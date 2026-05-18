@@ -47,14 +47,17 @@ jobs:
         shell: bash
         run: |
           dotnet test --no-build --configuration Release \
+            --filter "Category!=Stress" \
             --logger "trx" \
-            --logger "console;verbosity=normal"
+            --logger "console;verbosity=normal" \
+            --results-directory TestResults
 
       - name: Test (with coverage)
         if: matrix.os == 'ubuntu-latest'
         shell: bash
         run: |
           dotnet test --no-build --configuration Release \
+            --filter "Category!=Stress" \
             --collect:"XPlat Code Coverage" \
             --settings coverlet.runsettings \
             --results-directory TestResults \

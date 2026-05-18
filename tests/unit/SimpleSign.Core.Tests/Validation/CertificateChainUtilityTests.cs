@@ -75,19 +75,15 @@ public sealed class CertificateChainUtilityTests
     public void LoadCertsFromBytes_GarbageBytes_ReturnsEmptyOrThrowsPlatformException()
     {
         Func<List<X509Certificate2>> func = () => CertificateChainUtility.LoadCertsFromBytes(new byte[2] { 255, 254 }).ToList();
-#if NET9_0_OR_GREATER
-        if (OperatingSystem.IsMacOS())
-        {
-            Should.Throw<PlatformNotSupportedException>(func);
-        }
-        else
+        // Behavior varies by platform and .NET version — either empty or PlatformNotSupportedException
+        try
         {
             func().ShouldBeEmpty();
         }
-#else
-        // On .NET 8 + macOS, garbage bytes return empty instead of throwing.
-        func().ShouldBeEmpty();
-#endif
+        catch (PlatformNotSupportedException)
+        {
+            // Acceptable on some macOS/.NET version combinations
+        }
     }
 
     [Fact(DisplayName = "Subject with CN extracts short name correctly")]

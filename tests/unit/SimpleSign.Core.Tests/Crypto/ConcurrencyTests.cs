@@ -39,7 +39,9 @@ public sealed class ConcurrencyTests
     {
         var cache = new InMemoryCertificateCache();
         using var cert = TestCertificateFactory.CreateSelfSignedCert("CN=ClearTest");
-        var certBytes = cert.Export(System.Security.Cryptography.X509Certificates.X509ContentType.Pfx);
+        // Use a password to ensure cross-platform PKCS12 compatibility (macOS requires it)
+        const string pfxPassword = "concurrency-test";
+        var certBytes = cert.Export(System.Security.Cryptography.X509Certificates.X509ContentType.Pfx, pfxPassword);
 
         var exception = Record.Exception(() =>
         {
@@ -52,7 +54,7 @@ public sealed class ConcurrencyTests
                 else
                 {
                     // Use a fresh cert instance per Set to avoid disposing a shared object
-                    using var freshCert = System.Security.Cryptography.X509Certificates.X509CertificateLoader.LoadPkcs12(certBytes, null);
+                    using var freshCert = System.Security.Cryptography.X509Certificates.X509CertificateLoader.LoadPkcs12(certBytes, pfxPassword);
                     cache.Set(freshCert);
                 }
             });

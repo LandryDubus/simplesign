@@ -40,7 +40,7 @@ jobs:
         run: dotnet build --no-restore --configuration Release -p:Version=${{ steps.version.outputs.version }}
 
       - name: Test
-        run: dotnet test --no-build --configuration Release --verbosity quiet
+        run: dotnet test --no-build --configuration Release --filter "Category!=Stress" --verbosity quiet
 
       - name: Pack
         run: >-

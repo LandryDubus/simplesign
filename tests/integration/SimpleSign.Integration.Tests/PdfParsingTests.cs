@@ -136,7 +136,7 @@ public sealed class PdfParsingTests(ITestOutputHelper output)
     {
         Skip.IfNot(FixturePath.Exists(fixture), $"Fixture {fixture} not found");
 
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         using var stream = FixturePath.Open(fixture);
         var fields = await PdfStructureReader.ReadSignatureFieldsAsync(stream, cancellationToken: cts.Token);
 

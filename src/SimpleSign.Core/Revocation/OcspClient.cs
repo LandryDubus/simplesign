@@ -189,19 +189,32 @@ internal sealed class OcspClient
         byte[] ocspSignature = basicOcsp.ReadBitString(out _);
 
         // certs [0] OPTIONAL — extract responder cert
+        // Structure: [0] EXPLICIT { SEQUENCE OF Certificate }
+        // We must unwrap the [0] tag to get the SEQUENCE OF, then iterate individual certs.
         X509Certificate2? responderCert = null;
 #pragma warning disable CA2000 // responderCert is disposed in the finally block below
         if (basicOcsp.HasData && basicOcsp.PeekTag() == new Asn1Tag(TagClass.ContextSpecific, 0, true))
         {
             var certsWrapper = basicOcsp.ReadSequence(new Asn1Tag(TagClass.ContextSpecific, 0, true));
-            while (certsWrapper.HasData)
+            if (certsWrapper.HasData)
             {
-                try
+                var certSeq = certsWrapper.ReadSequence(); // SEQUENCE OF Certificate
+                while (certSeq.HasData)
                 {
-                    responderCert = CertificateLoader.LoadCertificate(certsWrapper.ReadEncodedValue().ToArray());
-                    break; // use first cert
+                    try
+                    {
+                        responderCert = CertificateLoader.LoadCertificate(certSeq.ReadEncodedValue().ToArray());
+                        break; // use first cert
+                    }
+                    catch (CryptographicException ex)
+                    {
+                        logger?.OcspResponderCertLoadingFailed(ex.Message);
+                        if (certSeq.HasData)
+                        {
+                            certSeq.ReadEncodedValue(); // skip malformed cert
+                        }
+                    }
                 }
-                catch (CryptographicException ex) { logger?.OcspResponderCertLoadingFailed(ex.Message); certsWrapper.ReadEncodedValue(); }
             }
         }
 #pragma warning restore CA2000

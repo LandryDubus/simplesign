@@ -199,7 +199,7 @@ public sealed partial class GovBrChainValidator
                             }
 
                             // Extracts only the CPF digits (11 digits)
-                            var digits = new string(cpfRaw.Where(char.IsDigit).ToArray());
+                            var digits = new string([.. cpfRaw.Where(char.IsDigit)]);
                             if (digits.Length == 11)
                             {
                                 return digits;

@@ -16,10 +16,7 @@ public sealed class OwaspSecurityTests
     [InlineData("https://ocsp.example.com/check", true)]
     [InlineData("http://tsa.postsignum.cz/timestamp", true)]
     [InlineData("https://pki.example.org/aia/issuer.crt", true)]
-    public void IsSafeUrl_AllowsLegitimatePublicUrls(string url, bool expected)
-    {
-        UrlValidator.IsSafeUrl(url).ShouldBe(expected);
-    }
+    public void IsSafeUrl_AllowsLegitimatePublicUrls(string url, bool expected) => UrlValidator.IsSafeUrl(url).ShouldBe(expected);
 
     [Theory]
     [InlineData("http://localhost/evil")]
@@ -34,10 +31,7 @@ public sealed class OwaspSecurityTests
     [InlineData("http://192.168.0.100/internal")]
     [InlineData("http://169.254.169.254/latest/meta-data/")]
     [InlineData("http://0.0.0.0/")]
-    public void IsSafeUrl_BlocksLocalhostAndPrivateIps(string url)
-    {
-        UrlValidator.IsSafeUrl(url).ShouldBeFalse($"URL '{url}' should be blocked (SSRF)");
-    }
+    public void IsSafeUrl_BlocksLocalhostAndPrivateIps(string url) => UrlValidator.IsSafeUrl(url).ShouldBeFalse($"URL '{url}' should be blocked (SSRF)");
 
     [Theory]
     [InlineData("ftp://ftp.example.com/crl.pem")]
@@ -45,19 +39,13 @@ public sealed class OwaspSecurityTests
     [InlineData("ldap://ldap.example.com/dc=example")]
     [InlineData("gopher://evil.com/")]
     [InlineData("javascript:alert(1)")]
-    public void IsSafeUrl_BlocksNonHttpSchemes(string url)
-    {
-        UrlValidator.IsSafeUrl(url).ShouldBeFalse($"non-HTTP scheme should be blocked");
-    }
+    public void IsSafeUrl_BlocksNonHttpSchemes(string url) => UrlValidator.IsSafeUrl(url).ShouldBeFalse($"non-HTTP scheme should be blocked");
 
     [Theory]
     [InlineData("")]
     [InlineData("not-a-url")]
     [InlineData("://missing-scheme")]
-    public void IsSafeUrl_BlocksMalformedUrls(string url)
-    {
-        UrlValidator.IsSafeUrl(url).ShouldBeFalse();
-    }
+    public void IsSafeUrl_BlocksMalformedUrls(string url) => UrlValidator.IsSafeUrl(url).ShouldBeFalse();
 
     // ── A02:2021 - Cryptographic Failures: Algorithm guards ─────────────────
 

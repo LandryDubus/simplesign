@@ -166,8 +166,5 @@ internal sealed class BrasilManifestProvider : ISignatureManifestProvider
         return manifest.ToJsonUtf8();
     }
 
-    public object? ParseManifest(ReadOnlySpan<byte> data)
-    {
-        return Signing.SignatureManifest.FromJsonUtf8(data);
-    }
+    public object? ParseManifest(ReadOnlySpan<byte> data) => Signing.SignatureManifest.FromJsonUtf8(data);
 }

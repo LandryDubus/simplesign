@@ -83,7 +83,7 @@ public sealed class DssExtractorTests
     [Fact(DisplayName = "ParseObjRefs on empty input returns empty")]
     public void ParseObjRefs_Empty_ReturnsEmpty()
     {
-        var result = DssExtractor.ParseObjRefs(Array.Empty<byte>()).ToList();
+        var result = DssExtractor.ParseObjRefs([]).ToList();
         result.ShouldBeEmpty();
     }
 

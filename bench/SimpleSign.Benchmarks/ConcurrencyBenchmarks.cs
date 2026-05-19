@@ -50,22 +50,13 @@ public class ConcurrencyBenchmarks
     }
 
     [Benchmark(Description = "Concurrent 8 tasks (32 ops)")]
-    public async Task<int> Concurrent_8()
-    {
-        return await RunConcurrent(8);
-    }
+    public async Task<int> Concurrent_8() => await RunConcurrent(8);
 
     [Benchmark(Description = "Concurrent 16 tasks (32 ops)")]
-    public async Task<int> Concurrent_16()
-    {
-        return await RunConcurrent(16);
-    }
+    public async Task<int> Concurrent_16() => await RunConcurrent(16);
 
     [Benchmark(Description = "Concurrent 32 tasks (32 ops)")]
-    public async Task<int> Concurrent_32()
-    {
-        return await RunConcurrent(32);
-    }
+    public async Task<int> Concurrent_32() => await RunConcurrent(32);
 
     private async Task<int> RunConcurrent(int concurrency)
     {

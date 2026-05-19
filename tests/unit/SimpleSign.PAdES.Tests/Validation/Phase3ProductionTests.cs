@@ -144,8 +144,8 @@ public sealed class Phase3ProductionTests
         var cmsData = new CmsSignedData
         {
             SignerCertificate = null,
-            SignedAttrs = new byte[] { 0xA0, 0x01 },
-            Signature = new byte[] { 0x01 }
+            SignedAttrs = [0xA0, 0x01],
+            Signature = [0x01]
         };
 
         CryptoVerifier.VerifySignature(cmsData).ShouldBeFalse();
@@ -159,7 +159,7 @@ public sealed class Phase3ProductionTests
         {
             SignerCertificate = cert,
             SignedAttrs = null,
-            Signature = new byte[] { 0x01 }
+            Signature = [0x01]
         };
 
         CryptoVerifier.VerifySignature(cmsData).ShouldBeFalse();
@@ -172,8 +172,8 @@ public sealed class Phase3ProductionTests
         var cmsData = new CmsSignedData
         {
             SignerCertificate = cert,
-            SignedAttrs = new byte[] { 0xA0, 0x00 },
-            Signature = new byte[] { 0x00 },
+            SignedAttrs = [0xA0, 0x00],
+            Signature = [0x00],
             DigestAlgorithmOid = Oids.Sha256,
             SignatureAlgorithmOid = Oids.Ed25519
         };
@@ -603,20 +603,11 @@ public sealed class Phase3ProductionTests
     }
 
     [Fact(DisplayName = "RSA-PSS OID constant has correct value")]
-    public void Oids_RsaPss_HasCorrectValue()
-    {
-        Oids.RsaPss.ShouldBe("1.2.840.113549.1.1.10");
-    }
+    public void Oids_RsaPss_HasCorrectValue() => Oids.RsaPss.ShouldBe("1.2.840.113549.1.1.10");
 
     [Fact(DisplayName = "Ed25519 OID constant has correct value")]
-    public void Oids_Ed25519_HasCorrectValue()
-    {
-        Oids.Ed25519.ShouldBe("1.3.101.112");
-    }
+    public void Oids_Ed25519_HasCorrectValue() => Oids.Ed25519.ShouldBe("1.3.101.112");
 
     [Fact(DisplayName = "Ed448 OID constant has correct value")]
-    public void Oids_Ed448_HasCorrectValue()
-    {
-        Oids.Ed448.ShouldBe("1.3.101.113");
-    }
+    public void Oids_Ed448_HasCorrectValue() => Oids.Ed448.ShouldBe("1.3.101.113");
 }

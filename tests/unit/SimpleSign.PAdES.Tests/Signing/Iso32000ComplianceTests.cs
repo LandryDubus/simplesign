@@ -61,31 +61,33 @@ public sealed class Iso32000ComplianceTests
         long xrefOffset = sb.Length;
 
         // Build xref stream entries: type(1) + offset(4) + gen(1) = 6 bytes per entry
-        byte[] entries = new byte[4 * 6];
-        entries[0] = 0;
-        entries[1] = 0;
-        entries[2] = 0;
-        entries[3] = 0;
-        entries[4] = 0;
-        entries[5] = 0xFF;
-        entries[6] = 1;
-        entries[7] = (byte)((obj1Offset >> 24) & 0xFF);
-        entries[8] = (byte)((obj1Offset >> 16) & 0xFF);
-        entries[9] = (byte)((obj1Offset >> 8) & 0xFF);
-        entries[10] = (byte)(obj1Offset & 0xFF);
-        entries[11] = 0;
-        entries[12] = 1;
-        entries[13] = (byte)((obj2Offset >> 24) & 0xFF);
-        entries[14] = (byte)((obj2Offset >> 16) & 0xFF);
-        entries[15] = (byte)((obj2Offset >> 8) & 0xFF);
-        entries[16] = (byte)(obj2Offset & 0xFF);
-        entries[17] = 0;
-        entries[18] = 1;
-        entries[19] = (byte)((obj3Offset >> 24) & 0xFF);
-        entries[20] = (byte)((obj3Offset >> 16) & 0xFF);
-        entries[21] = (byte)((obj3Offset >> 8) & 0xFF);
-        entries[22] = (byte)(obj3Offset & 0xFF);
-        entries[23] = 0;
+        byte[] entries =
+        [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0xFF,
+            1,
+            (byte)((obj1Offset >> 24) & 0xFF),
+            (byte)((obj1Offset >> 16) & 0xFF),
+            (byte)((obj1Offset >> 8) & 0xFF),
+            (byte)(obj1Offset & 0xFF),
+            0,
+            1,
+            (byte)((obj2Offset >> 24) & 0xFF),
+            (byte)((obj2Offset >> 16) & 0xFF),
+            (byte)((obj2Offset >> 8) & 0xFF),
+            (byte)(obj2Offset & 0xFF),
+            0,
+            1,
+            (byte)((obj3Offset >> 24) & 0xFF),
+            (byte)((obj3Offset >> 16) & 0xFF),
+            (byte)((obj3Offset >> 8) & 0xFF),
+            (byte)(obj3Offset & 0xFF),
+            0,
+        ];
 
         sb.Append("4 0 obj\n");
         sb.Append("<< /Type /XRef\n");

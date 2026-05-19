@@ -61,10 +61,7 @@ public class DeferredSigningBenchmarks
     }
 
     [Benchmark(Description = "Deferred: CompleteAsync only")]
-    public async Task<byte[]> CompleteOnly()
-    {
-        return await DeferredSigner.CompleteAsync(_sessionData, _signedHash);
-    }
+    public async Task<byte[]> CompleteOnly() => await DeferredSigner.CompleteAsync(_sessionData, _signedHash);
 
     [Benchmark(Description = "Deferred: full roundtrip (Prepare + sign + Complete)")]
     public async Task<byte[]> FullRoundtrip()

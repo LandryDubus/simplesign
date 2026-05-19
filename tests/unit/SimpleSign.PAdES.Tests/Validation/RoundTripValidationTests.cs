@@ -168,7 +168,7 @@ public sealed class RoundTripValidationTests
         }
 
         var opts = new ValidationOptions { CheckRevocation = false, TrustSystemRoots = false };
-        List<ITrustAnchorProvider> anchors = certs.Select(c => (ITrustAnchorProvider)new InMemoryTrust(c)).ToList();
+        List<ITrustAnchorProvider> anchors = [.. certs.Select(c => (ITrustAnchorProvider)new InMemoryTrust(c))];
         var validator = new PdfSignatureValidator(opts, httpClient: null, logger: null,
             trustAnchorProviders: anchors);
 

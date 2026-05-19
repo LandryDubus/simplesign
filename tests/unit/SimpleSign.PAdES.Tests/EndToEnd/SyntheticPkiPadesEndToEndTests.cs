@@ -28,7 +28,7 @@ public sealed class SyntheticPkiPadesEndToEndTests
             options: null,
             httpClient: null,
             logger: null,
-            trustAnchorProviders: new[] { (ITrustAnchorProvider)trustProvider });
+            trustAnchorProviders: [trustProvider]);
 
         using var ms = new MemoryStream(signed, writable: false);
         var results = await validator.ValidateAsync(ms);
@@ -56,7 +56,7 @@ public sealed class SyntheticPkiPadesEndToEndTests
             options: null,
             httpClient: null,
             logger: null,
-            trustAnchorProviders: new[] { (ITrustAnchorProvider)trustProvider });
+            trustAnchorProviders: [trustProvider]);
 
         using var ms = new MemoryStream(signed, writable: false);
         var results = await validator.ValidateAsync(ms);

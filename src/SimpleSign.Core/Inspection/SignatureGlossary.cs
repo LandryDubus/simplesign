@@ -215,7 +215,7 @@ public static class SignatureGlossary
 
     /// <summary>Returns all distinct categories.</summary>
     public static IReadOnlyList<string> AllCategories =>
-        Entries.Values.Select(e => e.Category).Distinct().ToList();
+        [.. Entries.Values.Select(e => e.Category).Distinct()];
 
     /// <summary>Looks up an entry by exact key (case-insensitive).</summary>
     public static GlossaryEntry? Lookup(string key) =>
@@ -231,17 +231,16 @@ public static class SignatureGlossary
             return [];
         }
 
-        return Entries.Values
+        return [.. Entries.Values
             .Where(e =>
                 e.Key.Contains(query, StringComparison.OrdinalIgnoreCase) ||
                 e.DisplayName.Contains(query, StringComparison.OrdinalIgnoreCase) ||
-                e.ShortDescription.Contains(query, StringComparison.OrdinalIgnoreCase))
-            .ToList();
+                e.ShortDescription.Contains(query, StringComparison.OrdinalIgnoreCase))];
     }
 
     /// <summary>Returns entries in a specific category.</summary>
     public static IReadOnlyList<GlossaryEntry> ByCategory(string category) =>
-        Entries.Values.Where(e => e.Category.Equals(category, StringComparison.OrdinalIgnoreCase)).ToList();
+        [.. Entries.Values.Where(e => e.Category.Equals(category, StringComparison.OrdinalIgnoreCase))];
 
     /// <summary>
     /// Gets an inline comment explanation for a PDF dictionary key.

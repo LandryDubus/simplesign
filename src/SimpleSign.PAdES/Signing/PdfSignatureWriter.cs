@@ -730,7 +730,7 @@ public sealed class PdfSignatureWriter
         StringBuilder xref = new StringBuilder();
         xref.Append("xref\n");
 
-        List<int> sortedObjNums = objectOffsets.Keys.ToList();
+        List<int> sortedObjNums = [.. objectOffsets.Keys];
         int groupStart = 0;
         while (groupStart < sortedObjNums.Count)
         {
@@ -784,7 +784,7 @@ public sealed class PdfSignatureWriter
 
         // Build /Index array and binary entry data
         // /W [1 4 1] = 6 bytes per entry: type(1) + offset(4, big-endian) + gen(1)
-        List<int> sortedObjNums = allOffsets.Keys.ToList();
+        List<int> sortedObjNums = [.. allOffsets.Keys];
 
         // Build /Index groups (contiguous object number ranges)
         var indexParts = new List<string>();
@@ -819,7 +819,7 @@ public sealed class PdfSignatureWriter
 
         // Compress the entry data with zlib (RFC 1950 = 2-byte header + deflate + Adler-32)
         // PDF /FlateDecode expects zlib-wrapped data, NOT raw deflate
-        byte[] rawData = entries.ToArray();
+        byte[] rawData = [.. entries];
         byte[] compressedData;
         using (var ms = new MemoryStream())
         {
@@ -1104,14 +1104,14 @@ public sealed class PdfSignatureWriter
             return pageObj;
         }
 
-        string[] parts = new string[5]
-        {
+        string[] parts =
+        [
             pageObj.Substring(0, insertPos),
             "   /Annots [",
             fieldRef,
             "]\n",
             null!
-        };
+        ];
         parts[4] = pageObj[insertPos..];
         return string.Concat(parts);
     }

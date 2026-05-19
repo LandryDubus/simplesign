@@ -15,10 +15,7 @@ namespace SimpleSign.PAdES.Tests.Signing;
 /// </summary>
 public sealed class DeferredSignerTests
 {
-    private static byte[] BuildMinimalPdf()
-    {
-        return Encoding.Latin1.GetBytes("%PDF-1.7\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n2 0 obj\n<< /Type /Pages /Kids [] /Count 0 >>\nendobj\nxref\n0 3\n0000000000 65535 f \n0000000009 00000 n \n0000000058 00000 n \ntrailer\n<< /Size 3 /Root 1 0 R >>\nstartxref\n110\n%%EOF");
-    }
+    private static byte[] BuildMinimalPdf() => Encoding.Latin1.GetBytes("%PDF-1.7\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n2 0 obj\n<< /Type /Pages /Kids [] /Count 0 >>\nendobj\nxref\n0 3\n0000000000 65535 f \n0000000009 00000 n \n0000000058 00000 n \ntrailer\n<< /Size 3 /Root 1 0 R >>\nstartxref\n110\n%%EOF");
 
     private static X509Certificate2 CreateRsaCertWithPrivateKey()
     {
@@ -38,17 +35,14 @@ public sealed class DeferredSignerTests
         return CertificateLoader.LoadPkcs12(x509Certificate.Export(X509ContentType.Pfx, "test-export"), "test-export");
     }
 
-    private static X509Certificate2 GetPublicCertOnly(X509Certificate2 fullCert)
-    {
-        return CertificateLoader.LoadCertificate(fullCert.Export(X509ContentType.Cert));
-    }
+    private static X509Certificate2 GetPublicCertOnly(X509Certificate2 fullCert) => CertificateLoader.LoadCertificate(fullCert.Export(X509ContentType.Cert));
 
     private static PdfSignatureValidator ValidatorTrusting(params X509Certificate2[] certs)
     {
         return new PdfSignatureValidator(new ValidationOptions
         {
             CheckRevocation = false,
-            TrustedRoots = certs.ToList()
+            TrustedRoots = [.. certs]
         });
     }
 
@@ -136,7 +130,7 @@ public sealed class DeferredSignerTests
         using X509Certificate2 publicCert = GetPublicCertOnly(fullCert);
         byte[] pdfBytes = BuildMinimalPdf();
         DeferredSigningPrepareResult prepResult = await DeferredSigner.PrepareAsync(pdfBytes, publicCert);
-        Func<Task<byte[]>> action = () => DeferredSigner.CompleteAsync(prepResult.SessionData, Array.Empty<byte>());
+        Func<Task<byte[]>> action = () => DeferredSigner.CompleteAsync(prepResult.SessionData, []);
         var ex = await Should.ThrowAsync<ArgumentException>(async () => await action());
         ex.Message.ShouldContain("empty");
     }
@@ -194,7 +188,7 @@ public sealed class DeferredSignerTests
     [Fact(DisplayName = "Null sessionData throws ArgumentNullException")]
     public async Task CompleteAsync_NullSession_ThrowsArgumentNullException()
     {
-        Func<Task<byte[]>> action = () => DeferredSigner.CompleteAsync(null!, new byte[1] { 1 });
+        Func<Task<byte[]>> action = () => DeferredSigner.CompleteAsync(null!, [1]);
         await Should.ThrowAsync<ArgumentNullException>(async () => await action());
     }
 

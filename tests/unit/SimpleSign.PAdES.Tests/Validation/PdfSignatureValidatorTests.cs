@@ -182,7 +182,7 @@ public sealed class PdfSignatureValidatorTests
         using X509Certificate2 x509Certificate = certificateRequest.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1.0), DateTimeOffset.UtcNow.AddYears(10));
         using RSA key2 = RSA.Create(2048);
         CertificateRequest certificateRequest2 = new CertificateRequest("CN=Subject", key2, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
-        using X509Certificate2 x509Certificate2 = certificateRequest2.Create(x509Certificate, DateTimeOffset.UtcNow.AddDays(-1.0), DateTimeOffset.UtcNow.AddYears(1), (ReadOnlySpan<byte>)new byte[3] { 1, 2, 3 });
+        using X509Certificate2 x509Certificate2 = certificateRequest2.Create(x509Certificate, DateTimeOffset.UtcNow.AddDays(-1.0), DateTimeOffset.UtcNow.AddYears(1), [1, 2, 3]);
         AsnWriter asnWriter = new AsnWriter(AsnEncodingRules.DER);
         using (asnWriter.PushSequence())
         {
@@ -199,12 +199,12 @@ public sealed class PdfSignatureValidatorTests
             {
                 asnWriter.WriteObjectIdentifier("1.2.840.113549.1.1.11");
             }
-            asnWriter.WriteBitString(new byte[4] { 0, 1, 2, 3 });
+            asnWriter.WriteBitString([0, 1, 2, 3]);
         }
         byte[] array = asnWriter.Encode();
         MethodInfo? method = typeof(CrlClient).GetMethod("IsSerialInCrl", BindingFlags.Static | BindingFlags.NonPublic);
         method.ShouldNotBeNull("IsSerialInCrl should exist as a private static method");
-        bool? actualValue = (bool?)method!.Invoke(null, new object?[5] { x509Certificate2, array, null, null, null });
+        bool? actualValue = (bool?)method!.Invoke(null, [x509Certificate2, array, null, null, null]);
         actualValue!.Value.ShouldBeFalse();
     }
 
@@ -217,7 +217,7 @@ public sealed class PdfSignatureValidatorTests
         using X509Certificate2 x509Certificate = certificateRequest.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-365.0), DateTimeOffset.UtcNow.AddYears(10));
         using RSA key2 = RSA.Create(2048);
         CertificateRequest certificateRequest2 = new CertificateRequest("CN=Subject", key2, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
-        using X509Certificate2 x509Certificate2 = certificateRequest2.Create(x509Certificate, DateTimeOffset.UtcNow.AddDays(-365.0), DateTimeOffset.UtcNow.AddYears(1), (ReadOnlySpan<byte>)new byte[3] { 1, 2, 3 });
+        using X509Certificate2 x509Certificate2 = certificateRequest2.Create(x509Certificate, DateTimeOffset.UtcNow.AddDays(-365.0), DateTimeOffset.UtcNow.AddYears(1), [1, 2, 3]);
         AsnWriter asnWriter = new AsnWriter(AsnEncodingRules.DER);
         using (asnWriter.PushSequence())
         {
@@ -235,12 +235,12 @@ public sealed class PdfSignatureValidatorTests
             {
                 asnWriter.WriteObjectIdentifier("1.2.840.113549.1.1.11");
             }
-            asnWriter.WriteBitString(new byte[4] { 0, 1, 2, 3 });
+            asnWriter.WriteBitString([0, 1, 2, 3]);
         }
         byte[] array = asnWriter.Encode();
         MethodInfo? method = typeof(CrlClient).GetMethod("IsSerialInCrl", BindingFlags.Static | BindingFlags.NonPublic);
         method.ShouldNotBeNull("");
-        bool? actualValue = (bool?)method!.Invoke(null, new object?[5] { x509Certificate2, array, null, null, null });
+        bool? actualValue = (bool?)method!.Invoke(null, [x509Certificate2, array, null, null, null]);
         actualValue.ShouldBeNull("expired CRL is not trustworthy — should return null to fetch updated CRL");
     }
 

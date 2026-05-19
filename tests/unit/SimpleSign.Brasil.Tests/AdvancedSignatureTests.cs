@@ -17,11 +17,9 @@ namespace SimpleSign.Brasil.Tests;
 /// </summary>
 public sealed class AdvancedSignatureTests
 {
-    private static byte[] CreateMinimalPdf()
-    {
+    private static byte[] CreateMinimalPdf() =>
         // Minimal valid 1-page PDF
-        return "%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n3 0 obj<</Type/Page/MediaBox[0 0 612 792]/Parent 2 0 R>>endobj\nxref\n0 4\n0000000000 65535 f \n0000000009 00000 n \n0000000058 00000 n \n0000000115 00000 n \ntrailer<</Size 4/Root 1 0 R>>\nstartxref\n190\n%%EOF"u8.ToArray();
-    }
+        "%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n3 0 obj<</Type/Page/MediaBox[0 0 612 792]/Parent 2 0 R>>endobj\nxref\n0 4\n0000000000 65535 f \n0000000009 00000 n \n0000000058 00000 n \n0000000115 00000 n \ntrailer<</Size 4/Root 1 0 R>>\nstartxref\n190\n%%EOF"u8.ToArray();
 
     // ── CPF Masking ──────────────────────────────────────────────────────────
 
@@ -29,18 +27,12 @@ public sealed class AdvancedSignatureTests
     [InlineData("12345678901", "***.456.789-**")]
     [InlineData("00000000000", "***.000.000-**")]
     [InlineData("99999999999", "***.999.999-**")]
-    public void MaskCpf_ValidInput_MasksCorrectly(string cpf, string expected)
-    {
-        AdvancedSignatureInfo.MaskCpf(cpf).ShouldBe(expected);
-    }
+    public void MaskCpf_ValidInput_MasksCorrectly(string cpf, string expected) => AdvancedSignatureInfo.MaskCpf(cpf).ShouldBe(expected);
 
     [Theory(DisplayName = "MaskCpf handles formatted input")]
     [InlineData("123.456.789-01", "***.456.789-**")]
     [InlineData("123 456 789 01", "***.456.789-**")]
-    public void MaskCpf_FormattedInput_StripsPunctuation(string cpf, string expected)
-    {
-        AdvancedSignatureInfo.MaskCpf(cpf).ShouldBe(expected);
-    }
+    public void MaskCpf_FormattedInput_StripsPunctuation(string cpf, string expected) => AdvancedSignatureInfo.MaskCpf(cpf).ShouldBe(expected);
 
     [Theory(DisplayName = "MaskCpf rejects invalid CPFs")]
     [InlineData("1234")]

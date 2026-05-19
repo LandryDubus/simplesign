@@ -20,10 +20,7 @@ namespace SimpleSign.PAdES.Tests;
 /// </summary>
 public sealed class MissingCoverageTests
 {
-    private static byte[] BuildMinimalPdf()
-    {
-        return Encoding.Latin1.GetBytes("%PDF-1.7\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n2 0 obj\n<< /Type /Pages /Kids [] /Count 0 >>\nendobj\nxref\n0 3\n0000000000 65535 f \n0000000009 00000 n \n0000000058 00000 n \ntrailer\n<< /Size 3 /Root 1 0 R >>\nstartxref\n110\n%%EOF");
-    }
+    private static byte[] BuildMinimalPdf() => Encoding.Latin1.GetBytes("%PDF-1.7\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n2 0 obj\n<< /Type /Pages /Kids [] /Count 0 >>\nendobj\nxref\n0 3\n0000000000 65535 f \n0000000009 00000 n \n0000000058 00000 n \ntrailer\n<< /Size 3 /Root 1 0 R >>\nstartxref\n110\n%%EOF");
 
     private static X509Certificate2 CreateRsaCert(string subject = "CN=Test RSA, O=Tests, C=BR")
     {
@@ -39,7 +36,7 @@ public sealed class MissingCoverageTests
         return new PdfSignatureValidator(new ValidationOptions
         {
             CheckRevocation = false,
-            TrustedRoots = certs.ToList()
+            TrustedRoots = [.. certs]
         });
     }
 
@@ -185,7 +182,7 @@ public sealed class MissingCoverageTests
             IReadOnlyList<SignatureValidationResult> readOnlyList = await ValidatorTrusting(cert).ValidateAsync(stream);
             readOnlyList.Count().ShouldBe(1, "");
             readOnlyList[0].EmbeddedCertificates.ShouldNotBeEmpty("");
-            readOnlyList[0].EmbeddedCertificates.ShouldContain((X509Certificate2 c) => c.Thumbprint == cert.Thumbprint, "");
+            readOnlyList[0].EmbeddedCertificates.ShouldContain(c => c.Thumbprint == cert.Thumbprint, "");
         }
         finally
         {

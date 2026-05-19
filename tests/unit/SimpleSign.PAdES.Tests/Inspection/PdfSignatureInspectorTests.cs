@@ -29,40 +29,18 @@ public sealed class PdfSignatureInspectorTests
 
         public override long Position
         {
-            get
-            {
-                throw new NotSupportedException();
-            }
-            set
-            {
-                throw new NotSupportedException();
-            }
+            get => throw new NotSupportedException(); set => throw new NotSupportedException();
         }
 
-        public override void Flush()
-        {
-            inner.Flush();
-        }
+        public override void Flush() => inner.Flush();
 
-        public override int Read(byte[] buffer, int offset, int count)
-        {
-            return inner.Read(buffer, offset, count);
-        }
+        public override int Read(byte[] buffer, int offset, int count) => inner.Read(buffer, offset, count);
 
-        public override long Seek(long offset, SeekOrigin origin)
-        {
-            throw new NotSupportedException();
-        }
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
 
-        public override void SetLength(long value)
-        {
-            throw new NotSupportedException();
-        }
+        public override void SetLength(long value) => throw new NotSupportedException();
 
-        public override void Write(byte[] buffer, int offset, int count)
-        {
-            inner.Write(buffer, offset, count);
-        }
+        public override void Write(byte[] buffer, int offset, int count) => inner.Write(buffer, offset, count);
     }
 
     [Fact(DisplayName = "InspectAsync with unsigned PDF returns no signatures")]
@@ -128,7 +106,7 @@ public sealed class PdfSignatureInspectorTests
         using MemoryStream stream = new MemoryStream(await SimpleSigner.Document(pdfBytes).WithCertificate(cert).SignAsync());
         SignatureFieldInfo sig = (await PdfSignatureInspector.InspectAsync(stream)).Signatures[0];
         sig.EmbeddedCertificates.ShouldNotBeEmpty("");
-        sig.EmbeddedCertificates.ShouldContain((CertificateInfo c) => c.Subject == sig.Signer!.Subject, "");
+        sig.EmbeddedCertificates.ShouldContain(c => c.Subject == sig.Signer!.Subject, "");
     }
 
     [Fact(DisplayName = "InspectAsync extracts HasSigningCertificateV2")]
@@ -149,8 +127,8 @@ public sealed class PdfSignatureInspectorTests
         using MemoryStream stream = new MemoryStream(await SimpleSigner.Document(await SimpleSigner.Document(pdfBytes).WithCertificate(cert1).SignAsync()).WithCertificate(cert2).SignAsync());
         PdfInspectionResult pdfInspectionResult = await PdfSignatureInspector.InspectAsync(stream);
         pdfInspectionResult.Signatures.Count().ShouldBeGreaterThanOrEqualTo(2, "");
-        pdfInspectionResult.Signatures.ShouldContain((SignatureFieldInfo s) => s.Signer!.Subject.Contains("Signer One"), "");
-        pdfInspectionResult.Signatures.ShouldContain((SignatureFieldInfo s) => s.Signer!.Subject.Contains("Signer Two"), "");
+        pdfInspectionResult.Signatures.ShouldContain(s => s.Signer!.Subject.Contains("Signer One"), "");
+        pdfInspectionResult.Signatures.ShouldContain(s => s.Signer!.Subject.Contains("Signer Two"), "");
     }
 
     [Fact(DisplayName = "InspectAsync extracts SubFilter correctly")]
@@ -261,10 +239,7 @@ public sealed class PdfSignatureInspectorTests
         sig.IsSignatureAlgorithmDeprecated.ShouldBeTrue("RSA-SHA1 is deprecated per ISO 32000-2");
     }
 
-    private static byte[] BuildMinimalPdf()
-    {
-        return Encoding.Latin1.GetBytes("%PDF-1.7\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n2 0 obj\n<< /Type /Pages /Kids [] /Count 0 >>\nendobj\nxref\n0 3\n0000000000 65535 f \n0000000009 00000 n \n0000000058 00000 n \ntrailer\n<< /Size 3 /Root 1 0 R >>\nstartxref\n110\n%%EOF");
-    }
+    private static byte[] BuildMinimalPdf() => Encoding.Latin1.GetBytes("%PDF-1.7\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n2 0 obj\n<< /Type /Pages /Kids [] /Count 0 >>\nendobj\nxref\n0 3\n0000000000 65535 f \n0000000009 00000 n \n0000000058 00000 n \ntrailer\n<< /Size 3 /Root 1 0 R >>\nstartxref\n110\n%%EOF");
 
     private static X509Certificate2 CreateRsaCert(string subject = "CN=Test Signer, O=Tests, C=BR")
     {

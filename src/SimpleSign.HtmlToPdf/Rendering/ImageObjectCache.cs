@@ -47,10 +47,7 @@ internal sealed class ImageObjectCache
     }
 
     /// <summary>Gets the PDF object number for a named image.</summary>
-    public bool TryGetObjectNum(string name, out int objNum)
-    {
-        return _nameToObjNum.TryGetValue(name, out objNum);
-    }
+    public bool TryGetObjectNum(string name, out int objNum) => _nameToObjNum.TryGetValue(name, out objNum);
 
     private void WriteImageXObject(int objNum, ImageData img)
     {

@@ -135,11 +135,11 @@ internal sealed class CertificateDto
         NotAfter = c.NotAfter,
         Expired = c.IsExpired,
         NonRepudiation = c.HasNonRepudiation,
-        KeyUsages = c.KeyUsages.ToList(),
-        ExtendedKeyUsages = c.ExtendedKeyUsages.ToList(),
+        KeyUsages = [.. c.KeyUsages],
+        ExtendedKeyUsages = [.. c.ExtendedKeyUsages],
         OcspUrl = c.OcspUrl,
         CrlUrl = c.CrlUrl,
-        AiaUrls = c.AiaUrls.ToList()
+        AiaUrls = [.. c.AiaUrls]
     };
 }
 

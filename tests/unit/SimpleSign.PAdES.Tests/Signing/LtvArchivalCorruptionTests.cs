@@ -23,7 +23,10 @@ namespace SimpleSign.PAdES.Tests.Signing;
 public sealed class LtvArchivalCorruptionTests
 {
     private readonly ITestOutputHelper _out;
-    public LtvArchivalCorruptionTests(ITestOutputHelper output) => _out = output;
+    public LtvArchivalCorruptionTests(ITestOutputHelper output)
+    {
+        _out = output;
+    }
 
     private static byte[] BuildPdfWithPage() =>
         Encoding.Latin1.GetBytes(

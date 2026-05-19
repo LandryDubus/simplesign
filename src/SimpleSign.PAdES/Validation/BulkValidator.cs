@@ -173,10 +173,7 @@ public sealed class BulkValidator
     /// <returns>Async enumerable of bulk validation results.</returns>
     public IAsyncEnumerable<BulkValidationResult> ValidateFilesAsync(
         IEnumerable<string> filePaths,
-        CancellationToken cancellationToken = default)
-    {
-        return ValidateAllAsync(ReadFilesAsync(filePaths, cancellationToken), cancellationToken);
-    }
+        CancellationToken cancellationToken = default) => ValidateAllAsync(ReadFilesAsync(filePaths, cancellationToken), cancellationToken);
 
     /// <summary>Resets success/failure counters and average elapsed time.</summary>
     public void ResetMetrics()

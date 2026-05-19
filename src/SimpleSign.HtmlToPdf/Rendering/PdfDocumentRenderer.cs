@@ -414,10 +414,7 @@ public sealed class PdfDocumentRenderer
         }
     }
 
-    private static string F(float value)
-    {
-        return value.ToString("F2", CultureInfo.InvariantCulture);
-    }
+    private static string F(float value) => value.ToString("F2", CultureInfo.InvariantCulture);
 
     private static string FormatPdfString(string value)
     {
@@ -451,10 +448,7 @@ public sealed class PdfDocumentRenderer
         return sb.ToString();
     }
 
-    private static string EscapePdfString(string value)
-    {
-        return value.Replace("\\", "\\\\").Replace("(", "\\(").Replace(")", "\\)");
-    }
+    private static string EscapePdfString(string value) => value.Replace("\\", "\\\\").Replace("(", "\\(").Replace(")", "\\)");
 
     private static string BuildXObjectResources(HashSet<string> pageImages, ImageObjectCache cache)
     {

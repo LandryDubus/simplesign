@@ -100,8 +100,8 @@ app.MapPost("/api/validate", async (HttpRequest request) =>
                 RevocationSource = r.RevocationSource.ToString(),
                 HasValidTimestamp = r.HasValidTimestamp,
                 SigningTime = r.SigningTime,
-                Errors = r.Errors.ToList(),
-                Warnings = r.Warnings.ToList(),
+                Errors = [.. r.Errors],
+                Warnings = [.. r.Warnings],
                 IcpBrasil = icpBrasil
             };
         }).ToList();
@@ -140,11 +140,11 @@ static InspectResultDto MapInspection(PdfInspectionResult result)
                 HasVri = doc.SecurityStore.HasVri
             } : null
         },
-        Signatures = result.Signatures.Select(sig =>
+        Signatures = [.. result.Signatures.Select(sig =>
         {
             var level = ConformanceDetector.Detect(sig, doc, result.Signatures);
             return MapSignature(sig, level);
-        }).ToList()
+        })]
     };
 }
 
@@ -189,11 +189,11 @@ static SignatureDto MapSignature(SignatureFieldInfo sig, PAdESConformanceLevel l
             NotAfter = sig.Signer.NotAfter,
             IsExpired = sig.Signer.IsExpired,
             HasNonRepudiation = sig.Signer.HasNonRepudiation,
-            KeyUsages = sig.Signer.KeyUsages.ToList(),
-            ExtendedKeyUsages = sig.Signer.ExtendedKeyUsages.ToList(),
+            KeyUsages = [.. sig.Signer.KeyUsages],
+            ExtendedKeyUsages = [.. sig.Signer.ExtendedKeyUsages],
             OcspUrl = sig.Signer.OcspUrl,
             CrlUrl = sig.Signer.CrlUrl,
-            AiaUrls = sig.Signer.AiaUrls.ToList()
+            AiaUrls = [.. sig.Signer.AiaUrls]
         } : null,
         Timestamp = sig.Timestamp is not null ? new TimestampDto
         {
@@ -205,7 +205,7 @@ static SignatureDto MapSignature(SignatureFieldInfo sig, PAdESConformanceLevel l
             SerialNumber = sig.Timestamp.SerialNumber,
             TokenSize = sig.Timestamp.RawToken.Length
         } : null,
-        EmbeddedCertificates = sig.EmbeddedCertificates.Select(c => new EmbeddedCertDto
+        EmbeddedCertificates = [.. sig.EmbeddedCertificates.Select(c => new EmbeddedCertDto
         {
             Subject = c.Subject,
             Issuer = c.Issuer,
@@ -215,7 +215,7 @@ static SignatureDto MapSignature(SignatureFieldInfo sig, PAdESConformanceLevel l
             NotBefore = c.NotBefore,
             NotAfter = c.NotAfter,
             IsExpired = c.IsExpired
-        }).ToList(),
+        })],
         Manifest = sig.ManifestJson is { Length: > 0 } ? MapManifest(sig.ManifestJson) : null
     };
 }

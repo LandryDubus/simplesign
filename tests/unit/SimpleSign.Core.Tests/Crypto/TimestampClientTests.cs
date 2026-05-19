@@ -45,7 +45,7 @@ public sealed class TimestampClientTests
             using (writer.PushSequence(new System.Formats.Asn1.Asn1Tag(
                 System.Formats.Asn1.TagClass.ContextSpecific, 0, true)))
             {
-                writer.WriteOctetString(new byte[] { 0x01, 0x02, 0x03 });
+                writer.WriteOctetString([0x01, 0x02, 0x03]);
             }
         }
         return writer.Encode();
@@ -148,7 +148,7 @@ public sealed class TimestampClientTests
     public async Task GetTimestampAsync_WrongContentType_ThrowsInvalidDataException()
     {
         var handler = new MockHttpMessageHandler(
-            new byte[] { 0x01 }, HttpStatusCode.OK, "text/html");
+            [0x01], HttpStatusCode.OK, "text/html");
         var httpClient = new HttpClient(handler);
         var client = new TimestampClient(httpClient, "http://tsa.example.com");
 
@@ -160,14 +160,14 @@ public sealed class TimestampClientTests
     public void EmbedTimestampInCms_NullCms_ThrowsArgumentNullException()
     {
         Assert.Throws<ArgumentNullException>(
-            () => TimestampClient.EmbedTimestampInCms(null!, new byte[] { 0x01 }));
+            () => TimestampClient.EmbedTimestampInCms(null!, [0x01]));
     }
 
     [Fact(DisplayName = "EmbedTimestamp with null token throws ArgumentNullException")]
     public void EmbedTimestampInCms_NullToken_ThrowsArgumentNullException()
     {
         Assert.Throws<ArgumentNullException>(
-            () => TimestampClient.EmbedTimestampInCms(new byte[] { 0x30 }, null!));
+            () => TimestampClient.EmbedTimestampInCms([0x30], null!));
     }
 
     [Fact(DisplayName = "Valid CMS with timestamp returns larger CMS")]

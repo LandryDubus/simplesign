@@ -124,7 +124,7 @@ public sealed class PdfStructureParserTests
     {
         byte[] encoded = System.Text.Encoding.ASCII.GetBytes("<~z~>");
         var result = PdfStructureReader.DecodeAscii85(encoded);
-        result.ShouldBe(new byte[] { 0, 0, 0, 0 });
+        result.ShouldBe([0, 0, 0, 0]);
     }
 
     [Fact]
@@ -300,10 +300,8 @@ public sealed class PdfStructureParserTests
 
         // Build minimal PDF with header, the ObjStm, and a trailer
         string pdfHeader = "%PDF-1.7\n";
-        byte[] pdfBytes = System.Text.Encoding.Latin1.GetBytes(pdfHeader + objStmDict)
-            .Concat(compressed)
-            .Concat(System.Text.Encoding.Latin1.GetBytes(objStmEnd))
-            .ToArray();
+        byte[] pdfBytes = [.. System.Text.Encoding.Latin1.GetBytes(pdfHeader + objStmDict)
+, .. compressed, .. System.Text.Encoding.Latin1.GetBytes(objStmEnd)];
 
         // Act
         var fields = PdfStructureParser.ExtractFieldsFromCompressedAcroForm(pdfBytes, 50);

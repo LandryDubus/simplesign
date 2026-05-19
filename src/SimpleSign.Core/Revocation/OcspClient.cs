@@ -138,7 +138,7 @@ internal sealed class OcspClient
         var seq = reader.ReadSequence();
         seq.ReadSequence(); // AlgorithmIdentifier
         var bitString = seq.ReadBitString(out _);
-        return bitString.ToArray();
+        return [.. bitString];
     }
 
     /// <summary>

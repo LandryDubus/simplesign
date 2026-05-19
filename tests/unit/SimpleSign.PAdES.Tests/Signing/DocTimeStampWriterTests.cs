@@ -37,8 +37,5 @@ public sealed class DocTimeStampWriterTests
     }
 
     [Fact(DisplayName = "Default reserved bytes for timestamp is 12KB")]
-    public void DefaultTimestampReservedBytes_Is12KB()
-    {
-        DocTimeStampWriter.DefaultTimestampReservedBytes.ShouldBe(12288);
-    }
+    public void DefaultTimestampReservedBytes_Is12KB() => DocTimeStampWriter.DefaultTimestampReservedBytes.ShouldBe(12288);
 }

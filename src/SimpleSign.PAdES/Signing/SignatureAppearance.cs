@@ -192,10 +192,7 @@ public sealed class SignatureAppearance
     }
 
     /// <summary>Truncates text to the max display length.</summary>
-    internal static string Truncate(string text)
-    {
-        return text.Length <= MaxTextLength ? text : string.Concat(text.AsSpan(0, MaxTextLength - 3), "...");
-    }
+    internal static string Truncate(string text) => text.Length <= MaxTextLength ? text : string.Concat(text.AsSpan(0, MaxTextLength - 3), "...");
 
     /// <summary>Font size used for rendering.</summary>
     internal float GetFontSizeValue() => CustomFontSize ?? FontSize;

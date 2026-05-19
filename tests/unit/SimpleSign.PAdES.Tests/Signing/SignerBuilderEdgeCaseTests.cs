@@ -16,10 +16,7 @@ namespace SimpleSign.PAdES.Tests.Core;
 /// </summary>
 public sealed class SignerBuilderEdgeCaseTests
 {
-    private static byte[] BuildMinimalPdf()
-    {
-        return Encoding.Latin1.GetBytes("%PDF-1.7\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n2 0 obj\n<< /Type /Pages /Kids [] /Count 0 >>\nendobj\nxref\n0 3\n0000000000 65535 f \n0000000009 00000 n \n0000000058 00000 n \ntrailer\n<< /Size 3 /Root 1 0 R >>\nstartxref\n110\n%%EOF");
-    }
+    private static byte[] BuildMinimalPdf() => Encoding.Latin1.GetBytes("%PDF-1.7\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n2 0 obj\n<< /Type /Pages /Kids [] /Count 0 >>\nendobj\nxref\n0 3\n0000000000 65535 f \n0000000009 00000 n \n0000000058 00000 n \ntrailer\n<< /Size 3 /Root 1 0 R >>\nstartxref\n110\n%%EOF");
 
     private static X509Certificate2 CreateRsaCert(HashAlgorithmName? hash = null, string subject = "CN=Test RSA, O=Tests, C=BR")
     {
@@ -53,7 +50,7 @@ public sealed class SignerBuilderEdgeCaseTests
         return new PdfSignatureValidator(new ValidationOptions
         {
             CheckRevocation = false,
-            TrustedRoots = certs.ToList()
+            TrustedRoots = [.. certs]
         });
     }
 
@@ -157,7 +154,7 @@ public sealed class SignerBuilderEdgeCaseTests
     {
         using X509Certificate2 cert = CreateRsaCert();
         byte[] pdfBytes = BuildMinimalPdf();
-        SignerBuilder signerBuilder = SimpleSigner.Document(pdfBytes).WithExternalSigner(cert, (byte[] _) => Task.FromResult(Array.Empty<byte>()));
+        SignerBuilder signerBuilder = SimpleSigner.Document(pdfBytes).WithExternalSigner(cert, _ => Task.FromResult(Array.Empty<byte>()));
         try
         {
             using MemoryStream stream = new MemoryStream(await signerBuilder.SignAsync());
@@ -176,7 +173,7 @@ public sealed class SignerBuilderEdgeCaseTests
     {
         using X509Certificate2 cert = CreateRsaCert();
         byte[] pdfBytes = BuildMinimalPdf();
-        SignerBuilder signerBuilder = SimpleSigner.Document(pdfBytes).WithExternalSigner(cert, (byte[] _) => Task.FromResult<byte[]>(null!));
+        SignerBuilder signerBuilder = SimpleSigner.Document(pdfBytes).WithExternalSigner(cert, _ => Task.FromResult<byte[]>(null!));
         try
         {
             using MemoryStream stream = new MemoryStream(await signerBuilder.SignAsync());
@@ -255,7 +252,7 @@ public sealed class SignerBuilderEdgeCaseTests
     public void ExternalSigner_AutoDetect_RsaSha256()
     {
         using X509Certificate2 certificate = CreateRsaCert();
-        SignerBuilder actualValue = SimpleSigner.Document(BuildMinimalPdf()).WithHashAlgorithm(HashAlgorithmName.SHA256).WithExternalSigner(certificate, (byte[] _) => Task.FromResult(Array.Empty<byte>()));
+        SignerBuilder actualValue = SimpleSigner.Document(BuildMinimalPdf()).WithHashAlgorithm(HashAlgorithmName.SHA256).WithExternalSigner(certificate, _ => Task.FromResult(Array.Empty<byte>()));
         actualValue.ShouldNotBeNull("");
     }
 
@@ -263,7 +260,7 @@ public sealed class SignerBuilderEdgeCaseTests
     public void ExternalSigner_AutoDetect_EcdsaSha256()
     {
         using X509Certificate2 certificate = CreateEcdsaCert();
-        SignerBuilder actualValue = SimpleSigner.Document(BuildMinimalPdf()).WithHashAlgorithm(HashAlgorithmName.SHA256).WithExternalSigner(certificate, (byte[] _) => Task.FromResult(Array.Empty<byte>()));
+        SignerBuilder actualValue = SimpleSigner.Document(BuildMinimalPdf()).WithHashAlgorithm(HashAlgorithmName.SHA256).WithExternalSigner(certificate, _ => Task.FromResult(Array.Empty<byte>()));
         actualValue.ShouldNotBeNull("");
     }
 
@@ -271,7 +268,7 @@ public sealed class SignerBuilderEdgeCaseTests
     public void ExternalSigner_AutoDetect_RsaSha384()
     {
         using X509Certificate2 cert = CreateRsaCert();
-        SignerBuilder actualValue = SimpleSigner.Document(BuildMinimalPdf()).WithHashAlgorithm(HashAlgorithmName.SHA384).WithExternalSigner(cert, (byte[] _) => Task.FromResult(Array.Empty<byte>()));
+        SignerBuilder actualValue = SimpleSigner.Document(BuildMinimalPdf()).WithHashAlgorithm(HashAlgorithmName.SHA384).WithExternalSigner(cert, _ => Task.FromResult(Array.Empty<byte>()));
         actualValue.ShouldNotBeNull("");
     }
 
@@ -279,7 +276,7 @@ public sealed class SignerBuilderEdgeCaseTests
     public void ExternalSigner_AutoDetect_EcdsaSha384()
     {
         using X509Certificate2 cert = CreateEcdsaCert();
-        SignerBuilder actualValue = SimpleSigner.Document(BuildMinimalPdf()).WithHashAlgorithm(HashAlgorithmName.SHA384).WithExternalSigner(cert, (byte[] _) => Task.FromResult(Array.Empty<byte>()));
+        SignerBuilder actualValue = SimpleSigner.Document(BuildMinimalPdf()).WithHashAlgorithm(HashAlgorithmName.SHA384).WithExternalSigner(cert, _ => Task.FromResult(Array.Empty<byte>()));
         actualValue.ShouldNotBeNull("");
     }
 
@@ -287,7 +284,7 @@ public sealed class SignerBuilderEdgeCaseTests
     public void ExternalSigner_ExplicitEd25519Oid_AcceptsConfiguration()
     {
         using X509Certificate2 certificate = CreateRsaCert();
-        SignerBuilder actualValue = SimpleSigner.Document(BuildMinimalPdf()).WithExternalSigner(certificate, (byte[] _) => Task.FromResult(Array.Empty<byte>()), "1.3.101.112");
+        SignerBuilder actualValue = SimpleSigner.Document(BuildMinimalPdf()).WithExternalSigner(certificate, _ => Task.FromResult(Array.Empty<byte>()), "1.3.101.112");
         actualValue.ShouldNotBeNull("");
     }
 
@@ -295,7 +292,7 @@ public sealed class SignerBuilderEdgeCaseTests
     public void ExternalSigner_ExplicitEd448Oid_AcceptsConfiguration()
     {
         using X509Certificate2 certificate = CreateRsaCert();
-        SignerBuilder actualValue = SimpleSigner.Document(BuildMinimalPdf()).WithExternalSigner(certificate, (byte[] _) => Task.FromResult(Array.Empty<byte>()), "1.3.101.113");
+        SignerBuilder actualValue = SimpleSigner.Document(BuildMinimalPdf()).WithExternalSigner(certificate, _ => Task.FromResult(Array.Empty<byte>()), "1.3.101.113");
         actualValue.ShouldNotBeNull("");
     }
 

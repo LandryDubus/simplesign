@@ -156,7 +156,7 @@ public sealed class PdfSignatureWriterTests
 
         var result = await PdfSignatureWriter.PrepareAsync(input, output, DefaultOptions());
 
-        byte[] cmsBytes = new byte[] { 0xCA, 0xFE, 0xBA, 0xBE };
+        byte[] cmsBytes = [0xCA, 0xFE, 0xBA, 0xBE];
         await PdfSignatureWriter.FinalizeAsync(output, result, cmsBytes);
 
         output.Seek(result.ContentsHexOffset, SeekOrigin.Begin);
@@ -243,7 +243,7 @@ public sealed class PdfSignatureWriterTests
 
         var result = await PdfSignatureWriter.PrepareAsync(input, output, DefaultOptions());
 
-        byte[] dummyCms = new byte[] { 0x01, 0x02, 0x03 };
+        byte[] dummyCms = [0x01, 0x02, 0x03];
         await PdfSignatureWriter.FinalizeAsync(output, result, dummyCms);
 
         long totalLength = output.Length;

@@ -49,10 +49,8 @@ public sealed class CrlClientRealFixtureTests
     }
 
     [Fact(DisplayName = "Real DigiCert CRL is hundreds of KB (real CA produces large CRLs)")]
-    public void RealDigiCertCrl_IsRealisticSize()
-    {
+    public void RealDigiCertCrl_IsRealisticSize() =>
         // Captured DigiCert CRL has ~400KB at fixture time. If this fixture ever shrinks
         // to a few hundred bytes, something has gone wrong with the recording.
         RecordedFixtures.DigiCertCrl.Length.ShouldBeGreaterThan(10_000);
-    }
 }

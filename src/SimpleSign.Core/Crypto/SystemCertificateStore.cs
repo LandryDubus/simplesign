@@ -38,10 +38,7 @@ public sealed class SystemCertificateStore : ICertificateStore, IDisposable
     }
 
     /// <inheritdoc/>
-    public IReadOnlyList<X509Certificate2> ListAll()
-    {
-        return _store.Certificates.Cast<X509Certificate2>().ToList().AsReadOnly();
-    }
+    public IReadOnlyList<X509Certificate2> ListAll() => _store.Certificates.Cast<X509Certificate2>().ToList().AsReadOnly();
 
     /// <inheritdoc/>
     public void Dispose()

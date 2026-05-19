@@ -63,10 +63,7 @@ public sealed class GovBrChainValidatorTests
     }
 
     [Fact(DisplayName = "Null certificate throws ArgumentNullException")]
-    public void IsGovBrCertificate_NullThrows()
-    {
-        Assert.Throws<ArgumentNullException>(() => GovBrChainValidator.IsGovBrCertificate(null!));
-    }
+    public void IsGovBrCertificate_NullThrows() => Assert.Throws<ArgumentNullException>(() => GovBrChainValidator.IsGovBrCertificate(null!));
 
     // ── IsGovBrCertificate via bundled roots ──────────────────────────────────
 
@@ -113,10 +110,7 @@ public sealed class GovBrChainValidatorTests
     }
 
     [Fact(DisplayName = "DetectAssuranceLevel with null throws exception")]
-    public void DetectAssuranceLevel_NullThrows()
-    {
-        Assert.Throws<ArgumentNullException>(() => GovBrChainValidator.DetectAssuranceLevel(null!));
-    }
+    public void DetectAssuranceLevel_NullThrows() => Assert.Throws<ArgumentNullException>(() => GovBrChainValidator.DetectAssuranceLevel(null!));
 
     // ── GovBrValidationResult ─────────────────────────────────────────────────
 

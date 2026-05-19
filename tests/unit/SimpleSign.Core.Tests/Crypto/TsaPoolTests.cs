@@ -9,7 +9,7 @@ public sealed class TsaPoolTests
     [Fact(DisplayName = "Constructor requires at least one URL")]
     public void Constructor_NoUrls_Throws()
     {
-        var act = () => new TsaPool(Array.Empty<string>());
+        var act = () => new TsaPool([]);
         Should.Throw<ArgumentException>(act);
     }
 

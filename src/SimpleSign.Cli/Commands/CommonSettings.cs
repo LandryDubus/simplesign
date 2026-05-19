@@ -10,13 +10,7 @@ internal class CommonSettings : CommandSettings
     [Description("Enable detailed logging (writes to stderr)")]
     public bool Verbose { get; init; }
 
-    public ILoggerFactory? CreateLoggerFactory()
-    {
-        return Verbose ? new CliConsoleLoggerFactory(LogLevel.Debug) : null;
-    }
+    public ILoggerFactory? CreateLoggerFactory() => Verbose ? new CliConsoleLoggerFactory(LogLevel.Debug) : null;
 
-    public ILogger<T>? CreateLogger<T>()
-    {
-        return Verbose ? new CliConsoleLogger<T>(LogLevel.Debug) : null;
-    }
+    public ILogger<T>? CreateLogger<T>() => Verbose ? new CliConsoleLogger<T>(LogLevel.Debug) : null;
 }

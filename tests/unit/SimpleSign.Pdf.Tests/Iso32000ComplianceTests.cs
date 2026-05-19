@@ -29,7 +29,7 @@ public sealed class Iso32000ComplianceTests
         // 'z' = four zero bytes, combined with "!!" (which decodes to \x00\x00 partial)
         byte[] encoded = Encoding.ASCII.GetBytes("z");
         var result = PdfStructureReader.DecodeAscii85(encoded);
-        result.ShouldBe(new byte[] { 0, 0, 0, 0 });
+        result.ShouldBe([0, 0, 0, 0]);
     }
 
     [Fact(DisplayName = "§7.4.3: ASCII85 partial group (2 chars) decodes to 1 byte")]

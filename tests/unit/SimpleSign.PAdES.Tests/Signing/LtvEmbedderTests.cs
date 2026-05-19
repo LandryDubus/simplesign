@@ -26,10 +26,7 @@ public sealed class LtvEmbedderTests
         }
     }
 
-    private static byte[] BuildMinimalPdf()
-    {
-        return Encoding.Latin1.GetBytes("%PDF-1.7\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n2 0 obj\n<< /Type /Pages /Kids [] /Count 0 >>\nendobj\nxref\n0 3\n0000000000 65535 f \n0000000009 00000 n \n0000000058 00000 n \ntrailer\n<< /Size 3 /Root 1 0 R >>\nstartxref\n110\n%%EOF");
-    }
+    private static byte[] BuildMinimalPdf() => Encoding.Latin1.GetBytes("%PDF-1.7\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n2 0 obj\n<< /Type /Pages /Kids [] /Count 0 >>\nendobj\nxref\n0 3\n0000000000 65535 f \n0000000009 00000 n \n0000000058 00000 n \ntrailer\n<< /Size 3 /Root 1 0 R >>\nstartxref\n110\n%%EOF");
 
     /// <summary>
     /// Creates a self-signed cert whose CRL Distribution Points extension
@@ -156,7 +153,7 @@ public sealed class LtvEmbedderTests
     {
         LtvEmbedder ltvEmbedder = new LtvEmbedder();
         using X509Certificate2 cert = TestCertificateFactory.CreateSelfSignedCert();
-        (await ltvEmbedder.EmbedLtvDataAsync(Array.Empty<byte>(), [cert])).ShouldBeEmpty("");
+        (await ltvEmbedder.EmbedLtvDataAsync([], [cert])).ShouldBeEmpty("");
     }
 
     [Fact(DisplayName = "Invalid bytes do not throw exception")]
@@ -164,7 +161,7 @@ public sealed class LtvEmbedderTests
     {
         LtvEmbedder ltvEmbedder = new LtvEmbedder();
         using X509Certificate2 cert = TestCertificateFactory.CreateSelfSignedCert();
-        byte[] garbage = new byte[4] { 0, 255, 222, 173 };
+        byte[] garbage = [0, 255, 222, 173];
         (await ltvEmbedder.EmbedLtvDataAsync(garbage, [cert])).ShouldBe(garbage);
     }
 
@@ -192,7 +189,7 @@ public sealed class LtvEmbedderTests
     [Fact(DisplayName = "With CRL data, output contains DSS dictionary")]
     public async Task EmbedLtvDataAsync_WithCrlData_OutputContainsDssMarker()
     {
-        byte[] content = new byte[4] { 48, 130, 1, 0 };
+        byte[] content = [48, 130, 1, 0];
         using HttpClient httpClient = new HttpClient(new MockHandler(HttpStatusCode.OK, content));
         LtvEmbedder ltvEmbedder = new LtvEmbedder(httpClient);
         using X509Certificate2 cert = CreateCertWithCrlUrl();
@@ -206,7 +203,7 @@ public sealed class LtvEmbedderTests
     [Fact(DisplayName = "With CRL data, output starts with original PDF")]
     public async Task EmbedLtvDataAsync_WithCrlData_OutputStartsWithOriginalPdf()
     {
-        byte[] content = new byte[4] { 48, 130, 1, 0 };
+        byte[] content = [48, 130, 1, 0];
         using HttpClient httpClient = new HttpClient(new MockHandler(HttpStatusCode.OK, content));
         LtvEmbedder ltvEmbedder = new LtvEmbedder(httpClient);
         using X509Certificate2 cert = CreateCertWithCrlUrl();
@@ -229,7 +226,7 @@ public sealed class LtvEmbedderTests
     {
         LtvEmbedder ltvEmbedder = new LtvEmbedder();
         byte[] pdf = BuildMinimalPdf();
-        (await ltvEmbedder.EmbedLtvDataAsync(pdf, Array.Empty<X509Certificate2>())).ShouldBe(pdf);
+        (await ltvEmbedder.EmbedLtvDataAsync(pdf, [])).ShouldBe(pdf);
     }
 
     [Fact(DisplayName = "LTV embedding preserves xref stream format for xref-stream PDFs")]

@@ -25,7 +25,7 @@ public class BatchBenchmarks
     {
         _cert = TestCertificateFactory.CreateSelfSignedCert("CN=Batch Bench");
         var template = PdfHelper.BuildMinimalPdf();
-        _pdfs = Enumerable.Range(0, DocumentCount).Select(_ => (byte[])template.Clone()).ToArray();
+        _pdfs = [.. Enumerable.Range(0, DocumentCount).Select(_ => (byte[])template.Clone())];
     }
 
     [GlobalCleanup]

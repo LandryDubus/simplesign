@@ -444,10 +444,7 @@ public class CkEditorCompatibilityTests
 
     // ── Helpers ─────────────────────────────────────────────────────────
 
-    private static byte[] ConvertToPdf(string html)
-    {
-        return HtmlToPdfConverter.Html(html).Convert();
-    }
+    private static byte[] ConvertToPdf(string html) => HtmlToPdfConverter.Html(html).Convert();
 
     private static HtmlNode? FindByTag(HtmlNode node, string tag)
     {

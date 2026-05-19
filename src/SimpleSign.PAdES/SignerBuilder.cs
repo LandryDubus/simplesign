@@ -220,10 +220,7 @@ public sealed class SignerBuilder
     /// Only the first signature in a document can be a certification signature.
     /// </summary>
     /// <param name="level">The permitted modification level after certification.</param>
-    public SignerBuilder AsCertification(CertificationLevel level = CertificationLevel.FormFilling)
-    {
-        return With(fieldOptions: CloneOptions(certificationLevel: level));
-    }
+    public SignerBuilder AsCertification(CertificationLevel level = CertificationLevel.FormFilling) => With(fieldOptions: CloneOptions(certificationLevel: level));
 
     /// <summary>
     /// Signs an existing empty signature field instead of creating a new one.
@@ -499,10 +496,7 @@ public sealed class SignerBuilder
     /// <exception cref="EncryptedPdfException">The PDF is encrypted.</exception>
     /// <exception cref="NotSupportedException">Unsupported hash algorithm or key type.</exception>
     /// <exception cref="HttpRequestException">Timestamp or LTV network operations failed.</exception>
-    public async Task SignAsync(Stream outputStream, CancellationToken cancellationToken = default)
-    {
-        await SignCoreAsync(outputStream, cancellationToken: cancellationToken).ConfigureAwait(false);
-    }
+    public async Task SignAsync(Stream outputStream, CancellationToken cancellationToken = default) => await SignCoreAsync(outputStream, cancellationToken: cancellationToken).ConfigureAwait(false);
 
     /// <summary>
     /// Executes the signing operation and returns the signed PDF as a byte array.

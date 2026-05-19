@@ -14,10 +14,7 @@ internal static class PdfStructureParser
     /// Determines the next available PDF object number by taking the maximum of the
     /// trailer <c>/Size</c> value and the highest object number found in the file, plus one.
     /// </summary>
-    public static int DetermineNextObjectNumber(ReadOnlySpan<byte> pdfData)
-    {
-        return Math.Max(FindTrailerSize(pdfData), FindHighestObjectNumber(pdfData) + 1);
-    }
+    public static int DetermineNextObjectNumber(ReadOnlySpan<byte> pdfData) => Math.Max(FindTrailerSize(pdfData), FindHighestObjectNumber(pdfData) + 1);
 
     /// <summary>
     /// Reads the <c>/Root N 0 R</c> reference from the trailer to find the catalog object number.

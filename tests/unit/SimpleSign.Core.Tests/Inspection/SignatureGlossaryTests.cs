@@ -39,10 +39,7 @@ public sealed class SignatureGlossaryTests
     }
 
     [Fact(DisplayName = "Lookup returns null for unknown key")]
-    public void Lookup_UnknownKey_ReturnsNull()
-    {
-        SignatureGlossary.Lookup("NonExistentTerm123").ShouldBeNull();
-    }
+    public void Lookup_UnknownKey_ReturnsNull() => SignatureGlossary.Lookup("NonExistentTerm123").ShouldBeNull();
 
     [Fact(DisplayName = "Search finds entries matching query in key, name, or description")]
     public void Search_MatchesAcrossFields()
@@ -55,10 +52,7 @@ public sealed class SignatureGlossaryTests
     [Theory(DisplayName = "Search returns empty for blank or null query")]
     [InlineData("")]
     [InlineData("   ")]
-    public void Search_BlankQuery_ReturnsEmpty(string query)
-    {
-        SignatureGlossary.Search(query).ShouldBeEmpty();
-    }
+    public void Search_BlankQuery_ReturnsEmpty(string query) => SignatureGlossary.Search(query).ShouldBeEmpty();
 
     [Fact(DisplayName = "ByCategory returns entries for known category")]
     public void ByCategory_ReturnsFilteredEntries()
@@ -69,10 +63,7 @@ public sealed class SignatureGlossaryTests
     }
 
     [Fact(DisplayName = "ByCategory returns empty for unknown category")]
-    public void ByCategory_UnknownCategory_ReturnsEmpty()
-    {
-        SignatureGlossary.ByCategory("FakeCategory").ShouldBeEmpty();
-    }
+    public void ByCategory_UnknownCategory_ReturnsEmpty() => SignatureGlossary.ByCategory("FakeCategory").ShouldBeEmpty();
 
     [Fact(DisplayName = "GetInlineComment returns description for known key")]
     public void GetInlineComment_KnownKey_ReturnsDescription()
@@ -82,10 +73,7 @@ public sealed class SignatureGlossaryTests
     }
 
     [Fact(DisplayName = "GetInlineComment returns null for unknown key")]
-    public void GetInlineComment_UnknownKey_ReturnsNull()
-    {
-        SignatureGlossary.GetInlineComment("Unknown").ShouldBeNull();
-    }
+    public void GetInlineComment_UnknownKey_ReturnsNull() => SignatureGlossary.GetInlineComment("Unknown").ShouldBeNull();
 
     [Fact(DisplayName = "Every entry has non-empty key, display name, category, and description")]
     public void AllEntries_HaveRequiredFields()

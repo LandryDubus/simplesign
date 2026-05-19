@@ -39,10 +39,7 @@ public sealed class IcpBrasilChainValidatorTests
     }
 
     [Fact(DisplayName = "DetectPolicy with null certificate throws exception")]
-    public void DetectPolicy_NullCertificate_ThrowsArgumentNullException()
-    {
-        Assert.Throws<ArgumentNullException>(() => IcpBrasilChainValidator.DetectPolicy(null!));
-    }
+    public void DetectPolicy_NullCertificate_ThrowsArgumentNullException() => Assert.Throws<ArgumentNullException>(() => IcpBrasilChainValidator.DetectPolicy(null!));
 
     [Fact(DisplayName = "Cert without policies returns null")]
     public void DetectPolicy_CertWithoutPolicies_ReturnsNull()
@@ -55,31 +52,31 @@ public sealed class IcpBrasilChainValidatorTests
     }
 
     [Theory(DisplayName = "ICP-Brasil OID returns correct policy")]
-    [InlineData(new object[]
-    {
+    [InlineData(
+    [
         "2.16.76.1.7.1.1.2.3",
         IcpBrasilPolicy.AdRb
-    })]
-    [InlineData(new object[]
-    {
+    ])]
+    [InlineData(
+    [
         "2.16.76.1.7.1.2.2.3",
         IcpBrasilPolicy.AdRt
-    })]
-    [InlineData(new object[]
-    {
+    ])]
+    [InlineData(
+    [
         "2.16.76.1.7.1.3.2.3",
         IcpBrasilPolicy.AdRv
-    })]
-    [InlineData(new object[]
-    {
+    ])]
+    [InlineData(
+    [
         "2.16.76.1.7.1.4.2.3",
         IcpBrasilPolicy.AdRc
-    })]
-    [InlineData(new object[]
-    {
+    ])]
+    [InlineData(
+    [
         "2.16.76.1.7.1.5.2.3",
         IcpBrasilPolicy.AdRa
-    })]
+    ])]
     public void DetectPolicy_CertWithIcpPolicyOid_ReturnsCorrectPolicy(string oid, IcpBrasilPolicy expectedPolicy)
     {
         using X509Certificate2 certificate = CreateCertWithPolicy(oid);
@@ -114,7 +111,7 @@ public sealed class IcpBrasilChainValidatorTests
         IcpBrasilValidationResult icpBrasilValidationResult = new IcpBrasilValidationResult
         {
             IsChainValid = true,
-            Errors = Array.Empty<string>()
+            Errors = []
         };
         icpBrasilValidationResult.IsValid.ShouldBeTrue("");
     }
@@ -148,14 +145,11 @@ public sealed class IcpBrasilChainValidatorTests
         using X509Certificate2 cert = certificateRequest.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1.0), DateTimeOffset.UtcNow.AddYears(1));
         IcpBrasilValidationResult icpBrasilValidationResult = await icpBrasilChainValidator.ValidateAsync(cert);
         icpBrasilValidationResult.DetectedPolicy.ShouldBeNull("");
-        icpBrasilValidationResult.Warnings.ShouldContain((string w) => w.Contains("ICP-Brasil"), "");
+        icpBrasilValidationResult.Warnings.ShouldContain(w => w.Contains("ICP-Brasil"), "");
     }
 
     [Fact(DisplayName = "ExtractCpfCnpj with null cert throws exception")]
-    public void ExtractCpfCnpj_NullCert_ThrowsArgumentNullException()
-    {
-        Assert.Throws<ArgumentNullException>(() => IcpBrasilChainValidator.ExtractCpfCnpj(null!));
-    }
+    public void ExtractCpfCnpj_NullCert_ThrowsArgumentNullException() => Assert.Throws<ArgumentNullException>(() => IcpBrasilChainValidator.ExtractCpfCnpj(null!));
 
     [Fact(DisplayName = "Cert without SAN returns null CPF and CNPJ")]
     public void ExtractCpfCnpj_CertWithoutSan_ReturnsNulls()
@@ -177,6 +171,6 @@ public sealed class IcpBrasilChainValidatorTests
         using RSA rsa = RSA.Create(1024);
         CertificateRequest certificateRequest = new CertificateRequest("CN=SmallKey", rsa, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
         using X509Certificate2 cert = CertificateLoader.LoadPkcs12(certificateRequest.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1.0), DateTimeOffset.UtcNow.AddYears(1)).Export(X509ContentType.Pfx, "test-export"), "test-export");
-        (await icpBrasilChainValidator.ValidateAsync(cert)).Warnings.ShouldContain((string w) => w.Contains("1024") && w.Contains("2048"), "");
+        (await icpBrasilChainValidator.ValidateAsync(cert)).Warnings.ShouldContain(w => w.Contains("1024") && w.Contains("2048"), "");
     }
 }

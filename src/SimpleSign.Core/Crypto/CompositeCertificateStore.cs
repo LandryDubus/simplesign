@@ -31,14 +31,8 @@ public sealed class CompositeCertificateStore : ICertificateStore
     }
 
     /// <inheritdoc/>
-    public IReadOnlyList<X509Certificate2> FindBySubject(string subjectName)
-    {
-        return _stores.SelectMany(s => s.FindBySubject(subjectName)).ToList().AsReadOnly();
-    }
+    public IReadOnlyList<X509Certificate2> FindBySubject(string subjectName) => _stores.SelectMany(s => s.FindBySubject(subjectName)).ToList().AsReadOnly();
 
     /// <inheritdoc/>
-    public IReadOnlyList<X509Certificate2> ListAll()
-    {
-        return _stores.SelectMany(s => s.ListAll()).ToList().AsReadOnly();
-    }
+    public IReadOnlyList<X509Certificate2> ListAll() => _stores.SelectMany(s => s.ListAll()).ToList().AsReadOnly();
 }

@@ -15,10 +15,7 @@ namespace SimpleSign.PAdES.Tests.Core;
 /// </summary>
 public sealed class SimpleSignerEndToEndTests
 {
-    private static byte[] BuildMinimalPdf()
-    {
-        return Encoding.Latin1.GetBytes("%PDF-1.7\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n2 0 obj\n<< /Type /Pages /Kids [] /Count 0 >>\nendobj\nxref\n0 3\n0000000000 65535 f \n0000000009 00000 n \n0000000058 00000 n \ntrailer\n<< /Size 3 /Root 1 0 R >>\nstartxref\n110\n%%EOF");
-    }
+    private static byte[] BuildMinimalPdf() => Encoding.Latin1.GetBytes("%PDF-1.7\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n2 0 obj\n<< /Type /Pages /Kids [] /Count 0 >>\nendobj\nxref\n0 3\n0000000000 65535 f \n0000000009 00000 n \n0000000058 00000 n \ntrailer\n<< /Size 3 /Root 1 0 R >>\nstartxref\n110\n%%EOF");
 
     private static X509Certificate2 CreateRsaCert(string subject = "CN=Test Signer, O=Tests, C=BR")
     {
@@ -43,7 +40,7 @@ public sealed class SimpleSignerEndToEndTests
         return new PdfSignatureValidator(new ValidationOptions
         {
             CheckRevocation = false,
-            TrustedRoots = certs.ToList()
+            TrustedRoots = [.. certs]
         });
     }
 
@@ -140,7 +137,7 @@ public sealed class SimpleSignerEndToEndTests
         _ = new PdfStructureReader();
         IReadOnlyList<PdfSignatureField> readOnlyList = await PdfStructureReader.ReadSignatureFieldsAsync(stream);
         readOnlyList.Count().ShouldBe(2);
-        var objNumbers = readOnlyList.Select((PdfSignatureField f) => f.SigDictObjectNumber).ToList();
+        var objNumbers = readOnlyList.Select(f => f.SigDictObjectNumber).ToList();
         objNumbers.Distinct().Count().ShouldBe(objNumbers.Count);
     }
 
@@ -149,7 +146,7 @@ public sealed class SimpleSignerEndToEndTests
     {
         using X509Certificate2 cert1 = CreateRsaCert("CN=First, C=BR");
         using X509Certificate2 cert2 = CreateRsaCert("CN=Second, C=BR");
-        byte[] pdfBytes = (await SimpleSigner.Document(BuildMinimalPdf()).WithCertificate(cert1).SignAsync()).Concat(new byte[10]).ToArray();
+        byte[] pdfBytes = [.. (await SimpleSigner.Document(BuildMinimalPdf()).WithCertificate(cert1).SignAsync()), .. new byte[10]];
         using MemoryStream stream = new MemoryStream(await SimpleSigner.Document(pdfBytes).WithCertificate(cert2).SignAsync());
         IReadOnlyList<SignatureValidationResult> actualValue = await ValidatorTrusting(cert1, cert2).ValidateAsync(stream);
         actualValue.Count().ShouldBe(2, "");
@@ -160,11 +157,11 @@ public sealed class SimpleSignerEndToEndTests
     }
 
     [Theory(DisplayName = "Known OIDs return expected algorithm name")]
-    [InlineData(new object[] { "2.16.840.1.101.3.4.2.1", "SHA-256" })]
-    [InlineData(new object[] { "2.16.840.1.101.3.4.2.3", "SHA-512" })]
-    [InlineData(new object[] { "2.16.840.1.101.3.4.2.2", "SHA-384" })]
-    [InlineData(new object[] { "1.3.14.3.2.26", "SHA-1 (legacy)" })]
-    [InlineData(new object[] { "1.2.3.4.5", "1.2.3.4.5" })]
+    [InlineData(["2.16.840.1.101.3.4.2.1", "SHA-256"])]
+    [InlineData(["2.16.840.1.101.3.4.2.3", "SHA-512"])]
+    [InlineData(["2.16.840.1.101.3.4.2.2", "SHA-384"])]
+    [InlineData(["1.3.14.3.2.26", "SHA-1 (legacy)"])]
+    [InlineData(["1.2.3.4.5", "1.2.3.4.5"])]
     public void DigestAlgorithmName_KnownOids_ReturnsExpectedName(string oid, string expected)
     {
         SignatureValidationResult signatureValidationResult = new SignatureValidationResult

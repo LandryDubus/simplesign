@@ -109,37 +109,39 @@ public sealed class PdfStructureReaderXrefTests
 
         // XRef stream (uncompressed, W=[1,3,1], 4 entries)
         // Entry format: [type(1)][offset(3)][gen(1)]
-        byte[] xrefData = new byte[5 * 5]; // 5 entries × 5 bytes
-        // obj 0: free
-        xrefData[0] = 0;
-        xrefData[1] = 0;
-        xrefData[2] = 0;
-        xrefData[3] = 0;
-        xrefData[4] = 0xFF;
-        // obj 1
-        xrefData[5] = 1;
-        xrefData[6] = (byte)(obj1Off >> 16);
-        xrefData[7] = (byte)(obj1Off >> 8);
-        xrefData[8] = (byte)obj1Off;
-        xrefData[9] = 0;
-        // obj 2
-        xrefData[10] = 1;
-        xrefData[11] = (byte)(obj2Off >> 16);
-        xrefData[12] = (byte)(obj2Off >> 8);
-        xrefData[13] = (byte)obj2Off;
-        xrefData[14] = 0;
-        // obj 3
-        xrefData[15] = 1;
-        xrefData[16] = (byte)(obj3Off >> 16);
-        xrefData[17] = (byte)(obj3Off >> 8);
-        xrefData[18] = (byte)obj3Off;
-        xrefData[19] = 0;
-        // obj 4 (xref itself)
-        xrefData[20] = 1;
-        xrefData[21] = (byte)(obj4Off >> 16);
-        xrefData[22] = (byte)(obj4Off >> 8);
-        xrefData[23] = (byte)obj4Off;
-        xrefData[24] = 0;
+        byte[] xrefData =
+        [
+            // obj 0: free
+            0,
+            0,
+            0,
+            0,
+            0xFF,
+            // obj 1
+            1,
+            (byte)(obj1Off >> 16),
+            (byte)(obj1Off >> 8),
+            (byte)obj1Off,
+            0,
+            // obj 2
+            1,
+            (byte)(obj2Off >> 16),
+            (byte)(obj2Off >> 8),
+            (byte)obj2Off,
+            0,
+            // obj 3
+            1,
+            (byte)(obj3Off >> 16),
+            (byte)(obj3Off >> 8),
+            (byte)obj3Off,
+            0,
+            // obj 4 (xref itself)
+            1,
+            (byte)(obj4Off >> 16),
+            (byte)(obj4Off >> 8),
+            (byte)obj4Off,
+            0,
+        ]; // 5 entries × 5 bytes
 
         string xrefHdr = $"4 0 obj\n<< /Type /XRef /W [1 3 1] /Index [0 5] /Size 5 /Length {xrefData.Length} >>\nstream\n";
         byte[] xrefObj = Encoding.ASCII.GetBytes(xrefHdr);
@@ -188,32 +190,34 @@ public sealed class PdfStructureReaderXrefTests
         int obj4Off = obj3Off + obj3.Length;
 
         // Build raw xref stream entries: W=[1,3,1], 5 entries (objects 0-4)
-        byte[] xrefData = new byte[5 * 5];
-        xrefData[0] = 0;
-        xrefData[1] = 0;
-        xrefData[2] = 0;
-        xrefData[3] = 0;
-        xrefData[4] = 0xFF; // free
-        xrefData[5] = 1;
-        xrefData[6] = (byte)(obj1Off >> 16);
-        xrefData[7] = (byte)(obj1Off >> 8);
-        xrefData[8] = (byte)obj1Off;
-        xrefData[9] = 0;
-        xrefData[10] = 1;
-        xrefData[11] = (byte)(obj2Off >> 16);
-        xrefData[12] = (byte)(obj2Off >> 8);
-        xrefData[13] = (byte)obj2Off;
-        xrefData[14] = 0;
-        xrefData[15] = 1;
-        xrefData[16] = (byte)(obj3Off >> 16);
-        xrefData[17] = (byte)(obj3Off >> 8);
-        xrefData[18] = (byte)obj3Off;
-        xrefData[19] = 0;
-        xrefData[20] = 1;
-        xrefData[21] = (byte)(obj4Off >> 16);
-        xrefData[22] = (byte)(obj4Off >> 8);
-        xrefData[23] = (byte)obj4Off;
-        xrefData[24] = 0;
+        byte[] xrefData =
+        [
+            0,
+            0,
+            0,
+            0,
+            0xFF, // free
+            1,
+            (byte)(obj1Off >> 16),
+            (byte)(obj1Off >> 8),
+            (byte)obj1Off,
+            0,
+            1,
+            (byte)(obj2Off >> 16),
+            (byte)(obj2Off >> 8),
+            (byte)obj2Off,
+            0,
+            1,
+            (byte)(obj3Off >> 16),
+            (byte)(obj3Off >> 8),
+            (byte)obj3Off,
+            0,
+            1,
+            (byte)(obj4Off >> 16),
+            (byte)(obj4Off >> 8),
+            (byte)obj4Off,
+            0,
+        ];
 
         // Compress with zlib (2-byte header + deflate)
         byte[] compressedData;
@@ -285,43 +289,45 @@ public sealed class PdfStructureReaderXrefTests
         int obj5Off = obj4Off + obj4.Length;
 
         // Xref entries: W=[1 3 1], 6 entries (objects 0-5)
-        byte[] xrefData = new byte[6 * 5];
-        // obj 0: free
-        xrefData[0] = 0;
-        xrefData[1] = 0;
-        xrefData[2] = 0;
-        xrefData[3] = 0;
-        xrefData[4] = 0xFF;
-        // obj 1: Type 2 (in ObjStm 3, index 0)
-        xrefData[5] = 2;
-        xrefData[6] = 0;
-        xrefData[7] = 0;
-        xrefData[8] = 3;
-        xrefData[9] = 0;
-        // obj 2: Type 2 (in ObjStm 3, index 1)
-        xrefData[10] = 2;
-        xrefData[11] = 0;
-        xrefData[12] = 0;
-        xrefData[13] = 3;
-        xrefData[14] = 1;
-        // obj 3: Type 1 (ObjStm itself)
-        xrefData[15] = 1;
-        xrefData[16] = (byte)(obj3Off >> 16);
-        xrefData[17] = (byte)(obj3Off >> 8);
-        xrefData[18] = (byte)obj3Off;
-        xrefData[19] = 0;
-        // obj 4: Type 1 (signature dictionary)
-        xrefData[20] = 1;
-        xrefData[21] = (byte)(obj4Off >> 16);
-        xrefData[22] = (byte)(obj4Off >> 8);
-        xrefData[23] = (byte)obj4Off;
-        xrefData[24] = 0;
-        // obj 5: Type 1 (xref stream itself)
-        xrefData[25] = 1;
-        xrefData[26] = (byte)(obj5Off >> 16);
-        xrefData[27] = (byte)(obj5Off >> 8);
-        xrefData[28] = (byte)obj5Off;
-        xrefData[29] = 0;
+        byte[] xrefData =
+        [
+            // obj 0: free
+            0,
+            0,
+            0,
+            0,
+            0xFF,
+            // obj 1: Type 2 (in ObjStm 3, index 0)
+            2,
+            0,
+            0,
+            3,
+            0,
+            // obj 2: Type 2 (in ObjStm 3, index 1)
+            2,
+            0,
+            0,
+            3,
+            1,
+            // obj 3: Type 1 (ObjStm itself)
+            1,
+            (byte)(obj3Off >> 16),
+            (byte)(obj3Off >> 8),
+            (byte)obj3Off,
+            0,
+            // obj 4: Type 1 (signature dictionary)
+            1,
+            (byte)(obj4Off >> 16),
+            (byte)(obj4Off >> 8),
+            (byte)obj4Off,
+            0,
+            // obj 5: Type 1 (xref stream itself)
+            1,
+            (byte)(obj5Off >> 16),
+            (byte)(obj5Off >> 8),
+            (byte)obj5Off,
+            0,
+        ];
 
         string xrefHdr = $"5 0 obj\n<< /Type /XRef /W [1 3 1] /Index [0 6] /Size 6 /Length {xrefData.Length} >>\nstream\n";
         byte[] xrefObj = Encoding.ASCII.GetBytes(xrefHdr);

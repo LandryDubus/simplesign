@@ -302,8 +302,7 @@ internal sealed class TrayContext : ApplicationContext
 
     private static int CompareVersions(string a, string b)
     {
-        static int[] Parse(string v) => v.Split(['.', '-'], StringSplitOptions.RemoveEmptyEntries)
-            .Select(p => int.TryParse(p, out var n) ? n : 0).ToArray();
+        static int[] Parse(string v) => [.. v.Split(['.', '-'], StringSplitOptions.RemoveEmptyEntries).Select(p => int.TryParse(p, out var n) ? n : 0)];
         var pa = Parse(a);
         var pb = Parse(b);
         for (int i = 0; i < Math.Max(pa.Length, pb.Length); i++)

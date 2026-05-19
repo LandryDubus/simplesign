@@ -12,16 +12,10 @@ namespace SimpleSign.Core.Tests.Inspection;
 public sealed class TimestampDataExtractorTests
 {
     [Fact(DisplayName = "Extract returns null for empty bytes")]
-    public void Extract_EmptyBytes_ReturnsNull()
-    {
-        TimestampDataExtractor.Extract([]).ShouldBeNull();
-    }
+    public void Extract_EmptyBytes_ReturnsNull() => TimestampDataExtractor.Extract([]).ShouldBeNull();
 
     [Fact(DisplayName = "Extract returns null for garbage bytes")]
-    public void Extract_GarbageBytes_ReturnsNull()
-    {
-        TimestampDataExtractor.Extract([0xFF, 0xFE, 0xFD, 0xFC, 0xFB]).ShouldBeNull();
-    }
+    public void Extract_GarbageBytes_ReturnsNull() => TimestampDataExtractor.Extract([0xFF, 0xFE, 0xFD, 0xFC, 0xFB]).ShouldBeNull();
 
     [Fact(DisplayName = "Extract returns null for ASCII text")]
     public void Extract_AsciiText_ReturnsNull()

@@ -17,10 +17,7 @@ internal sealed class FakeLogger : ILogger
     public bool IsEnabled(LogLevel logLevel) => true;
 
     public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception,
-        Func<TState, Exception?, string> formatter)
-    {
-        Entries.Add((logLevel, formatter(state, exception)));
-    }
+        Func<TState, Exception?, string> formatter) => Entries.Add((logLevel, formatter(state, exception)));
 }
 
 internal sealed class FakeLogger<T> : ILogger<T>
@@ -31,10 +28,7 @@ internal sealed class FakeLogger<T> : ILogger<T>
     public bool IsEnabled(LogLevel logLevel) => true;
 
     public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception,
-        Func<TState, Exception?, string> formatter)
-    {
-        Entries.Add((logLevel, formatter(state, exception)));
-    }
+        Func<TState, Exception?, string> formatter) => Entries.Add((logLevel, formatter(state, exception)));
 }
 
 public sealed class SigningLoggingTests : IDisposable

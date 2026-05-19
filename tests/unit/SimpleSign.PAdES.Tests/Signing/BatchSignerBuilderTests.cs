@@ -223,7 +223,7 @@ public sealed class BatchSignerBuilderTests
     [Fact(DisplayName = "BatchSignResult IsSuccess returns true when Error is null")]
     public void BatchSignResult_NullError_IsSuccess()
     {
-        var result = new BatchSignResult("doc1.pdf", new byte[] { 0x01, 0x02 }, Error: null);
+        var result = new BatchSignResult("doc1.pdf", [0x01, 0x02], Error: null);
         result.IsSuccess.ShouldBeTrue();
         result.SignedPdf.ShouldNotBeNull();
     }

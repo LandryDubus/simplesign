@@ -32,10 +32,7 @@ public static class SimpleSignServiceCollectionExtensions
     /// <returns>The service collection for chaining.</returns>
     public static IServiceCollection AddSimpleSign(
         this IServiceCollection services,
-        Action<SimpleSignOptions>? configure = null)
-    {
-        return AddSimpleSignCore(services, configure, httpClientProvider: null);
-    }
+        Action<SimpleSignOptions>? configure = null) => AddSimpleSignCore(services, configure, httpClientProvider: null);
 
     /// <summary>
     /// Registers SimpleSign services with a custom <see cref="IHttpClientProvider"/>.
@@ -48,10 +45,7 @@ public static class SimpleSignServiceCollectionExtensions
     public static IServiceCollection AddSimpleSign(
         this IServiceCollection services,
         Action<SimpleSignOptions>? configure,
-        IHttpClientProvider httpClientProvider)
-    {
-        return AddSimpleSignCore(services, configure, httpClientProvider);
-    }
+        IHttpClientProvider httpClientProvider) => AddSimpleSignCore(services, configure, httpClientProvider);
 
     private static IServiceCollection AddSimpleSignCore(
         IServiceCollection services,

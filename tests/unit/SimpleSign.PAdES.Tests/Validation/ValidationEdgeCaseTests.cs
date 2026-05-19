@@ -74,7 +74,7 @@ public sealed class ValidationEdgeCaseTests
         {
             CheckRevocation = false,
             TrustSystemRoots = false,
-            TrustedRoots = Array.Empty<X509Certificate2>()
+            TrustedRoots = []
         };
         PdfSignatureValidator pdfSignatureValidator = new PdfSignatureValidator(options);
         IReadOnlyList<SignatureValidationResult> readOnlyList = await pdfSignatureValidator.ValidateAsync(new MemoryStream(buffer));
@@ -89,7 +89,7 @@ public sealed class ValidationEdgeCaseTests
         using RSA leafRsa = RSA.Create(2048);
         CertificateRequest certificateRequest = new CertificateRequest("CN=Leaf Edge", leafRsa, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
         certificateRequest.CertificateExtensions.Add(new X509KeyUsageExtension(X509KeyUsageFlags.DigitalSignature, critical: false));
-        using X509Certificate2 leafPub = certificateRequest.Create(ca, DateTimeOffset.UtcNow.AddDays(-1.0), DateTimeOffset.UtcNow.AddYears(1), (ReadOnlySpan<byte>)new byte[2] { 16, 32 });
+        using X509Certificate2 leafPub = certificateRequest.Create(ca, DateTimeOffset.UtcNow.AddDays(-1.0), DateTimeOffset.UtcNow.AddYears(1), [16, 32]);
         using X509Certificate2 leaf = CertificateLoader.LoadPkcs12(leafPub.CopyWithPrivateKey(leafRsa).Export(X509ContentType.Pfx, "test-export"), "test-export");
         byte[] pdfBytes = BuildMinimalPdf();
         byte[] buffer = await SimpleSigner.Document(pdfBytes).WithCertificate(leaf).SignAsync();
@@ -122,7 +122,7 @@ public sealed class ValidationEdgeCaseTests
         {
             CheckRevocation = false
         });
-        MemoryStream stream = new MemoryStream(Array.Empty<byte>());
+        MemoryStream stream = new MemoryStream([]);
         try
         {
             Func<Task> action = async () => await validator.ValidateAsync(stream);
@@ -242,7 +242,7 @@ public sealed class ValidationEdgeCaseTests
         X509Certificate2 cert = TestCertificateFactory.CreateSelfSignedCert();
         try
         {
-            using HttpClient httpClient = MockHttpHandler.ForGetBytes(Array.Empty<byte>(), HttpStatusCode.InternalServerError);
+            using HttpClient httpClient = MockHttpHandler.ForGetBytes([], HttpStatusCode.InternalServerError);
             CrlClient client = new CrlClient(httpClient);
             Func<Task<bool>> action = () => client.CheckCrlAsync(cert, "http://example.com/test.crl", CancellationToken.None);
             await Should.ThrowAsync<HttpRequestException>(async () => await action());
@@ -262,7 +262,7 @@ public sealed class ValidationEdgeCaseTests
         X509Certificate2 cert = TestCertificateFactory.CreateSelfSignedCert();
         try
         {
-            using HttpClient httpClient = MockHttpHandler.ForGetBytes(Array.Empty<byte>(), HttpStatusCode.NotFound);
+            using HttpClient httpClient = MockHttpHandler.ForGetBytes([], HttpStatusCode.NotFound);
             CrlClient client = new CrlClient(httpClient);
             Func<Task<bool>> action = () => client.CheckCrlAsync(cert, "http://example.com/test.crl", CancellationToken.None);
             await Should.ThrowAsync<HttpRequestException>(async () => await action());
@@ -304,7 +304,7 @@ public sealed class ValidationEdgeCaseTests
     [Fact(DisplayName = "OCSP malformed response throws exception without crash")]
     public async Task OcspClient_MalformedResponse_ThrowsException()
     {
-        byte[] responseBytes = new byte[6] { 255, 254, 0, 1, 2, 3 };
+        byte[] responseBytes = [255, 254, 0, 1, 2, 3];
         using HttpClient httpClient = MockHttpHandler.ForPostBytes(responseBytes);
         OcspClient client = new OcspClient(httpClient);
         X509Certificate2 cert = TestCertificateFactory.CreateSelfSignedCert();
@@ -414,7 +414,7 @@ public sealed class ValidationEdgeCaseTests
         try
         {
             RevocationChecker checker = new RevocationChecker(new OcspClient(new HttpClient()), new CrlClient(new HttpClient()));
-            Func<Task<(bool, SimpleSign.Core.Validation.RevocationSource)>> action = () => checker.CheckRevocationAsync(cert, [cert], Array.Empty<byte[]>(), CancellationToken.None);
+            Func<Task<(bool, SimpleSign.Core.Validation.RevocationSource)>> action = () => checker.CheckRevocationAsync(cert, [cert], [], CancellationToken.None);
             var ex = await Should.ThrowAsync<ValidationException>(async () => await action());
             ex.Message.ShouldContain("no OCSP or CRL URL");
         }

@@ -17,20 +17,14 @@ public sealed class VriValidatorTests
     [Theory(DisplayName = "IsValidVriKey accepts valid uppercase hex SHA-1")]
     [InlineData("A1B2C3D4E5F6A1B2C3D4E5F6A1B2C3D4E5F6A1B2")]
     [InlineData("0123456789ABCDEF0123456789ABCDEF01234567")]
-    public void IsValidVriKey_ValidHex_ReturnsTrue(string key)
-    {
-        VriValidator.IsValidVriKey(key).ShouldBeTrue();
-    }
+    public void IsValidVriKey_ValidHex_ReturnsTrue(string key) => VriValidator.IsValidVriKey(key).ShouldBeTrue();
 
     [Theory(DisplayName = "IsValidVriKey rejects invalid keys")]
     [InlineData("a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2")] // lowercase
     [InlineData("A1B2C3")] // too short
     [InlineData("ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ")] // non-hex
     [InlineData("")] // empty
-    public void IsValidVriKey_InvalidKey_ReturnsFalse(string key)
-    {
-        VriValidator.IsValidVriKey(key).ShouldBeFalse();
-    }
+    public void IsValidVriKey_InvalidKey_ReturnsFalse(string key) => VriValidator.IsValidVriKey(key).ShouldBeFalse();
 
     // ── VRI Validation on well-formed DSS ───────────────────────────────────
 

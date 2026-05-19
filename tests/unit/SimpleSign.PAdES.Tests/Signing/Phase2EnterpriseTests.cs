@@ -16,7 +16,7 @@ public sealed class Phase2EnterpriseTests
     [Fact(DisplayName = "AsCertification returns new builder instance")]
     public void AsCertification_ReturnsNewInstance()
     {
-        var builder = SimpleSigner.Document(new byte[] { 0x25 });
+        var builder = SimpleSigner.Document([0x25]);
         var builder2 = builder.AsCertification(CertificationLevel.NoChanges);
         builder2.ShouldNotBeSameAs(builder);
     }
@@ -24,7 +24,7 @@ public sealed class Phase2EnterpriseTests
     [Fact(DisplayName = "Default AsCertification uses FormFilling")]
     public void AsCertification_DefaultLevel_IsFormFilling()
     {
-        var builder = SimpleSigner.Document(new byte[] { 0x25 });
+        var builder = SimpleSigner.Document([0x25]);
         var builder2 = builder.AsCertification();
         builder2.ShouldNotBeNull();
     }
@@ -33,17 +33,14 @@ public sealed class Phase2EnterpriseTests
     [InlineData(CertificationLevel.NoChanges)]
     [InlineData(CertificationLevel.FormFilling)]
     [InlineData(CertificationLevel.FormFillingAndAnnotations)]
-    public void CertificationLevel_Values_AreCorrect(CertificationLevel level)
-    {
-        ((int)level).ShouldBeInRange(1, 3);
-    }
+    public void CertificationLevel_Values_AreCorrect(CertificationLevel level) => ((int)level).ShouldBeInRange(1, 3);
 
     // ── Existing Field ───────────────────────────────────────────────────
 
     [Fact(DisplayName = "WithExistingField returns new instance")]
     public void WithExistingField_ReturnsNewInstance()
     {
-        var builder = SimpleSigner.Document(new byte[] { 0x25 });
+        var builder = SimpleSigner.Document([0x25]);
         var builder2 = builder.WithExistingField("Signature1");
         builder2.ShouldNotBeSameAs(builder);
     }
@@ -51,7 +48,7 @@ public sealed class Phase2EnterpriseTests
     [Fact(DisplayName = "WithExistingField with null name throws exception")]
     public void WithExistingField_NullName_ThrowsArgument()
     {
-        var builder = SimpleSigner.Document(new byte[] { 0x25 });
+        var builder = SimpleSigner.Document([0x25]);
         var act = () => builder.WithExistingField(null!);
         Should.Throw<ArgumentException>(act);
     }
@@ -59,7 +56,7 @@ public sealed class Phase2EnterpriseTests
     [Fact(DisplayName = "WithExistingField with empty name throws exception")]
     public void WithExistingField_EmptyName_ThrowsArgument()
     {
-        var builder = SimpleSigner.Document(new byte[] { 0x25 });
+        var builder = SimpleSigner.Document([0x25]);
         var act = () => builder.WithExistingField("");
         Should.Throw<ArgumentException>(act);
     }

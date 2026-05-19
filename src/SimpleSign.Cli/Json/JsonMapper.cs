@@ -15,7 +15,7 @@ internal static class JsonMapper
         {
             File = fileName,
             SignatureCount = results.Count(r => !r.IsDocumentTimestamp),
-            Signatures = results.Select(r =>
+            Signatures = [.. results.Select(r =>
             {
                 PAdESConformanceLevel? level = null;
                 if (conformanceLevels is not null && conformanceLevels.TryGetValue(r.FieldName, out var l))
@@ -36,9 +36,9 @@ internal static class JsonMapper
                     Chain = r.IsCertificateChainValid,
                     Revoked = !r.IsNotRevoked,
                     SigningTime = r.SigningTime,
-                    Errors = r.Errors.ToList()
+                    Errors = [.. r.Errors]
                 };
-            }).ToList()
+            })]
         };
     }
 
@@ -66,11 +66,11 @@ internal static class JsonMapper
                     }
                     : null
             },
-            Signatures = result.Signatures.Select(sig =>
+            Signatures = [.. result.Signatures.Select(sig =>
             {
                 var level = ConformanceDetector.Detect(sig, doc, result.Signatures);
                 return MapSignature(sig, level);
-            }).ToList()
+            })]
         };
     }
 
@@ -112,14 +112,14 @@ internal static class JsonMapper
                     TokenSize = sig.Timestamp.RawToken.Length
                 }
                 : null,
-            EmbeddedCertificates = sig.EmbeddedCertificates
+            EmbeddedCertificates = [.. sig.EmbeddedCertificates
                 .Select(c => new EmbeddedCertDto
                 {
                     Subject = c.Subject,
                     Issuer = c.Issuer,
                     Serial = c.SerialNumber,
                     Expired = c.IsExpired
-                }).ToList()
+                })]
         };
     }
 

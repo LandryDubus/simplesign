@@ -5,16 +5,10 @@ namespace SimpleSign.Interop.Tests;
 internal static class DockerProbe
 {
     /// <summary>Returns true if <c>docker info</c> succeeds within 5 seconds.</summary>
-    public static bool IsDockerAvailable()
-    {
-        return RunProbe("docker", "info");
-    }
+    public static bool IsDockerAvailable() => RunProbe("docker", "info");
 
     /// <summary>Returns true if the named Docker image is locally available.</summary>
-    public static bool ImageExists(string image)
-    {
-        return RunProbe("docker", $"image inspect {image}");
-    }
+    public static bool ImageExists(string image) => RunProbe("docker", $"image inspect {image}");
 
     private static bool RunProbe(string command, string args, int timeoutMs = 10_000)
     {

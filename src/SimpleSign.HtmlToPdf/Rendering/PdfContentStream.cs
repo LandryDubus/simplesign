@@ -20,75 +20,48 @@ internal sealed class PdfContentStream
     public IReadOnlySet<string> UsedFonts => _usedFonts;
 
     /// <summary>Saves graphics state (q operator).</summary>
-    public void SaveState()
-    {
-        _sb.Append("q\n");
-    }
+    public void SaveState() => _sb.Append("q\n");
 
     /// <summary>Restores graphics state (Q operator).</summary>
-    public void RestoreState()
-    {
-        _sb.Append("Q\n");
-    }
+    public void RestoreState() => _sb.Append("Q\n");
 
     /// <summary>Sets the fill color (rg operator).</summary>
     /// <param name="color">The fill color.</param>
-    public void SetFillColor(PdfColor color)
-    {
-        _sb.Append(CultureInfo.InvariantCulture, $"{F(color.R)} {F(color.G)} {F(color.B)} rg\n");
-    }
+    public void SetFillColor(PdfColor color) => _sb.Append(CultureInfo.InvariantCulture, $"{F(color.R)} {F(color.G)} {F(color.B)} rg\n");
 
     /// <summary>Sets the stroke color (RG operator).</summary>
     /// <param name="color">The stroke color.</param>
-    public void SetStrokeColor(PdfColor color)
-    {
-        _sb.Append(CultureInfo.InvariantCulture, $"{F(color.R)} {F(color.G)} {F(color.B)} RG\n");
-    }
+    public void SetStrokeColor(PdfColor color) => _sb.Append(CultureInfo.InvariantCulture, $"{F(color.R)} {F(color.G)} {F(color.B)} RG\n");
 
     /// <summary>Sets the line width (w operator).</summary>
     /// <param name="width">Line width in points.</param>
-    public void SetLineWidth(float width)
-    {
-        _sb.Append(CultureInfo.InvariantCulture, $"{F(width)} w\n");
-    }
+    public void SetLineWidth(float width) => _sb.Append(CultureInfo.InvariantCulture, $"{F(width)} w\n");
 
     /// <summary>Draws a filled rectangle.</summary>
     /// <param name="x">X position.</param>
     /// <param name="y">Y position (bottom-left).</param>
     /// <param name="width">Width.</param>
     /// <param name="height">Height.</param>
-    public void FillRect(float x, float y, float width, float height)
-    {
-        _sb.Append(CultureInfo.InvariantCulture, $"{F(x)} {F(y)} {F(width)} {F(height)} re f\n");
-    }
+    public void FillRect(float x, float y, float width, float height) => _sb.Append(CultureInfo.InvariantCulture, $"{F(x)} {F(y)} {F(width)} {F(height)} re f\n");
 
     /// <summary>Draws a stroked rectangle.</summary>
     /// <param name="x">X position.</param>
     /// <param name="y">Y position (bottom-left).</param>
     /// <param name="width">Width.</param>
     /// <param name="height">Height.</param>
-    public void StrokeRect(float x, float y, float width, float height)
-    {
-        _sb.Append(CultureInfo.InvariantCulture, $"{F(x)} {F(y)} {F(width)} {F(height)} re S\n");
-    }
+    public void StrokeRect(float x, float y, float width, float height) => _sb.Append(CultureInfo.InvariantCulture, $"{F(x)} {F(y)} {F(width)} {F(height)} re S\n");
 
     /// <summary>Draws a horizontal line.</summary>
     /// <param name="x1">Start X.</param>
     /// <param name="y">Y position.</param>
     /// <param name="x2">End X.</param>
-    public void HorizontalLine(float x1, float y, float x2)
-    {
-        _sb.Append(CultureInfo.InvariantCulture, $"{F(x1)} {F(y)} m {F(x2)} {F(y)} l S\n");
-    }
+    public void HorizontalLine(float x1, float y, float x2) => _sb.Append(CultureInfo.InvariantCulture, $"{F(x1)} {F(y)} m {F(x2)} {F(y)} l S\n");
 
     /// <summary>Draws a vertical line.</summary>
     /// <param name="x">X position.</param>
     /// <param name="y1">Start Y.</param>
     /// <param name="y2">End Y.</param>
-    public void VerticalLine(float x, float y1, float y2)
-    {
-        _sb.Append(CultureInfo.InvariantCulture, $"{F(x)} {F(y1)} m {F(x)} {F(y2)} l S\n");
-    }
+    public void VerticalLine(float x, float y1, float y2) => _sb.Append(CultureInfo.InvariantCulture, $"{F(x)} {F(y1)} m {F(x)} {F(y2)} l S\n");
 
     /// <summary>Draws text at the specified position.</summary>
     /// <param name="text">Text to render.</param>
@@ -144,17 +117,11 @@ internal sealed class PdfContentStream
 
     /// <summary>Appends raw content stream operators.</summary>
     /// <param name="content">Raw PDF operator string.</param>
-    public void AppendRaw(string content)
-    {
-        _sb.Append(content);
-    }
+    public void AppendRaw(string content) => _sb.Append(content);
 
     /// <summary>Gets the content stream bytes.</summary>
     /// <returns>ASCII-encoded content stream.</returns>
-    public byte[] ToBytes()
-    {
-        return Encoding.ASCII.GetBytes(_sb.ToString());
-    }
+    public byte[] ToBytes() => Encoding.ASCII.GetBytes(_sb.ToString());
 
     /// <summary>Converts a PDF font name to a resource key (e.g., "Helvetica-Bold" → "F2").</summary>
     /// <param name="pdfFontName">PDF base font name.</param>
@@ -200,10 +167,7 @@ internal sealed class PdfContentStream
         return sb.ToString();
     }
 
-    private static string F(float value)
-    {
-        return value.ToString("F2", CultureInfo.InvariantCulture);
-    }
+    private static string F(float value) => value.ToString("F2", CultureInfo.InvariantCulture);
 
     private static string EscapePdfString(string s)
     {

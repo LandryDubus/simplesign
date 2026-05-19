@@ -77,10 +77,7 @@ public sealed class SignatureManifest
     }
 
     /// <summary>Serializes to compact JSON (AOT-safe).</summary>
-    public byte[] ToJsonUtf8()
-    {
-        return JsonSerializer.SerializeToUtf8Bytes(this, ManifestJsonContext.Default.SignatureManifest);
-    }
+    public byte[] ToJsonUtf8() => JsonSerializer.SerializeToUtf8Bytes(this, ManifestJsonContext.Default.SignatureManifest);
 
     /// <summary>Deserializes from UTF-8 JSON bytes (AOT-safe).</summary>
     public static SignatureManifest? FromJsonUtf8(ReadOnlySpan<byte> utf8Json)

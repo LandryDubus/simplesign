@@ -28,11 +28,11 @@ internal static class InspectMapper
                     HasVri = doc.SecurityStore.HasVri
                 } : null
             },
-            Signatures = result.Signatures.Select(sig =>
+            Signatures = [.. result.Signatures.Select(sig =>
             {
                 var level = ConformanceDetector.Detect(sig, doc, result.Signatures);
                 return MapSignature(sig, level);
-            }).ToList()
+            })]
         };
     }
 
@@ -77,7 +77,7 @@ internal static class InspectMapper
                 SerialNumber = sig.Timestamp.SerialNumber,
                 TokenSize = sig.Timestamp.RawToken.Length
             } : null,
-            EmbeddedCertificates = sig.EmbeddedCertificates.Select(c => new EmbeddedCertDto
+            EmbeddedCertificates = [.. sig.EmbeddedCertificates.Select(c => new EmbeddedCertDto
             {
                 Subject = c.Subject,
                 Issuer = c.Issuer,
@@ -87,7 +87,7 @@ internal static class InspectMapper
                 NotBefore = c.NotBefore,
                 NotAfter = c.NotAfter,
                 IsExpired = c.IsExpired
-            }).ToList()
+            })]
         };
     }
 
@@ -107,11 +107,11 @@ internal static class InspectMapper
             NotAfter = cert.NotAfter,
             IsExpired = cert.IsExpired,
             HasNonRepudiation = cert.HasNonRepudiation,
-            KeyUsages = full ? cert.KeyUsages.ToList() : [],
-            ExtendedKeyUsages = full ? cert.ExtendedKeyUsages.ToList() : [],
+            KeyUsages = full ? [.. cert.KeyUsages] : [],
+            ExtendedKeyUsages = full ? [.. cert.ExtendedKeyUsages] : [],
             OcspUrl = full ? cert.OcspUrl : null,
             CrlUrl = full ? cert.CrlUrl : null,
-            AiaUrls = full ? cert.AiaUrls.ToList() : []
+            AiaUrls = full ? [.. cert.AiaUrls] : []
         };
     }
 

@@ -10,7 +10,7 @@ public sealed class PdfSignatureField
     public PdfByteRange ByteRange { get; init; } = new PdfByteRange();
 
     /// <summary>Raw DER-encoded CMS/PKCS#7 bytes from /Contents.</summary>
-    public byte[] ContentsBytes { get; init; } = Array.Empty<byte>();
+    public byte[] ContentsBytes { get; init; } = [];
 
     /// <summary>Indicates whether the field contains a signature.</summary>
     public bool IsSigned => ContentsBytes.Length != 0;

@@ -16,15 +16,9 @@ namespace SimpleSign.PAdES.Tests;
 /// </summary>
 public sealed class RobustnessTests
 {
-    private static byte[] BuildMinimalPdf()
-    {
-        return Encoding.Latin1.GetBytes("%PDF-1.7\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>\nendobj\nxref\n0 4\n0000000000 65535 f \n0000000009 00000 n \n0000000058 00000 n \n0000000115 00000 n \ntrailer\n<< /Size 4 /Root 1 0 R >>\nstartxref\n190\n%%EOF");
-    }
+    private static byte[] BuildMinimalPdf() => Encoding.Latin1.GetBytes("%PDF-1.7\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>\nendobj\nxref\n0 4\n0000000000 65535 f \n0000000009 00000 n \n0000000058 00000 n \n0000000115 00000 n \ntrailer\n<< /Size 4 /Root 1 0 R >>\nstartxref\n190\n%%EOF");
 
-    private static byte[] BuildHeaderOnlyPdf()
-    {
-        return Encoding.Latin1.GetBytes("%PDF-1.4\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>\nendobj\nxref\n0 4\n0000000000 65535 f \n0000000009 00000 n \n0000000058 00000 n \n0000000115 00000 n \ntrailer\n<< /Size 4 /Root 1 0 R >>\nstartxref\n190\n%%EOF");
-    }
+    private static byte[] BuildHeaderOnlyPdf() => Encoding.Latin1.GetBytes("%PDF-1.4\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>\nendobj\nxref\n0 4\n0000000000 65535 f \n0000000009 00000 n \n0000000058 00000 n \n0000000115 00000 n \ntrailer\n<< /Size 4 /Root 1 0 R >>\nstartxref\n190\n%%EOF");
 
     private static X509Certificate2 CreateCert(string subject = "CN=Robustness Test, O=Tests, C=BR")
     {
@@ -49,7 +43,7 @@ public sealed class RobustnessTests
         return new PdfSignatureValidator(new ValidationOptions
         {
             CheckRevocation = false,
-            TrustedRoots = certs.ToList()
+            TrustedRoots = [.. certs]
         });
     }
 
@@ -117,9 +111,9 @@ public sealed class RobustnessTests
     }
 
     [Theory(DisplayName = "Signing with Unicode name (Japanese, Arabic, emoji) does not crash")]
-    [InlineData(new object[] { "田中太郎" })]
-    [InlineData(new object[] { "محمد أحمد" })]
-    [InlineData(new object[] { "\ud83d\udd12\ud83d\udcc4✅" })]
+    [InlineData(["田中太郎"])]
+    [InlineData(["محمد أحمد"])]
+    [InlineData(["\ud83d\udd12\ud83d\udcc4✅"])]
     public async Task Robustness_UnicodeSignerName_DoesNotCrash(string unicodeName)
     {
         using X509Certificate2 cert = CreateCert();

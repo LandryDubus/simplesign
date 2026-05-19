@@ -102,10 +102,7 @@ public sealed class RevocationUrlExtractionTests
     }
 
     [Fact(DisplayName = "ParseAiaUri returns null on malformed bytes")]
-    public void ParseAiaUri_GarbageBytes_ReturnsNull()
-    {
-        OcspClient.ParseAiaUri([0xFF, 0x01, 0x02], OcspMethodOid).ShouldBeNull();
-    }
+    public void ParseAiaUri_GarbageBytes_ReturnsNull() => OcspClient.ParseAiaUri([0xFF, 0x01, 0x02], OcspMethodOid).ShouldBeNull();
 
     // ── CrlClient.GetCrlUrl ──────────────────────────────────────────────────
 

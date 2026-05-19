@@ -37,7 +37,7 @@ public sealed class TsaPool
             throw new ArgumentException("At least one TSA URL is required.", nameof(tsaUrls));
         }
 
-        _endpoints = urls.Select(u => new TsaEndpoint(u)).ToArray();
+        _endpoints = [.. urls.Select(u => new TsaEndpoint(u))];
         _logger = logger ?? NullLogger.Instance;
     }
 
@@ -110,14 +110,14 @@ public sealed class TsaPool
     /// <summary>Returns the health status of all configured TSA endpoints.</summary>
     public IReadOnlyList<TsaEndpointStatus> GetEndpointStatuses()
     {
-        return _endpoints.Select((e, i) => new TsaEndpointStatus
+        return [.. _endpoints.Select((e, i) => new TsaEndpointStatus
         {
             Url = e.Url,
             IsHealthy = e.IsHealthy(FailureThreshold, RecoveryInterval),
             ConsecutiveFailures = e.ConsecutiveFailures,
             LastFailureUtc = e.LastFailureUtc,
             IsPrimary = i == Volatile.Read(ref _primaryIndex)
-        }).ToArray();
+        })];
     }
 
     /// <summary>Resets all endpoints to healthy state.</summary>
@@ -160,10 +160,7 @@ public sealed class TsaPool
             return ticks == 0 || DateTime.UtcNow - new DateTime(ticks, DateTimeKind.Utc) >= recoveryInterval;
         }
 
-        public void RecordSuccess()
-        {
-            Volatile.Write(ref _consecutiveFailures, 0);
-        }
+        public void RecordSuccess() => Volatile.Write(ref _consecutiveFailures, 0);
 
         public void RecordFailure()
         {

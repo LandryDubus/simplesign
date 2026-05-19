@@ -128,7 +128,7 @@ public sealed class BatchSignerTests
     [Fact(DisplayName = "BatchSignResult IsSuccess reflects Error state")]
     public void BatchSignResult_IsSuccess()
     {
-        var success = new BatchSignResult("ok", new byte[] { 1 }, null);
+        var success = new BatchSignResult("ok", [1], null);
         success.IsSuccess.ShouldBeTrue();
 
         var failure = new BatchSignResult("fail", null, new InvalidOperationException("test"));

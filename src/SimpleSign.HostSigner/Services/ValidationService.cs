@@ -23,7 +23,7 @@ internal static class ValidationService
         }
         catch { /* best-effort */ }
 
-        return results.Select(r => new ValidateResultDto
+        return [.. results.Select(r => new ValidateResultDto
         {
             FieldName = r.FieldName,
             IsValid = r.IsValid,
@@ -39,9 +39,9 @@ internal static class ValidationService
             IsChainTrustWarning = r.IsChainTrustWarning,
             HasValidTimestamp = r.HasValidTimestamp,
             SigningTime = r.SigningTime,
-            Errors = r.Errors.ToList(),
-            Warnings = r.Warnings.ToList()
-        }).ToList();
+            Errors = [.. r.Errors],
+            Warnings = [.. r.Warnings]
+        })];
     }
 
     private static string FormatLevel(PAdESConformanceLevel level) => level switch

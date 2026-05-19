@@ -42,7 +42,7 @@ public sealed class CertificateChainUtilityTests
     public void ExtractAiaUrls_ValidAsn1_ReturnsUrls()
     {
         byte[] data = BuildAiaExtensionBytes("http://example.com/ca.crt");
-        List<string> list = CertificateChainUtility.ExtractAiaUrls(data).ToList();
+        List<string> list = [.. CertificateChainUtility.ExtractAiaUrls(data)];
         list.Count().ShouldBe(1);
         list[0].ShouldBe("http://example.com/ca.crt");
     }
@@ -51,7 +51,7 @@ public sealed class CertificateChainUtilityTests
     public void ExtractAiaUrls_InvalidAsn1_FallsBackToTextSearch()
     {
         byte[] bytes = Encoding.ASCII.GetBytes("garbage http://example.com/ca.crt more garbage");
-        List<string> list = CertificateChainUtility.ExtractAiaUrls(bytes).ToList();
+        List<string> list = [.. CertificateChainUtility.ExtractAiaUrls(bytes)];
         list.Count().ShouldBe(1);
         list[0].ShouldBe("http://example.com/ca.crt");
     }
@@ -59,7 +59,7 @@ public sealed class CertificateChainUtilityTests
     [Fact(DisplayName = "Empty data returns empty AIA URL list")]
     public void ExtractAiaUrls_EmptyData_ReturnsEmpty()
     {
-        List<string> list = CertificateChainUtility.ExtractAiaUrls(Array.Empty<byte>()).ToList();
+        List<string> list = [.. CertificateChainUtility.ExtractAiaUrls([])];
         list.ShouldBeEmpty("");
     }
 
@@ -67,14 +67,14 @@ public sealed class CertificateChainUtilityTests
     public void LoadCertsFromBytes_ValidDer_ReturnsCert()
     {
         using X509Certificate2 x509Certificate = TestCertificateFactory.CreateSelfSignedCert();
-        List<X509Certificate2> actualValue = CertificateChainUtility.LoadCertsFromBytes(x509Certificate.RawData).ToList();
+        List<X509Certificate2> actualValue = [.. CertificateChainUtility.LoadCertsFromBytes(x509Certificate.RawData)];
         actualValue.Count().ShouldBe(1, "");
     }
 
     [Fact(DisplayName = "Invalid bytes return empty or throw platform exception")]
     public void LoadCertsFromBytes_GarbageBytes_ReturnsEmptyOrThrowsPlatformException()
     {
-        Func<List<X509Certificate2>> func = () => CertificateChainUtility.LoadCertsFromBytes(new byte[2] { 255, 254 }).ToList();
+        Func<List<X509Certificate2>> func = () => [.. CertificateChainUtility.LoadCertsFromBytes([255, 254])];
         // Behavior varies by platform and .NET version — either empty or PlatformNotSupportedException
         try
         {
@@ -87,22 +87,16 @@ public sealed class CertificateChainUtilityTests
     }
 
     [Fact(DisplayName = "Subject with CN extracts short name correctly")]
-    public void ShortName_WithCn_ExtractsCn()
-    {
-        CertificateChainUtility.ShortName("CN=Fulano, O=Org").ShouldBe("Fulano", "");
-    }
+    public void ShortName_WithCn_ExtractsCn() => CertificateChainUtility.ShortName("CN=Fulano, O=Org").ShouldBe("Fulano", "");
 
     [Fact(DisplayName = "Subject without CN returns full subject")]
-    public void ShortName_WithoutCn_ReturnsFullSubject()
-    {
-        CertificateChainUtility.ShortName("O=Org").ShouldBe("O=Org", "");
-    }
+    public void ShortName_WithoutCn_ReturnsFullSubject() => CertificateChainUtility.ShortName("O=Org").ShouldBe("O=Org", "");
 
     [Fact(DisplayName = "Certificate without AIA extension returns empty list")]
     public async Task DownloadAiaCertsAsync_NoAiaExtension_ReturnsEmpty()
     {
         using X509Certificate2 cert = TestCertificateFactory.CreateSelfSignedCert();
-        using HttpClient httpClient = MockHttpHandler.ForGetBytes(Array.Empty<byte>());
+        using HttpClient httpClient = MockHttpHandler.ForGetBytes([]);
         List<string> warnings = new List<string>();
         (await CertificateChainUtility.DownloadAiaCertsAsync(httpClient, cert, null, warnings, CancellationToken.None)).ShouldBeEmpty("");
     }

@@ -43,7 +43,7 @@ public sealed class PdfStructureReaderTests
                                           out long offset2, out long length2,
                                           out byte[] cmsBytes)
     {
-        cmsBytes = new byte[] { 0x30, 0x06, 0x02, 0x01, 0x01, 0x02, 0x01, 0x02 };
+        cmsBytes = [0x30, 0x06, 0x02, 0x01, 0x01, 0x02, 0x01, 0x02];
         string cmsHex = Convert.ToHexString(cmsBytes).ToLowerInvariant();
         // Padding to 32 hex chars (16 bytes reserved)
         string contentsPadded = cmsHex.PadRight(32, '0');
@@ -124,7 +124,7 @@ public sealed class PdfStructureReaderTests
     public async Task ReadSignatureFields_NonSeekableStream_ThrowsArgumentException()
     {
         var reader = new PdfStructureReader();
-        var nonSeekable = new NonSeekableStream(new byte[] { 0x25, 0x50, 0x44, 0x46 });
+        var nonSeekable = new NonSeekableStream([0x25, 0x50, 0x44, 0x46]);
         await Assert.ThrowsAsync<ArgumentException>(
             () => PdfStructureReader.ReadSignatureFieldsAsync(nonSeekable));
     }
@@ -242,7 +242,7 @@ public sealed class PdfStructureReaderTests
     [Fact(DisplayName = "Field with Contents returns IsSigned true")]
     public void PdfSignatureField_WithContents_IsSignedReturnsTrue()
     {
-        var field = new PdfSignatureField { ContentsBytes = new byte[] { 0x30 } };
+        var field = new PdfSignatureField { ContentsBytes = [0x30] };
         field.IsSigned.ShouldBeTrue();
     }
 

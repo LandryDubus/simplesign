@@ -20,10 +20,7 @@ internal sealed class PdfObjectWriter
 
     /// <summary>Allocates the next object number.</summary>
     /// <returns>The allocated object number.</returns>
-    public int AllocateObject()
-    {
-        return _nextObjNum++;
-    }
+    public int AllocateObject() => _nextObjNum++;
 
     /// <summary>Writes a PDF object with the given content.</summary>
     /// <param name="objNum">Object number.</param>

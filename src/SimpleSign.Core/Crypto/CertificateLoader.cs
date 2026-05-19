@@ -10,35 +10,32 @@ namespace SimpleSign.Core.Crypto;
 internal static class CertificateLoader
 {
     /// <summary>Loads a DER-encoded X.509 certificate from a byte array.</summary>
-    internal static X509Certificate2 LoadCertificate(byte[] data)
-    {
+    internal static X509Certificate2 LoadCertificate(byte[] data) =>
 #if NET9_0_OR_GREATER
-        return X509CertificateLoader.LoadCertificate(data);
+        X509CertificateLoader.LoadCertificate(data);
 #else
-        return new X509Certificate2(data);
+        new X509Certificate2(data);
 #endif
-    }
+
 
     /// <summary>Loads a DER-encoded X.509 certificate from a read-only span.</summary>
-    internal static X509Certificate2 LoadCertificate(ReadOnlySpan<byte> data)
-    {
+    internal static X509Certificate2 LoadCertificate(ReadOnlySpan<byte> data) =>
 #if NET9_0_OR_GREATER
-        return X509CertificateLoader.LoadCertificate(data);
+        X509CertificateLoader.LoadCertificate(data);
 #else
-        return new X509Certificate2(data.ToArray());
+        new X509Certificate2(data.ToArray());
 #endif
-    }
+
 
     /// <summary>Loads a PKCS#12 (PFX) file from disk.</summary>
-    internal static X509Certificate2 LoadPkcs12FromFile(string path, string? password)
-    {
+    internal static X509Certificate2 LoadPkcs12FromFile(string path, string? password) =>
 #if NET9_0_OR_GREATER
-        return X509CertificateLoader.LoadPkcs12FromFile(path, password);
+        X509CertificateLoader.LoadPkcs12FromFile(path, password);
 #else
         // On macOS + .NET 8, Apple Crypto rejects null password — use empty string.
-        return new X509Certificate2(path, password ?? string.Empty);
+        new X509Certificate2(path, password ?? string.Empty);
 #endif
-    }
+
 
     /// <summary>
     /// Loads all certificates from a PKCS#12 (PFX) file, including any embedded chain certificates.
@@ -51,16 +48,15 @@ internal static class CertificateLoader
     }
 
     /// <summary>Loads a PKCS#12 (PFX) from a byte array.</summary>
-    internal static X509Certificate2 LoadPkcs12(byte[] data, string? password)
-    {
+    internal static X509Certificate2 LoadPkcs12(byte[] data, string? password) =>
 #if NET9_0_OR_GREATER
-        return X509CertificateLoader.LoadPkcs12(data, password);
+        X509CertificateLoader.LoadPkcs12(data, password);
 #else
 #pragma warning disable SYSLIB0057
-        return new X509Certificate2(data, password ?? string.Empty);
+        new X509Certificate2(data, password ?? string.Empty);
 #pragma warning restore SYSLIB0057
 #endif
-    }
+
 
     /// <summary>Loads a collection of certificates from a PKCS#12 (PFX) byte array.</summary>
     internal static X509Certificate2Collection LoadPkcs12Collection(

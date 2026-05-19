@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.RegularExpressions;
+using Microsoft.Extensions.Logging;
 using SimpleSign.Core.Crypto;
 using SimpleSign.Core.Inspection;
 using SimpleSign.PAdES.Validation;
@@ -18,11 +19,13 @@ public static partial class PdfSignatureInspector
     /// No network calls are made and no validation is performed.
     /// </summary>
     /// <param name="pdfStream">A seekable stream containing the PDF document.</param>
+    /// <param name="logger">Optional logger for diagnostic messages.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>A complete inspection result with document metadata and signature details.</returns>
     /// <exception cref="ArgumentException">Thrown when the stream is not seekable.</exception>
     public static async Task<PdfInspectionResult> InspectAsync(
         Stream pdfStream,
+        ILogger? logger = null,
         CancellationToken cancellationToken = default)
     {
         if (!pdfStream.CanSeek)
@@ -46,7 +49,7 @@ public static partial class PdfSignatureInspector
                 continue;
             }
 
-            var sigInfo = InspectSignatureField(field);
+            var sigInfo = InspectSignatureField(field, logger);
             signatures.Add(sigInfo);
         }
 
@@ -66,15 +69,16 @@ public static partial class PdfSignatureInspector
         };
     }
 
-    private static SignatureFieldInfo InspectSignatureField(PdfSignatureField field)
+    private static SignatureFieldInfo InspectSignatureField(PdfSignatureField field, ILogger? logger = null)
     {
         CmsSignedData? cms = null;
         try
         {
             cms = CmsParser.Parse(field.ContentsBytes);
         }
-        catch
+        catch (Exception ex)
         {
+            logger?.InspectCmsParseFailed(field.FieldName, ex.Message);
             // CMS parsing failed — return field with minimal info
             return new SignatureFieldInfo
             {

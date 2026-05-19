@@ -190,4 +190,16 @@ internal static partial class Log
     [LoggerMessage(EventId = 3410, Level = LogLevel.Warning,
         Message = "CRL extraction from PDF failed: {Message}")]
     internal static partial void CrlExtractionFromPdfFailed(this ILogger logger, string message);
+
+    // ── Inspector (35xx) ──────────────────────────────────────────────
+
+    [LoggerMessage(EventId = 3500, Level = LogLevel.Warning,
+        Message = "CMS parsing failed for signature field '{FieldName}': {Message}")]
+    internal static partial void InspectCmsParseFailed(this ILogger logger, string fieldName, string message);
+
+    // ── LTV Embedder (36xx) ───────────────────────────────────────────
+
+    [LoggerMessage(EventId = 3600, Level = LogLevel.Debug,
+        Message = "No revocation data (CRL/OCSP) was collected — LTV/DSS will not be embedded")]
+    internal static partial void LtvNoRevocationDataCollected(this ILogger logger);
 }

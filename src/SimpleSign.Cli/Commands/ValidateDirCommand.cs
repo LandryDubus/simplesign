@@ -92,7 +92,7 @@ internal sealed class ValidateDirCommand : AsyncCommand<ValidateDirCommand.Setti
             try
             {
                 await using var inspectStream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read, 4096, FileOptions.Asynchronous);
-                var inspection = await PdfSignatureInspector.InspectAsync(inspectStream, cancellationToken).ConfigureAwait(false);
+                var inspection = await PdfSignatureInspector.InspectAsync(inspectStream, cancellationToken: cancellationToken).ConfigureAwait(false);
                 conformanceLevels = ConformanceDetector.DetectAll(inspection)
                     .GroupBy(x => x.Signature.FieldName)
                     .ToDictionary(g => g.Key, g => g.First().Level);

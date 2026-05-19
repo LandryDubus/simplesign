@@ -44,7 +44,7 @@ internal sealed class InspectCommand : AsyncCommand<InspectCommand.Settings>
     protected override async Task<int> ExecuteAsync(CommandContext context, Settings settings, CancellationToken cancellationToken)
     {
         await using var stream = File.OpenRead(settings.InputPath);
-        var result = await PdfSignatureInspector.InspectAsync(stream, cancellationToken);
+        var result = await PdfSignatureInspector.InspectAsync(stream, cancellationToken: cancellationToken);
         var fileName = Path.GetFileName(settings.InputPath);
 
         if (settings.Json)

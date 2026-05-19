@@ -104,6 +104,7 @@ public sealed class LtvEmbedder
 
         if (crlData is [] && ocspData is [])
         {
+            _logger.LtvNoRevocationDataCollected();
             return signedPdf;
         }
 

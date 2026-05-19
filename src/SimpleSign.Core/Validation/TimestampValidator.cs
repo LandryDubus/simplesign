@@ -142,6 +142,8 @@ internal static class TimestampValidator
         byte[]? tsaSignerInfoSignature = null;
         string? tsaSignerDigestOid = null;
         string? tsaSignerSigAlgOid = null;
+        ReadOnlyMemory<byte> signerIssuerRaw = default;
+        ReadOnlyMemory<byte> signerSerialBytes = default;
         try
         {
             var tsaTokenReader2 = new AsnReader(timestampToken, AsnEncodingRules.BER);
@@ -175,7 +177,10 @@ internal static class TimestampValidator
                 {
                     var si = siSet.ReadSequence();
                     _ = si.ReadInteger(); // version
-                    si.ReadEncodedValue(); // issuerAndSerialNumber
+                    // issuerAndSerialNumber — parse to identify signer cert
+                    var ias = si.ReadSequence();
+                    signerIssuerRaw = ias.ReadEncodedValue();
+                    signerSerialBytes = ias.ReadIntegerBytes();
                     var digestAlgSeq = si.ReadSequence();
                     tsaSignerDigestOid = digestAlgSeq.ReadObjectIdentifier();
                     // signedAttrs [0] IMPLICIT OPTIONAL
@@ -190,6 +195,21 @@ internal static class TimestampValidator
             }
         }
         catch (AsnContentException ex) { logger?.TsaDataExtractionFailed(ex.Message); }
+
+        // Identify signer cert from embedded certificates via issuerAndSerialNumber
+        if (tsaCerts.Count > 1 && !signerIssuerRaw.IsEmpty)
+        {
+            var signerCert = tsaCerts.FirstOrDefault(c =>
+                c.IssuerName.RawData.AsSpan().SequenceEqual(signerIssuerRaw.Span) &&
+                c.SerialNumberBytes.Span.SequenceEqual(signerSerialBytes.Span));
+            if (signerCert is not null && tsaCerts[0] != signerCert)
+            {
+                // Move signer cert to position [0] so VerifyTsaSignature uses the correct one
+                tsaCerts.Remove(signerCert);
+                tsaCerts.Insert(0, signerCert);
+                logger?.TsaSignerCertIdentified(signerCert.Subject);
+            }
+        }
 
         return new ParsedTsaSignerInfo(tsaCerts, tsaSignerInfoSignedAttrs, tsaSignerInfoSignature, tsaSignerDigestOid, tsaSignerSigAlgOid);
     }

@@ -109,6 +109,10 @@ internal static partial class Log
         Message = "OCSP response: certificate status is 'revoked'")]
     internal static partial void OcspStatusRevoked(this ILogger logger);
 
+    [LoggerMessage(EventId = 2617, Level = LogLevel.Warning,
+        Message = "OCSP issuer certificate not found in chain for '{Subject}' — issuerKeyHash will use cert's own key (may be imprecise)")]
+    internal static partial void OcspIssuerCertNotFound(this ILogger logger, string subject);
+
     // ── Timestamp Client (27xx) ──────────────────────────────────────
 
     [LoggerMessage(EventId = 2710, Level = LogLevel.Debug,
@@ -200,6 +204,10 @@ internal static partial class Log
     [LoggerMessage(EventId = 3612, Level = LogLevel.Warning,
         Message = "TSA data extraction failed: {Message}")]
     internal static partial void TsaDataExtractionFailed(this ILogger logger, string message);
+
+    [LoggerMessage(EventId = 3613, Level = LogLevel.Debug,
+        Message = "TSA signer cert identified via issuerAndSerialNumber: {Subject}")]
+    internal static partial void TsaSignerCertIdentified(this ILogger logger, string subject);
 
     // ── HTTP Resilience (35xx) ───────────────────────────────────────
 

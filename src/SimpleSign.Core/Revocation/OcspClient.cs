@@ -41,6 +41,10 @@ internal sealed class OcspClient
         var issuerCert = chain.FirstOrDefault(c =>
             c.SubjectName.RawData.AsSpan().SequenceEqual(cert.IssuerName.RawData)) ??
             chain.FirstOrDefault(c => string.Equals(c.Subject, cert.Issuer, StringComparison.OrdinalIgnoreCase));
+        if (issuerCert is null)
+        {
+            _logger.OcspIssuerCertNotFound(cert.Subject);
+        }
         var (isValid, _) = await FetchOcspResponseAsync(cert, issuerCert, ocspUrl, ct).ConfigureAwait(false);
         return isValid;
     }

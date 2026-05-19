@@ -91,7 +91,8 @@ public sealed class TimestampClient
         ArgumentNullException.ThrowIfNull(cms);
         try
         {
-            var reader = new AsnReader(cms, AsnEncodingRules.DER);
+            // BER: some CAs produce BER-encoded CMS (indefinite length, etc.)
+            var reader = new AsnReader(cms, AsnEncodingRules.BER);
             var contentInfo = reader.ReadSequence();
             _ = contentInfo.ReadObjectIdentifier();
             var wrapper = contentInfo.ReadSequence(new Asn1Tag(TagClass.ContextSpecific, 0, true));
@@ -199,7 +200,8 @@ public sealed class TimestampClient
         //   status PKIStatusInfo,
         //   timeStampToken TimeStampToken OPTIONAL
         // }
-        var reader = new AsnReader(timestampResponse, AsnEncodingRules.DER);
+        // BER: some TSA servers (e.g. Gov.br ITI) may respond with BER encoding
+        var reader = new AsnReader(timestampResponse, AsnEncodingRules.BER);
         var seq = reader.ReadSequence();
 
         // status PKIStatusInfo

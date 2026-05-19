@@ -170,10 +170,19 @@ internal static partial class DssExtractor
                         streamStart += 1;
                     }
 
-                    int streamEnd = IndexOfBytesFrom(data, "\nendstream"u8, streamStart);
+                    int streamEnd = IndexOfBytesFrom(data, "endstream"u8, streamStart);
                     if (streamEnd < 0)
                     {
                         continue;
+                    }
+                    // PDF spec: stream data ends before EOL + "endstream". Trim trailing \r\n or \n.
+                    if (streamEnd >= 2 && data[streamEnd - 2] == '\r' && data[streamEnd - 1] == '\n')
+                    {
+                        streamEnd -= 2;
+                    }
+                    else if (streamEnd >= 1 && data[streamEnd - 1] == '\n')
+                    {
+                        streamEnd -= 1;
                     }
 
                     byte[] streamBytes = data[streamStart..streamEnd].ToArray();

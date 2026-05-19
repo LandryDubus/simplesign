@@ -58,7 +58,7 @@ internal sealed class ValidateCommand : AsyncCommand<ValidateCommand.Settings>
 
         // Run inspection to get PAdES conformance levels and AEA info
         stream.Position = 0;
-        var inspection = await PdfSignatureInspector.InspectAsync(stream, cancellationToken);
+        var inspection = await PdfSignatureInspector.InspectAsync(stream, cancellationToken: cancellationToken);
         var conformanceLevels = ConformanceDetector.DetectAll(inspection)
             .GroupBy(x => x.Signature.FieldName)
             .ToDictionary(g => g.Key, g => g.First().Level);

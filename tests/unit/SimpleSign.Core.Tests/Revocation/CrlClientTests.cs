@@ -15,11 +15,16 @@ public sealed class CrlClientTests
     private static byte[] BuildCrl(
         byte[] issuerNameRawData,
         byte[]? revokedSerial = null,
-        DateTimeOffset? nextUpdate = null)
+        DateTimeOffset? nextUpdate = null,
+        bool v2 = false)
     {
         var tbsWriter = new AsnWriter(AsnEncodingRules.DER);
         using (tbsWriter.PushSequence()) // TBSCertList
         {
+            // version INTEGER (bare, no context tag) — only present in v2 CRLs
+            if (v2)
+                tbsWriter.WriteInteger(1);
+
             // signature AlgorithmIdentifier (sha256WithRSAEncryption)
             using (tbsWriter.PushSequence())
             {
@@ -266,6 +271,22 @@ public sealed class CrlClientTests
         }
 
         return writer.Encode();
+    }
+
+    [Fact(DisplayName = "v2 CRL (with bare version INTEGER) is parsed correctly")]
+    public void IsSerialInCrl_V2CrlWithVersionField_Parsed()
+    {
+        // RFC 5280 v2 CRLs prepend a bare INTEGER (value=1) before the AlgorithmIdentifier.
+        // This matches the structure of real Brazilian ICP-Brasil / Gov.br CRLs.
+        using var issuer = TestCertificateFactory.CreateCaCert();
+        byte[] serial = [0x0A, 0x0B, 0x0C];
+        using var leaf = TestCertificateFactory.CreateLeafCert(issuer, serialNumber: serial);
+
+        byte[] crl = BuildCrl(issuer.SubjectName.RawData, revokedSerial: serial,
+            nextUpdate: DateTimeOffset.UtcNow.AddYears(1), v2: true);
+
+        CrlClient.IsSerialInCrl(leaf, crl)!.Value.ShouldBeTrue(
+            "v2 CRL with bare version INTEGER should be parsed and revoked cert found");
     }
 
     // ── Instance method tests (mocked HTTP) ──────────────────────────────────

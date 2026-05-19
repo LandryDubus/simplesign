@@ -85,8 +85,9 @@ internal sealed class CrlClient
             // signatureValue BIT STRING (outer)
             byte[] crlSignature = crlSeq.ReadBitString(out _);
 
-            // version [0] OPTIONAL
-            if (tbsCrl.HasData && tbsCrl.PeekTag() == new Asn1Tag(TagClass.ContextSpecific, 0, false))
+            // version Version OPTIONAL — bare INTEGER (tag Universal 2), present in v2 CRLs.
+            // RFC 5280 TBSCertList defines version as a plain INTEGER with no context wrapper.
+            if (tbsCrl.HasData && tbsCrl.PeekTag() == new Asn1Tag(TagClass.Universal, (int)UniversalTagNumber.Integer, false))
             {
                 tbsCrl.ReadEncodedValue();
             }

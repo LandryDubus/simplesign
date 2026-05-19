@@ -5,6 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] - 2026-05-19
+
+### Fixed
+
+- **OCSP `certs[0]` SEQUENCE OF wrapper** — correctly unwrap the inner `SEQUENCE OF Certificate` inside the OCSP BasicOCSPResponse `certs [0] EXPLICIT` wrapper (was failing to load OCSP responder certs)
+- **CRL v2 bare version INTEGER** — handle the bare `INTEGER` version field in TBSCertList (v2 CRLs use `02 01 01` directly, not wrapped in a context tag like X.509 certs)
+- **CMS serial comparison** — use `ReadIntegerBytes` for serial number comparison to preserve DER leading zeros (e.g. serial `00BB3F...` was being truncated by `BigInteger.ToString("X")`)
+- **BER tolerance in extension parsers** — `CrlClient.GetCrlUrl`, `OcspClient.ParseAiaUri`, and `CertificateChainUtility.ExtractAiaUrls` now use `AsnEncodingRules.BER` (extensions can be BER-encoded; DER was silently losing revocation URLs)
+- **Issuer cert lookup** — compare by `SubjectName.RawData` bytes first in OCSP and revocation checker (string comparison failed for re-encoded DNs with different ASN.1 string types)
+- **TimestampClient BER tolerance** — `ExtractSignatureValue` and `ParseTimeStampResponse` now use BER instead of DER (tolerates Brazilian CAs and TSA servers with BER-encoded responses)
+- **TSA signer cert identification** — `TimestampValidator` now identifies the correct signer certificate via `issuerAndSerialNumber` instead of blindly using `Certificates[0]` (fixes multi-cert TSA tokens like PostSignum)
+- **DSS endstream detection** — `DssExtractor` now handles both `\r\n` and `\n` before the `endstream` keyword (PDF spec allows both; was silently losing embedded CRLs)
+- **CRL issuer DN matching** — tolerate UTF8String vs PrintableString encoding differences when matching CRL issuer to certificate issuer
+- **signingCertificate hash algorithm** — correctly use SHA-1 for V1 (`signingCertificate`) and SHA-256 for V2 (`signingCertificateV2`) attributes
+- **Inspector CMS parse failure** — `PdfSignatureInspector` now logs a warning when CMS parsing fails (was silently returning minimal info)
+- **CI formatting (IDE0055)** — enforce LF line endings via `.gitattributes` to prevent spurious formatting errors on Windows CI runners
+
+### Added
+
+- **Diagnostic logging** — 13 new structured log messages across revocation, OCSP, CMS parser, timestamp validator, inspector, and LTV embedder for improved troubleshooting in verbose mode
+- **CmsParser normalized issuer fallback** — 3-step signer cert lookup: exact bytes → normalized issuer → issuer-only (resilient to DN encoding differences)
+
+### Changed
+
+- **CLI renamed** — tool command changed from `simplesign-cli` to `simplesign`
+
 ## [0.2.0] - 2026-05-17
 
 ### Added
@@ -45,4 +71,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **HostSigner** — React/shadcn UI overhaul
 - **README** — comprehensive rewrite: lib-focused structure, real benchmark numbers, dependency clarity, merged enterprise features
 
+[0.2.1]: https://github.com/eupassarin/SimpleSign/releases/tag/v0.2.1
 [0.2.0]: https://github.com/eupassarin/SimpleSign/releases/tag/v0.2.0

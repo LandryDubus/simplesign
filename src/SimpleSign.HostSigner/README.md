@@ -137,10 +137,10 @@ Checks for updates against GitHub Releases.
 
 ```json
 {
-  "current": "0.1.0",
-  "latest": "0.2.0",
+  "current": "0.2.0",
+  "latest": "0.2.1",
   "updateAvailable": true,
-  "downloadUrl": "https://github.com/eupassarin/SimpleSign/releases/tag/v0.2.0"
+  "downloadUrl": "https://github.com/eupassarin/SimpleSign/releases/tag/v0.2.1"
 }
 ```
 

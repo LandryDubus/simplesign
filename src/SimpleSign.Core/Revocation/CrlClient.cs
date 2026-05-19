@@ -99,7 +99,7 @@ internal sealed class CrlClient
             // If the CRL issuer does not match the certificate issuer, this CRL is not relevant.
             // Check BEFORE signature verification to avoid calling VerifyCrlSignature with the wrong
             // issuer key (which would throw CryptographicException when iterating a chain's CRL set).
-            if (!crlIssuer.AsSpan().SequenceEqual(cert.IssuerName.RawData))
+            if (!IssuerMatchesCertificate(crlIssuer, cert.IssuerName))
             {
                 return null;
             }
@@ -205,6 +205,33 @@ internal sealed class CrlClient
         {
             logger?.CrlSerialCheckParsingFailed(ex.Message);
             return null;
+        }
+    }
+
+    /// <summary>
+    /// Compares a CRL issuer (raw DER bytes) against a certificate's issuer DN.
+    /// First attempts an exact raw-byte match (fast path). If that fails, falls back to a
+    /// normalized string comparison to tolerate encoding differences between CAs that use
+    /// different ASN.1 string types (UTF8String vs PrintableString) for the same DN value.
+    /// This is common in Brazilian ICP-Brasil / Gov.br CAs.
+    /// </summary>
+    private static bool IssuerMatchesCertificate(byte[] crlIssuerBytes, X500DistinguishedName certIssuer)
+    {
+        if (crlIssuerBytes.AsSpan().SequenceEqual(certIssuer.RawData))
+        {
+            return true; // exact DER match
+        }
+
+        // Fallback: normalize both DNs to string and compare case-insensitively.
+        // X500DistinguishedName.Name decodes the string values regardless of their ASN.1 string type.
+        try
+        {
+            var crlIssuerDn = new X500DistinguishedName(crlIssuerBytes);
+            return string.Equals(crlIssuerDn.Name, certIssuer.Name, StringComparison.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return false;
         }
     }
 

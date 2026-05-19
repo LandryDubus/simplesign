@@ -208,6 +208,66 @@ public sealed class CrlClientTests
             .ShouldBeFalse();
     }
 
+    [Fact(DisplayName = "CRL issuer encoded as UTF8String matches cert issuer encoded as PrintableString")]
+    public void IsSerialInCrl_IssuerEncodingMismatch_NormalizedComparisonSucceeds()
+    {
+        // Simulate a real-world scenario (e.g., Brazilian ICP-Brasil / Gov.br CAs) where the CRL
+        // encodes its issuer DN using UTF8String but the certificate's IssuerName uses PrintableString
+        // for the same string values. The raw bytes differ but the DN values are identical.
+        using var issuer = TestCertificateFactory.CreateCaCert("CN=Test CA, O=Org, C=BR");
+        using var leaf = TestCertificateFactory.CreateLeafCert(issuer);
+
+        // Re-encode the issuer DN with UTF8String instead of whatever the cert uses
+        byte[] utf8IssuerBytes = BuildDnWithUtf8String("Test CA", "Org", "BR");
+        byte[] crl = BuildCrl(utf8IssuerBytes, nextUpdate: DateTimeOffset.UtcNow.AddYears(1));
+
+        // Should NOT return null (should recognize the issuer despite encoding mismatch)
+        CrlClient.IsSerialInCrl(leaf, crl).ShouldNotBeNull(
+            "CRL with same DN values but different string encoding should be accepted");
+        CrlClient.IsSerialInCrl(leaf, crl)!.Value.ShouldBeFalse(
+            "non-revoked certificate should not be in CRL");
+    }
+
+    /// <summary>Builds a raw X.500 DN with UTF8String-encoded values (mirrors Brazilian CA CRL encoding).</summary>
+    private static byte[] BuildDnWithUtf8String(string cn, string o, string c)
+    {
+        var writer = new AsnWriter(AsnEncodingRules.DER);
+        using (writer.PushSequence()) // Name SEQUENCE
+        {
+            // C= (always PrintableString per RFC)
+            using (writer.PushSetOf())
+            {
+                using (writer.PushSequence())
+                {
+                    writer.WriteObjectIdentifier("2.5.4.6"); // id-at-countryName
+                    writer.WriteCharacterString(UniversalTagNumber.PrintableString, c);
+                }
+            }
+
+            // O= (UTF8String — this differs from certs that use PrintableString here)
+            using (writer.PushSetOf())
+            {
+                using (writer.PushSequence())
+                {
+                    writer.WriteObjectIdentifier("2.5.4.10"); // id-at-organizationName
+                    writer.WriteCharacterString(UniversalTagNumber.UTF8String, o);
+                }
+            }
+
+            // CN= (UTF8String)
+            using (writer.PushSetOf())
+            {
+                using (writer.PushSequence())
+                {
+                    writer.WriteObjectIdentifier("2.5.4.3"); // id-at-commonName
+                    writer.WriteCharacterString(UniversalTagNumber.UTF8String, cn);
+                }
+            }
+        }
+
+        return writer.Encode();
+    }
+
     // ── Instance method tests (mocked HTTP) ──────────────────────────────────
 
     [Fact(DisplayName = "CRL check via HTTP with empty CRL returns true")]

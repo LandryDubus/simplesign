@@ -8,6 +8,7 @@ using SimpleSign.Core.Crypto;
 using SimpleSign.Core.Revocation;
 using SimpleSign.Core.Validation;
 using SimpleSign.PAdES.Validation;
+using SimpleSign.TestHelpers;
 using Xunit;
 namespace SimpleSign.PAdES.Tests.Validation;
 
@@ -275,5 +276,85 @@ public sealed class PdfSignatureValidatorTests
         MemoryStream pdfStream = new MemoryStream(buffer);
         PdfSignatureValidator pdfSignatureValidator = new PdfSignatureValidator();
         (await pdfSignatureValidator.ValidateAsync(pdfStream)).ShouldBeEmpty("minimal PDF without signatures has no fields to validate");
+    }
+
+    [Fact(DisplayName = "CmsParser identifies signer cert when serial has leading-zero DER encoding (high-bit first byte)")]
+    public void CmsParser_SignerCertWithHighBitSerial_IdentifiesCorrectly()
+    {
+        // serial 0xBB 0x01 0x02 — first byte has high bit set.
+        // In DER INTEGER this encodes as "02 04 00 BB 01 02" (leading 00 to mark positive).
+        // cert.SerialNumber = "00BB0102". The old code did BigInteger.ToString("X") = "BB0102", which
+        // fails the OrdinalIgnoreCase comparison. The fix uses ReadIntegerBytes() + SerialNumberBytes.
+        byte[] serial = [0xBB, 0x01, 0x02];
+
+        using var ca = TestCertificateFactory.CreateCaCert();
+        using var leaf = TestCertificateFactory.CreateLeafCert(ca, "CN=High Bit Serial Test", serialNumber: serial);
+
+        byte[] cmsBytes = BuildMinimalCmsForSignerLookup(leaf.RawData, leaf.IssuerName.RawData, leaf.SerialNumberBytes.ToArray());
+
+        var result = CmsParser.Parse(cmsBytes);
+
+        result.SignerCertificate.ShouldNotBeNull(
+            $"signer cert should be found; leaf.SerialNumber={leaf.SerialNumber}");
+        result.SignerCertificate!.SerialNumber.ShouldBe(
+            leaf.SerialNumber,
+            "parser must match the cert with DER-encoded serial, including leading 00 byte");
+    }
+
+    /// <summary>
+    /// Builds a structurally valid but cryptographically unsigned CMS enough for CmsParser
+    /// to identify the signer certificate from the embedded cert and issuerAndSerialNumber.
+    /// </summary>
+    private static byte[] BuildMinimalCmsForSignerLookup(byte[] signerCertDer, byte[] issuerRawDn, byte[] serialBytes)
+    {
+        var w = new AsnWriter(AsnEncodingRules.DER);
+        using (w.PushSequence()) // ContentInfo
+        {
+            w.WriteObjectIdentifier("1.2.840.113549.1.7.2"); // id-signedData
+            using (w.PushSequence(new Asn1Tag(TagClass.ContextSpecific, 0, true))) // [0] EXPLICIT
+            {
+                using (w.PushSequence()) // SignedData
+                {
+                    w.WriteInteger(1); // version
+                    // digestAlgorithms SET OF AlgorithmIdentifier
+                    using (w.PushSetOf())
+                    {
+                        using (w.PushSequence())
+                        { w.WriteObjectIdentifier("2.16.840.1.101.3.4.2.1"); w.WriteNull(); }
+                    }
+                    // encapContentInfo { id-data }
+                    using (w.PushSequence())
+                    { w.WriteObjectIdentifier("1.2.840.113549.1.7.1"); }
+                    // certificates [0] IMPLICIT
+                    using (w.PushSequence(new Asn1Tag(TagClass.ContextSpecific, 0, true)))
+                    {
+                        w.WriteEncodedValue(signerCertDer);
+                    }
+                    // signerInfos SET OF SignerInfo
+                    using (w.PushSetOf())
+                    {
+                        using (w.PushSequence()) // SignerInfo
+                        {
+                            w.WriteInteger(1); // version
+                            // issuerAndSerialNumber
+                            using (w.PushSequence())
+                            {
+                                w.WriteEncodedValue(issuerRawDn); // issuer Name
+                                w.WriteInteger(new System.Numerics.BigInteger(serialBytes, isUnsigned: false, isBigEndian: true)); // serialNumber
+                            }
+                            // digestAlgorithm
+                            using (w.PushSequence())
+                            { w.WriteObjectIdentifier("2.16.840.1.101.3.4.2.1"); w.WriteNull(); }
+                            // signatureAlgorithm
+                            using (w.PushSequence())
+                            { w.WriteObjectIdentifier("1.2.840.113549.1.1.11"); w.WriteNull(); }
+                            // signature OCTET STRING (dummy)
+                            w.WriteOctetString(new byte[32]);
+                        }
+                    }
+                }
+            }
+        }
+        return w.Encode();
     }
 }

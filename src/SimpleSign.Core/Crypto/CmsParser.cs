@@ -189,15 +189,22 @@ internal static class CmsParser
             // issuerAndSerialNumber → identifies the certificate
             var ias = si.ReadSequence();
             ReadOnlyMemory<byte> issuerRaw = ias.ReadEncodedValue();
-            var serial = ias.ReadInteger();
-            string serialHex = serial.ToString("X");
+            // ReadIntegerBytes preserves leading-zero bytes (e.g. "00BB3F..." serials) unlike
+            // BigInteger.ToString("X") which would strip them, causing a mismatch with SerialNumberBytes.
+            ReadOnlyMemory<byte> serialBytes = ias.ReadIntegerBytes();
 
-            // Finds the signer certificate
+            // 1. Exact match: issuer raw bytes + serial bytes
             signerCert = embeddedCerts.FirstOrDefault(c =>
                 c.IssuerName.RawData.AsSpan().SequenceEqual(issuerRaw.Span) &&
-                c.SerialNumber.Equals(serialHex, StringComparison.OrdinalIgnoreCase));
+                c.SerialNumberBytes.Span.SequenceEqual(serialBytes.Span));
 
-            // P0: fallback removed — if not found by serial, try partial match (issuer DN only)
+            // 2. Normalized issuer (tolerates UTF8String vs PrintableString encoding differences) + serial
+            signerCert ??= embeddedCerts.FirstOrDefault(c =>
+                NormalizedIssuerMatches(c.IssuerName, issuerRaw.Span) &&
+                c.SerialNumberBytes.Span.SequenceEqual(serialBytes.Span));
+
+            // 3. Last resort: issuer raw bytes only (no serial check) — avoids null signerCert
+            //    when all else fails, accepting the risk of picking wrong cert from same issuer
             signerCert ??= embeddedCerts.FirstOrDefault(c =>
                 c.IssuerName.RawData.AsSpan().SequenceEqual(issuerRaw.Span));
             // If still not found, signerCert will be null — ValidateFieldAsync will report error
@@ -404,5 +411,28 @@ internal static class CmsParser
 
         return new ParsedSignedAttributes(messageDigest, signingTime, signingCertHash, signingCertHashAlgOid,
             commitmentTypeOid, signaturePolicyOid, manifestJson, contentTypeOid);
+    }
+
+    /// <summary>
+    /// Compares a raw DER-encoded issuer Name against a certificate's IssuerName.
+    /// First tries exact byte equality (fast path), then falls back to normalized string comparison
+    /// to tolerate re-encoding differences (e.g. UTF8String vs PrintableString) in the CMS issuer field.
+    /// </summary>
+    private static bool NormalizedIssuerMatches(X500DistinguishedName certIssuer, ReadOnlySpan<byte> issuerRaw)
+    {
+        if (certIssuer.RawData.AsSpan().SequenceEqual(issuerRaw))
+        {
+            return true;
+        }
+
+        try
+        {
+            var dn = new X500DistinguishedName(issuerRaw.ToArray());
+            return string.Equals(dn.Name, certIssuer.Name, StringComparison.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return false;
+        }
     }
 }

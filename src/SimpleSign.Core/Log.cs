@@ -37,6 +37,10 @@ internal static partial class Log
         Message = "Trying CRL download for {Subject} from {CrlUrl}")]
     internal static partial void TryingCrlDownload(this ILogger logger, string subject, string crlUrl);
 
+    [LoggerMessage(EventId = 2416, Level = LogLevel.Debug,
+        Message = "Embedded CRL skipped (not relevant for cert '{Subject}')")]
+    internal static partial void EmbeddedCrlSkipped(this ILogger logger, string subject);
+
     // ── CRL Client (25xx) ────────────────────────────────────────────
 
     [LoggerMessage(EventId = 2510, Level = LogLevel.Debug,
@@ -63,6 +67,18 @@ internal static partial class Log
         Message = "CRL URL extension parsing failed: {Message}")]
     internal static partial void CrlUrlExtensionParsingFailed(this ILogger logger, string message);
 
+    [LoggerMessage(EventId = 2516, Level = LogLevel.Debug,
+        Message = "CRL issuer does not match certificate issuer — skipping (not relevant for this cert)")]
+    internal static partial void CrlIssuerMismatch(this ILogger logger);
+
+    [LoggerMessage(EventId = 2517, Level = LogLevel.Debug,
+        Message = "CRL is expired (nextUpdate={NextUpdate}, referenceTime={ReferenceTime}) — skipping")]
+    internal static partial void CrlExpired(this ILogger logger, DateTimeOffset nextUpdate, DateTimeOffset referenceTime);
+
+    [LoggerMessage(EventId = 2518, Level = LogLevel.Debug,
+        Message = "CRL thisUpdate ({ThisUpdate}) is after signing time ({SigningTime}) — not valid for this signing event")]
+    internal static partial void CrlIssuedAfterSigningTime(this ILogger logger, DateTimeOffset thisUpdate, DateTimeOffset signingTime);
+
     // ── OCSP Client (26xx) ───────────────────────────────────────────
 
     [LoggerMessage(EventId = 2610, Level = LogLevel.Debug,
@@ -84,6 +100,14 @@ internal static partial class Log
     [LoggerMessage(EventId = 2614, Level = LogLevel.Warning,
         Message = "OCSP URL extension parsing failed: {Message}")]
     internal static partial void OcspUrlExtensionParsingFailed(this ILogger logger, string message);
+
+    [LoggerMessage(EventId = 2615, Level = LogLevel.Debug,
+        Message = "OCSP response: certificate status is 'good' (not revoked)")]
+    internal static partial void OcspStatusGood(this ILogger logger);
+
+    [LoggerMessage(EventId = 2616, Level = LogLevel.Warning,
+        Message = "OCSP response: certificate status is 'revoked'")]
+    internal static partial void OcspStatusRevoked(this ILogger logger);
 
     // ── Timestamp Client (27xx) ──────────────────────────────────────
 
@@ -150,6 +174,18 @@ internal static partial class Log
     [LoggerMessage(EventId = 2813, Level = LogLevel.Warning,
         Message = "SigningCertificateV2 parsing failed: {Message}")]
     internal static partial void SigningCertificateV2ParsingFailed(this ILogger logger, string message);
+
+    [LoggerMessage(EventId = 2815, Level = LogLevel.Debug,
+        Message = "Signer cert identified via normalized issuer fallback (encoding difference tolerated)")]
+    internal static partial void SignerCertNormalizedIssuerFallback(this ILogger logger);
+
+    [LoggerMessage(EventId = 2816, Level = LogLevel.Warning,
+        Message = "Signer certificate not found in embedded certs after all fallbacks")]
+    internal static partial void SignerCertNotFound(this ILogger logger);
+
+    [LoggerMessage(EventId = 2817, Level = LogLevel.Debug,
+        Message = "EncapContentInfo parsing failed: {Message}")]
+    internal static partial void EncapContentInfoParsingFailed(this ILogger logger, string message);
 
     // ── Timestamp Validator (36xx) ───────────────────────────────────
 

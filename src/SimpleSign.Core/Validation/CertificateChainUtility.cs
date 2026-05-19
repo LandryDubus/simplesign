@@ -23,7 +23,8 @@ internal static class CertificateChainUtility
         var urls = new List<string>();
         try
         {
-            var outer = new AsnReader(data, AsnEncodingRules.DER);
+            // Use BER: X.509 allows CAs to encode extension values in BER (not strict DER)
+            var outer = new AsnReader(data, AsnEncodingRules.BER);
             var seq = outer.ReadSequence();
             while (seq.HasData)
             {

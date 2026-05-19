@@ -42,7 +42,9 @@ internal sealed class RevocationChecker
         if (embeddedCrls.Count > 0)
         {
             _logger.CheckingEmbeddedCrls(embeddedCrls.Count, cert.Subject);
-            var issuerCert = chain.FirstOrDefault(c => c.Subject == cert.Issuer);
+            var issuerCert = chain.FirstOrDefault(c =>
+                c.SubjectName.RawData.AsSpan().SequenceEqual(cert.IssuerName.RawData)) ??
+                chain.FirstOrDefault(c => string.Equals(c.Subject, cert.Issuer, StringComparison.OrdinalIgnoreCase));
             foreach (var crlBytes in embeddedCrls)
             {
                 try
@@ -59,6 +61,7 @@ internal sealed class RevocationChecker
                         return (true, RevocationSource.EmbeddedCrl);
                     }
                     // null = CRL does not belong to this issuer or is expired — continue
+                    _logger.EmbeddedCrlSkipped(cert.Subject);
                 }
                 catch (Exception ex) when (ex is AsnContentException or CryptographicException)
                 {

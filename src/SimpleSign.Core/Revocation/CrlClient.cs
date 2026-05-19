@@ -102,6 +102,7 @@ internal sealed class CrlClient
             // issuer key (which would throw CryptographicException when iterating a chain's CRL set).
             if (!IssuerMatchesCertificate(crlIssuer, cert.IssuerName))
             {
+                logger?.CrlIssuerMismatch();
                 return null;
             }
 
@@ -168,12 +169,14 @@ internal sealed class CrlClient
             // CRL was already expired at signing time → not valid for this signing event
             if (nextUpdate.HasValue && nextUpdate.Value < referenceTime)
             {
+                logger?.CrlExpired(nextUpdate.Value, referenceTime);
                 return null;
             }
 
             // CRL was issued after the signing time → cannot cover this signing event
             if (signingTime.HasValue && thisUpdate.HasValue && thisUpdate.Value > signingTime.Value)
             {
+                logger?.CrlIssuedAfterSigningTime(thisUpdate.Value, signingTime.Value);
                 return null;
             }
 
@@ -284,7 +287,8 @@ internal sealed class CrlClient
 
         try
         {
-            var reader = new AsnReader(cdp.RawData, AsnEncodingRules.DER);
+            // Use BER: X.509 allows CAs to encode extension values in BER (not strict DER)
+            var reader = new AsnReader(cdp.RawData, AsnEncodingRules.BER);
             var cdpSeq = reader.ReadSequence();
             while (cdpSeq.HasData)
             {

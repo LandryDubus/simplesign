@@ -38,7 +38,9 @@ internal sealed class OcspClient
         string ocspUrl,
         CancellationToken ct)
     {
-        var issuerCert = chain.FirstOrDefault(c => c.Subject == cert.Issuer);
+        var issuerCert = chain.FirstOrDefault(c =>
+            c.SubjectName.RawData.AsSpan().SequenceEqual(cert.IssuerName.RawData)) ??
+            chain.FirstOrDefault(c => string.Equals(c.Subject, cert.Issuer, StringComparison.OrdinalIgnoreCase));
         var (isValid, _) = await FetchOcspResponseAsync(cert, issuerCert, ocspUrl, ct).ConfigureAwait(false);
         return isValid;
     }
@@ -252,8 +254,10 @@ internal sealed class OcspClient
                     switch (certStatusTag.TagValue)
                     {
                         case 0:
+                            logger?.OcspStatusGood();
                             return true;  // good
                         case 1:
+                            logger?.OcspStatusRevoked();
                             return false; // revoked
                         case 2:
                             throw new InvalidOperationException("OCSP response indicates certificate status is 'unknown'.");
@@ -345,7 +349,8 @@ internal sealed class OcspClient
     {
         try
         {
-            var reader = new AsnReader(rawAia, AsnEncodingRules.DER);
+            // Use BER: X.509 allows CAs to encode extension values in BER (not strict DER)
+            var reader = new AsnReader(rawAia, AsnEncodingRules.BER);
             var seq = reader.ReadSequence();
             while (seq.HasData)
             {

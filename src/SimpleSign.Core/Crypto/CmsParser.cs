@@ -57,7 +57,7 @@ internal static class CmsParser
         string digestOid = ParseDigestAlgorithm(signedData);
 
         // encapContentInfo — extract eContentType and, for document timestamps, TSTInfo messageImprint
-        (string? eContentTypeOid, string? tstHashAlgOid, byte[]? tstHashBytes) = ParseEncapContentInfo(signedData);
+        (string? eContentTypeOid, string? tstHashAlgOid, byte[]? tstHashBytes) = ParseEncapContentInfo(signedData, logger);
 
         var embeddedCerts = ParseEmbeddedCertificates(signedData, logger);
 
@@ -111,7 +111,7 @@ internal static class CmsParser
     /// eContent contains the TSTInfo from which we extract messageImprint.
     /// </summary>
     private static (string? EContentTypeOid, string? TstHashAlgOid, byte[]? TstHashBytes)
-        ParseEncapContentInfo(AsnReader signedData)
+        ParseEncapContentInfo(AsnReader signedData, ILogger? logger = null)
     {
         const string IdCtTstInfo = "1.2.840.113549.1.9.16.1.4";
 
@@ -140,9 +140,10 @@ internal static class CmsParser
 
             return (eContentTypeOid, hashAlgOid, hashedMessage);
         }
-        catch (Exception)
+        catch (Exception ex)
         {
             // If parsing fails, don't block the rest of the validation pipeline
+            logger?.EncapContentInfoParsingFailed(ex.Message);
             return (null, null, null);
         }
     }
@@ -202,12 +203,20 @@ internal static class CmsParser
             signerCert ??= embeddedCerts.FirstOrDefault(c =>
                 NormalizedIssuerMatches(c.IssuerName, issuerRaw.Span) &&
                 c.SerialNumberBytes.Span.SequenceEqual(serialBytes.Span));
+            if (signerCert is not null && !signerCert.IssuerName.RawData.AsSpan().SequenceEqual(issuerRaw.Span))
+            {
+                logger?.SignerCertNormalizedIssuerFallback();
+            }
 
             // 3. Last resort: issuer raw bytes only (no serial check) — avoids null signerCert
             //    when all else fails, accepting the risk of picking wrong cert from same issuer
             signerCert ??= embeddedCerts.FirstOrDefault(c =>
                 c.IssuerName.RawData.AsSpan().SequenceEqual(issuerRaw.Span));
             // If still not found, signerCert will be null — ValidateFieldAsync will report error
+            if (signerCert is null)
+            {
+                logger?.SignerCertNotFound();
+            }
 
             // digestAlgorithm
             _ = si.ReadEncodedValue();

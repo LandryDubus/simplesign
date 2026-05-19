@@ -101,9 +101,9 @@ public sealed class EtsiEn319142ComplianceTests
     {
         var (_, cms) = await SignAndParseAsync();
 
-        cms.SigningCertificateV2Hash.ShouldNotBeNull(
+        cms.SigningCertificateHash.ShouldNotBeNull(
             "signingCertificateV2 is mandatory for PAdES-B-B (ETSI EN 319 142-1 §5.1)");
-        cms.SigningCertificateV2Hash.ShouldNotBeEmpty(
+        cms.SigningCertificateHash.ShouldNotBeEmpty(
             "the certHash in signingCertificateV2 must contain the certificate hash");
     }
 
@@ -396,7 +396,7 @@ public sealed class EtsiEn319142ComplianceTests
         var sigs = await PadesExtractor.ExtractAsync(signed);
         var cms = CmsParser.Parse(sigs[0].CmsSignature);
 
-        cms.SigningCertificateV2Hash.ShouldNotBeNull(
+        cms.SigningCertificateHash.ShouldNotBeNull(
             "signingCertificateV2 certHash must be present");
         cms.SignerCertificate.ShouldNotBeNull(
             "signer certificate must be embedded in the CMS");
@@ -404,7 +404,7 @@ public sealed class EtsiEn319142ComplianceTests
         // Compute expected SHA-256 hash of the signer certificate
         var expectedHash = SHA256.HashData(cms.SignerCertificate!.RawData);
 
-        cms.SigningCertificateV2Hash.ShouldBe(expectedHash,
+        cms.SigningCertificateHash.ShouldBe(expectedHash,
             "the certHash in signingCertificateV2 must equal SHA-256(signer certificate DER) " +
             "per ETSI EN 319 122-1 §5.2.8");
     }

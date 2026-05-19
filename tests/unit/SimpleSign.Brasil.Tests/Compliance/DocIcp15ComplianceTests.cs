@@ -33,9 +33,9 @@ public sealed class DocIcp15ComplianceTests
         var cms = CmsSignatureBuilder.Build(data, cert, HashAlgorithmName.SHA256);
         var parsed = CmsParser.Parse(cms);
 
-        parsed.SigningCertificateV2Hash.ShouldNotBeNull(
+        parsed.SigningCertificateHash.ShouldNotBeNull(
             "AD-RB requires the id-aa-signingCertificateV2 ESS attribute (DOC-ICP-15.01 §6.2.1)");
-        parsed.SigningCertificateV2Hash.ShouldNotBeEmpty();
+        parsed.SigningCertificateHash.ShouldNotBeEmpty();
     }
 
     [Fact(DisplayName = "DocIcp15: AD-RB CMS contains ContentType id-data")]

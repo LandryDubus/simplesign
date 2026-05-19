@@ -70,7 +70,9 @@ internal sealed class TrayContext : ApplicationContext
             {
                 var icon = Icon.ExtractAssociatedIcon(exePath);
                 if (icon is not null)
+                {
                     return icon;
+                }
             }
             catch { /* fall through */ }
         }
@@ -310,7 +312,9 @@ internal sealed class TrayContext : ApplicationContext
             var va = i < pa.Length ? pa[i] : 0;
             var vb = i < pb.Length ? pb[i] : 0;
             if (va != vb)
+            {
                 return va.CompareTo(vb);
+            }
         }
         return 0;
     }
@@ -318,7 +322,10 @@ internal sealed class TrayContext : ApplicationContext
     private static async Task ServeStaticFileAsync(string path, HttpListenerResponse resp)
     {
         if (path == "/")
+        {
             path = "/index.html";
+        }
+
         var resourceName = "SimpleSign.HostSigner.wwwroot" + path.Replace('/', '.');
 
         using var stream = typeof(TrayContext).Assembly.GetManifestResourceStream(resourceName);
@@ -526,7 +533,10 @@ internal sealed class TrayContext : ApplicationContext
     private static bool IsAllowedOrigin(string? origin)
     {
         if (string.IsNullOrEmpty(origin))
+        {
             return false;
+        }
+
         return origin.StartsWith($"http://localhost:{Port}", StringComparison.OrdinalIgnoreCase)
             || origin.StartsWith($"http://127.0.0.1:{Port}", StringComparison.OrdinalIgnoreCase)
             || origin.StartsWith($"http://localhost:", StringComparison.OrdinalIgnoreCase)

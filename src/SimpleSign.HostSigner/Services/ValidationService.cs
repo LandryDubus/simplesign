@@ -19,7 +19,9 @@ internal static class ValidationService
             stream.Position = 0;
             var inspection = await PdfSignatureInspector.InspectAsync(stream);
             foreach (var (sig, level) in ConformanceDetector.DetectAll(inspection))
+            {
                 levels[sig.FieldName] = level;
+            }
         }
         catch { /* best-effort */ }
 

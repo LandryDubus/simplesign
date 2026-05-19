@@ -30,7 +30,9 @@ internal static class SigningService
         store.Open(OpenFlags.ReadOnly);
         var matches = store.Certificates.Find(X509FindType.FindByThumbprint, options.Thumbprint, false);
         if (matches.Count == 0)
+        {
             throw new InvalidOperationException($"Certificate not found: {options.Thumbprint}");
+        }
 
         var cert = matches[0];
         var pdfBytes = await File.ReadAllBytesAsync(options.FilePath);
@@ -50,7 +52,9 @@ internal static class SigningService
 
         // Timestamp
         if (!string.IsNullOrEmpty(options.TsaUrl))
+        {
             builder = builder.WithTimestamp(options.TsaUrl);
+        }
 
         // Metadata
         if (!string.IsNullOrEmpty(options.SignerName) || !string.IsNullOrEmpty(options.Reason) ||
@@ -65,19 +69,27 @@ internal static class SigningService
 
         // Field name
         if (!string.IsNullOrEmpty(options.FieldName))
+        {
             builder = builder.WithFieldName(options.FieldName);
+        }
 
         // LTV
         if (options.EnableLtv)
+        {
             builder = builder.WithLtv();
+        }
 
         // Archival timestamp
         if (options.ArchivalTimestamp)
+        {
             builder = builder.WithArchivalTimestamp(options.TsaUrl);
+        }
 
         // PDF/A preservation
         if (options.PreservePdfA)
+        {
             builder = builder.WithPdfAPreservation();
+        }
 
         // Certification level
         var level = options.CertificationLevel?.ToLowerInvariant() switch
@@ -88,11 +100,15 @@ internal static class SigningService
             _ => (PAdES.Signing.CertificationLevel?)null
         };
         if (level.HasValue)
+        {
             builder = builder.AsCertification(level.Value);
+        }
 
         // Visible stamp
         if (options.VisibleStamp)
+        {
             builder = builder.WithAppearance(new SignatureAppearance { Page = 1 });
+        }
 
         var signedPdf = await builder.SignAsync();
 

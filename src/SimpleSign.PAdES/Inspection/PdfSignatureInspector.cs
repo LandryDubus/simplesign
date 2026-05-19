@@ -122,7 +122,7 @@ public static partial class PdfSignatureInspector
             SigningTime = cms.SigningTime,
             PdfDeclaredSigningTime = field.PdfSigningTime,
             Timestamp = timestamp,
-            HasSigningCertificateV2 = cms.SigningCertificateV2Hash is not null,
+            HasSigningCertificateV2 = cms.SigningCertificateHash is not null,
             CommitmentTypeOid = cms.CommitmentTypeOid,
             SignaturePolicyOid = cms.SignaturePolicyOid,
             ManifestJson = cms.ManifestJson,

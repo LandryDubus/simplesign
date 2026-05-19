@@ -14,7 +14,9 @@ internal static class CertificateService
         foreach (var cert in store.Certificates)
         {
             if (!cert.HasPrivateKey)
+            {
                 continue;
+            }
 
             // Only signing certs (digitalSignature or nonRepudiation)
             foreach (var ext in cert.Extensions)
@@ -124,14 +126,18 @@ internal static class CertificateService
         try
         {
             if (cert.GetRSAPrivateKey() is not null)
+            {
                 return ("RSA", "SHA256");
+            }
         }
         catch { /* key not accessible */ }
 
         try
         {
             if (cert.GetECDsaPrivateKey() is not null)
+            {
                 return ("ECDSA", "SHA256");
+            }
         }
         catch { /* key not accessible */ }
 

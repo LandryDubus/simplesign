@@ -191,7 +191,8 @@ public sealed class Phase3ProductionTests
         var cmsData = new CmsSignedData
         {
             SignerCertificate = cert,
-            SigningCertificateV2Hash = hash
+            SigningCertificateHash = hash,
+            SigningCertificateHashAlgorithmOid = "2.16.840.1.101.3.4.2.1" // SHA-256
         };
         var errors = new List<string>();
 
@@ -207,7 +208,8 @@ public sealed class Phase3ProductionTests
         var cmsData = new CmsSignedData
         {
             SignerCertificate = cert,
-            SigningCertificateV2Hash = new byte[32]
+            SigningCertificateHash = new byte[32],
+            SigningCertificateHashAlgorithmOid = "2.16.840.1.101.3.4.2.1" // SHA-256
         };
         var errors = new List<string>();
 
@@ -224,7 +226,7 @@ public sealed class Phase3ProductionTests
         var cmsData = new CmsSignedData
         {
             SignerCertificate = cert,
-            SigningCertificateV2Hash = null
+            SigningCertificateHash = null
         };
         var errors = new List<string>();
 

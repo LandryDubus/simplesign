@@ -16,7 +16,8 @@ internal static class CmsParser
     private record ParsedSignedAttributes(
         byte[]? MessageDigest,
         DateTimeOffset? SigningTime,
-        byte[]? SigningCertV2Hash,
+        byte[]? SigningCertHash,
+        string? SigningCertHashAlgOid,
         string? CommitmentTypeOid,
         string? SignaturePolicyOid,
         byte[]? ManifestJson,
@@ -29,7 +30,8 @@ internal static class CmsParser
         byte[]? Signature,
         DateTimeOffset? SigningTime,
         byte[]? TimestampToken,
-        byte[]? SigningCertV2Hash,
+        byte[]? SigningCertHash,
+        string? SigningCertHashAlgOid,
         string SignatureAlgorithmOid,
         string? CommitmentTypeOid,
         string? SignaturePolicyOid,
@@ -78,7 +80,8 @@ internal static class CmsParser
             Signature = signerInfo.Signature,
             SigningTime = signerInfo.SigningTime,
             SignatureTimestampToken = signerInfo.TimestampToken,
-            SigningCertificateV2Hash = signerInfo.SigningCertV2Hash,
+            SigningCertificateHash = signerInfo.SigningCertHash,
+            SigningCertificateHashAlgorithmOid = signerInfo.SigningCertHashAlgOid,
             CommitmentTypeOid = signerInfo.CommitmentTypeOid,
             SignaturePolicyOid = signerInfo.SignaturePolicyOid,
             ManifestJson = signerInfo.ManifestJson,
@@ -169,7 +172,8 @@ internal static class CmsParser
         byte[]? signature = null;
         DateTimeOffset? signingTime = null;
         byte[]? timestampToken = null;
-        byte[]? signingCertV2Hash = null;
+        byte[]? signingCertHash = null;
+        string? signingCertHashAlgOid = null;
         string signatureAlgorithmOid = string.Empty;
         string? commitmentTypeOid = null;
         string? signaturePolicyOid = null;
@@ -211,7 +215,8 @@ internal static class CmsParser
                 var parsedAttrs = ParseSignedAttributes(signedAttrs, logger);
                 messageDigest = parsedAttrs.MessageDigest;
                 signingTime = parsedAttrs.SigningTime;
-                signingCertV2Hash = parsedAttrs.SigningCertV2Hash;
+                signingCertHash = parsedAttrs.SigningCertHash;
+                signingCertHashAlgOid = parsedAttrs.SigningCertHashAlgOid;
                 commitmentTypeOid = parsedAttrs.CommitmentTypeOid;
                 signaturePolicyOid = parsedAttrs.SignaturePolicyOid;
                 manifestJson = parsedAttrs.ManifestJson;
@@ -250,15 +255,15 @@ internal static class CmsParser
         }
 
         return new ParsedSignerInfo(signerCert, messageDigest, signedAttrs, signature, signingTime, timestampToken,
-            signingCertV2Hash, signatureAlgorithmOid, commitmentTypeOid, signaturePolicyOid, manifestJson, contentTypeOid);
+            signingCertHash, signingCertHashAlgOid, signatureAlgorithmOid, commitmentTypeOid, signaturePolicyOid, manifestJson, contentTypeOid);
     }
 
     private static ParsedSignedAttributes ParseSignedAttributes(byte[] signedAttrs, ILogger? logger = null)
     {
         byte[]? messageDigest = null;
         DateTimeOffset? signingTime = null;
-        byte[]? signingCertV2Hash = null;
-        byte[]? signingCertV1Hash = null;
+        byte[]? signingCertHash = null;
+        string? signingCertHashAlgOid = null;
         string? commitmentTypeOid = null;
         string? signaturePolicyOid = null;
         byte[]? manifestJson = null;
@@ -297,31 +302,37 @@ internal static class CmsParser
                     }
                     break;
                 case Oids.SigningCertificate:
-                    // id-aa-signingCertificate (V1, RFC 2634): uses SHA-1 hash
-                    try
+                    // id-aa-signingCertificate (V1, RFC 2634): implicitly uses SHA-1
+                    // Only stored when no V2 attribute is present (priority is given to V2 below)
+                    if (signingCertHash is null)
                     {
-                        // SigningCertificate → SEQUENCE → ESSCertID → certHash OCTET STRING
-                        var signingCertV1Sequence = valSet.ReadSequence();
-                        if (signingCertV1Sequence.HasData)
+                        try
                         {
-                            var certIdSeq = signingCertV1Sequence.ReadSequence(); // SEQUENCE OF ESSCertID
-                            if (certIdSeq.HasData)
+                            // SigningCertificate → SEQUENCE → ESSCertID → certHash OCTET STRING
+                            var signingCertV1Sequence = valSet.ReadSequence();
+                            if (signingCertV1Sequence.HasData)
                             {
-                                var essCertIdSequence = certIdSeq.ReadSequence(); // ESSCertID
-                                if (essCertIdSequence.HasData)
+                                var certIdSeq = signingCertV1Sequence.ReadSequence(); // SEQUENCE OF ESSCertID
+                                if (certIdSeq.HasData)
                                 {
-                                    signingCertV1Hash = essCertIdSequence.ReadOctetString();
+                                    var essCertIdSequence = certIdSeq.ReadSequence(); // ESSCertID
+                                    if (essCertIdSequence.HasData)
+                                    {
+                                        signingCertHash = essCertIdSequence.ReadOctetString();
+                                        signingCertHashAlgOid = Oids.Sha1; // V1 always uses SHA-1
+                                    }
                                 }
                             }
                         }
+                        catch (AsnContentException ex) { logger?.SigningCertificateV2ParsingFailed(ex.Message); }
                     }
-                    catch (AsnContentException ex) { logger?.SigningCertificateV2ParsingFailed(ex.Message); }
                     break;
                 case Oids.SigningCertificateV2:
-                    // id-aa-signingCertificateV2: extracts certHash for later validation
+                    // id-aa-signingCertificateV2 (RFC 5035): explicit hash algorithm, DEFAULT id-sha256
+                    // V2 takes priority — overwrite any V1 hash already stored
                     try
                     {
-                        // SigningCertificateV2 → SEQUENCE → ESSCertIDv2 → certHash OCTET STRING
+                        // ESSCertIDv2 ::= SEQUENCE { hashAlgorithm AlgorithmIdentifier DEFAULT sha256, certHash Hash }
                         var signingCertV2Sequence = valSet.ReadSequence(); // SigningCertificateV2
                         if (signingCertV2Sequence.HasData)
                         {
@@ -329,14 +340,20 @@ internal static class CmsParser
                             if (certIdSeq.HasData)
                             {
                                 var essCertIdSequence = certIdSeq.ReadSequence(); // ESSCertIDv2
-                                // hashAlgorithm DEFAULT id-sha256 — if present, it is a SEQUENCE
+                                // hashAlgorithm: DEFAULT id-sha256; if present it is a SEQUENCE (AlgorithmIdentifier)
+                                string? explicitAlgOid = null;
                                 if (essCertIdSequence.HasData && essCertIdSequence.PeekTag() is { TagValue: (int)UniversalTagNumber.Sequence })
                                 {
-                                    essCertIdSequence.ReadEncodedValue(); // skips AlgorithmIdentifier
+                                    var algIdSeq = essCertIdSequence.ReadSequence(); // AlgorithmIdentifier
+                                    if (algIdSeq.HasData)
+                                    {
+                                        explicitAlgOid = algIdSeq.ReadObjectIdentifier();
+                                    }
                                 }
                                 if (essCertIdSequence.HasData)
                                 {
-                                    signingCertV2Hash = essCertIdSequence.ReadOctetString();
+                                    signingCertHash = essCertIdSequence.ReadOctetString();
+                                    signingCertHashAlgOid = explicitAlgOid ?? Oids.Sha256; // DEFAULT sha256
                                 }
                             }
                         }
@@ -385,7 +402,7 @@ internal static class CmsParser
             }
         }
 
-        return new ParsedSignedAttributes(messageDigest, signingTime, signingCertV2Hash ?? signingCertV1Hash,
+        return new ParsedSignedAttributes(messageDigest, signingTime, signingCertHash, signingCertHashAlgOid,
             commitmentTypeOid, signaturePolicyOid, manifestJson, contentTypeOid);
     }
 }

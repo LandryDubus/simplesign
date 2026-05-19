@@ -66,7 +66,10 @@ internal sealed class MainForm : Form
                     case "openUrl":
                         var url = msg.GetProperty("url").GetString();
                         if (url is not null)
+                        {
                             System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(url) { UseShellExecute = true });
+                        }
+
                         break;
                 }
             }
@@ -113,14 +116,21 @@ internal sealed class MainForm : Form
     public void Log(string message)
     {
         if (_webView?.CoreWebView2 is null)
+        {
             return;
+        }
+
         try
         {
             var json = JsonSerializer.Serialize(new { action = "log", message });
             if (InvokeRequired)
+            {
                 BeginInvoke(() => _webView.CoreWebView2?.PostWebMessageAsJson(json));
+            }
             else
+            {
                 _webView.CoreWebView2.PostWebMessageAsJson(json);
+            }
         }
         catch { /* not yet initialized */ }
     }
@@ -131,7 +141,10 @@ internal sealed class MainForm : Form
     private void EnableDarkTitleBar()
     {
         if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        {
             return;
+        }
+
         try
         {
             int value = 1;

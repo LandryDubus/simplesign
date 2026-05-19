@@ -40,10 +40,20 @@ public sealed class CmsSignedData
     public byte[]? SignatureTimestampToken { get; init; }
 
     /// <summary>
-    /// SHA-256 hash of the signer certificate extracted from the id-aa-signingCertificateV2 attribute.
+    /// Hash of the signer certificate extracted from the id-aa-signingCertificateV2 (RFC 5035)
+    /// or id-aa-signingCertificate (RFC 2634 V1) signed attribute.
     /// Used to verify cryptographic binding between certificate and signature (anti-substitution).
+    /// The hash algorithm is indicated by <see cref="SigningCertificateHashAlgorithmOid"/>.
     /// </summary>
-    public byte[]? SigningCertificateV2Hash { get; init; }
+    public byte[]? SigningCertificateHash { get; init; }
+
+    /// <summary>
+    /// OID of the hash algorithm used to compute <see cref="SigningCertificateHash"/>.
+    /// For V1 (id-aa-signingCertificate): always SHA-1 (1.3.14.3.2.26).
+    /// For V2 (id-aa-signingCertificateV2): the explicit AlgorithmIdentifier OID, or SHA-256 by default.
+    /// Null when no signingCertificate attribute was found.
+    /// </summary>
+    public string? SigningCertificateHashAlgorithmOid { get; init; }
 
     /// <summary>
     /// OID of the commitment type from the id-aa-ets-commitmentType attribute (RFC 5126 §5.11.1).

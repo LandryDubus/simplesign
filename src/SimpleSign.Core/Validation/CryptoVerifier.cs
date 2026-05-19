@@ -77,20 +77,30 @@ internal static class CryptoVerifier
     }
 
     /// <summary>
-    /// Validates signingCertificateV2 binding (certificate ↔ signature anti-substitution).
-    /// Uses stackalloc for the SHA-256 hash (32 bytes).
+    /// Validates signingCertificate (V1/V2) binding (certificate ↔ signature anti-substitution).
+    /// Respects the hash algorithm declared in the attribute (SHA-1 for V1, SHA-256 default for V2).
     /// </summary>
     internal static void ValidateSigningCertV2(CmsSignedData cmsData, List<string> errors, ILogger? logger = null)
     {
-        if (cmsData.SigningCertificateV2Hash is not null && cmsData.SignerCertificate is not null)
+        if (cmsData.SigningCertificateHash is not null && cmsData.SignerCertificate is not null)
         {
             (logger ?? NullLogger.Instance).ValidatingSigningCertV2(
                 cmsData.SignerCertificate.Issuer,
                 cmsData.SignerCertificate.SerialNumber);
 
-            Span<byte> actualCertHash = stackalloc byte[32]; // SHA-256 = 32 bytes
-            SHA256.TryHashData(cmsData.SignerCertificate.RawData, actualCertHash, out _);
-            if (!actualCertHash.SequenceEqual(cmsData.SigningCertificateV2Hash))
+            var certData = cmsData.SignerCertificate.RawData;
+
+#pragma warning disable CA5350 // SHA-1 is required for validating legacy V1 signingCertificate attributes
+            byte[] actualCertHash = cmsData.SigningCertificateHashAlgorithmOid switch
+            {
+                Oids.Sha384 => SHA384.HashData(certData),
+                Oids.Sha512 => SHA512.HashData(certData),
+                Oids.Sha1 => SHA1.HashData(certData),
+                _ => SHA256.HashData(certData) // SHA-256 (default for V2) and unknown OIDs
+            };
+#pragma warning restore CA5350
+
+            if (!actualCertHash.AsSpan().SequenceEqual(cmsData.SigningCertificateHash))
             {
                 errors.Add("signingCertificateV2 mismatch: signer certificate does not match the hash in the signed attribute.");
             }

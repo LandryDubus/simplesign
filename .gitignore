@@ -5,6 +5,11 @@ artifacts/
 BenchmarkDotNet.Artifacts/
 Findings/
 
+## Debug / test output files
+Signature_*.bin
+Signature_*.p7s
+Signature_*.pdf
+
 ## IDE / Editor
 .vs/
 .vscode/

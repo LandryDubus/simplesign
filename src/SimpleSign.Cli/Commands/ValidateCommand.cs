@@ -29,6 +29,10 @@ internal sealed class ValidateCommand : AsyncCommand<ValidateCommand.Settings>
         [Description("Output as JSON (machine-readable)")]
         public bool Json { get; init; }
 
+        [CommandOption("--simple")]
+        [Description("One-line summary per signature instead of full tree")]
+        public bool Simple { get; init; }
+
         public override ValidationResult Validate()
         {
             if (!File.Exists(InputPath))
@@ -71,6 +75,10 @@ internal sealed class ValidateCommand : AsyncCommand<ValidateCommand.Settings>
         if (settings.Json)
         {
             OutputJson(settings.InputPath, results, conformanceLevels);
+        }
+        else if (settings.Simple)
+        {
+            OutputSimple(settings.InputPath, results, conformanceLevels);
         }
         else
         {
@@ -379,6 +387,38 @@ internal sealed class ValidateCommand : AsyncCommand<ValidateCommand.Settings>
     {
         var output = JsonMapper.MapValidation(Path.GetFileName(inputPath), results, conformanceLevels);
         Console.WriteLine(JsonSerializer.Serialize(output, CliJsonContext.Default.ValidateOutput));
+    }
+
+    internal static void OutputSimple(string inputPath, IReadOnlyList<SignatureValidationResult> results,
+        Dictionary<string, PAdESConformanceLevel> conformanceLevels)
+    {
+        var fileName = Path.GetFileName(inputPath);
+        var userSigs = results.Where(r => !r.IsDocumentTimestamp).ToList();
+        var validCount = userSigs.Count(r => r.IsValid);
+        var allValid = validCount == userSigs.Count;
+        var statusIcon = userSigs.Count == 0 ? "[yellow]?[/]" : (allValid ? "[green]✓[/]" : "[red]✗[/]");
+
+        AnsiConsole.MarkupLine($"{statusIcon} [bold]{fileName.EscapeMarkup()}[/]  {validCount}/{userSigs.Count} valid");
+
+        foreach (var r in results)
+        {
+            string icon;
+            if (r.IsDocumentTimestamp)
+            {
+                icon = r.IsChainTrustWarning ? "[yellow]T[/]" : (r.IsValid ? "[green]T[/]" : "[red]T[/]");
+            }
+            else
+            {
+                icon = r.IsValid ? "[green]✓[/]" : "[red]✗[/]";
+            }
+
+            var signer = (r.SignerName ?? "unknown").EscapeMarkup();
+            var level = conformanceLevels.TryGetValue(r.FieldName, out var l) ? $"  [dim]{FormatLevel(l)}[/]" : string.Empty;
+            var time = r.SigningTime.HasValue ? $"  [dim]{r.SigningTime.Value:yyyy-MM-dd}[/]" : string.Empty;
+            var errSuffix = r.IsValid ? string.Empty : $"  [red]{(r.Errors.Count > 0 ? r.Errors[0].EscapeMarkup() : "invalid")}[/]";
+
+            AnsiConsole.MarkupLine($"  {icon} {r.FieldName.EscapeMarkup()}  {signer}{level}{time}{errSuffix}");
+        }
     }
 
     private static string Check(bool value, bool invert = false)

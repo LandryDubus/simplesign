@@ -13,6 +13,8 @@ app.Configure(config =>
         .WithDescription("Sign a PDF document");
     config.AddCommand<ValidateCommand>("validate")
         .WithDescription("Validate PDF signatures");
+    config.AddCommand<ValidateDirCommand>("validate-dir")
+        .WithDescription("Validate all PDFs in a directory (bulk)");
     config.AddCommand<InspectCommand>("inspect")
         .WithDescription("Inspect signature metadata (no validation)");
     config.AddCommand<ExtractCommand>("extract")

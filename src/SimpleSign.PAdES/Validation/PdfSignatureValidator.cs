@@ -21,6 +21,7 @@ public sealed class PdfSignatureValidator
 {
     private readonly ValidationOptions _options;
     private readonly RevocationChecker _revocationChecker;
+    private readonly HttpClient _httpClient;
     private readonly ILogger _logger;
     private readonly IReadOnlyList<ITrustAnchorProvider> _trustAnchorProviders;
 
@@ -58,6 +59,7 @@ public sealed class PdfSignatureValidator
         _options = options ?? ValidationOptions.Default;
         _logger = logger ?? NullLogger<PdfSignatureValidator>.Instance;
         var client = httpClient ?? DefaultHttpClientProvider.Instance.GetClient();
+        _httpClient = client;
         _revocationChecker = new RevocationChecker(new OcspClient(client, _logger), new CrlClient(client, _logger), _logger);
         _trustAnchorProviders = trustAnchorProviders?.ToList().AsReadOnly()
             ?? LoadDefaultTrustAnchorProviders();
@@ -75,6 +77,7 @@ public sealed class PdfSignatureValidator
         ArgumentNullException.ThrowIfNull(httpClientProvider);
         _options = options ?? ValidationOptions.Default;
         var client = httpClientProvider.GetClient();
+        _httpClient = client;
         _logger = logger ?? NullLogger<PdfSignatureValidator>.Instance;
         _revocationChecker = new RevocationChecker(new OcspClient(client, _logger), new CrlClient(client, _logger), _logger);
         _trustAnchorProviders = trustAnchorProviders?.ToList().AsReadOnly()
@@ -278,7 +281,7 @@ public sealed class PdfSignatureValidator
         CryptoVerifier.ValidateSigningCertV2(cmsData, errors, _logger);
 
         // 4. Certificate chain
-        bool chainValid = ValidateChainStep(cmsData, errors, warnings);
+        bool chainValid = await ValidateChainStep(cmsData, errors, warnings, cancellationToken).ConfigureAwait(false);
 
         // 5. Revocation (optional — requires network)
         var (notRevoked, revocationSource) = await ValidateRevocationIfEnabled(
@@ -337,7 +340,7 @@ public sealed class PdfSignatureValidator
         bool sigValid = ValidateSignatureStep(cmsData, errors);
 
         // 3. TSA certificate chain
-        bool chainValid = ValidateChainStep(cmsData, errors, warnings);
+        bool chainValid = await ValidateChainStep(cmsData, errors, warnings, cancellationToken).ConfigureAwait(false);
 
         // When integrity and signature are cryptographically sound but the TSA chain cannot be
         // anchored to a local trust root, treat this as an advisory warning rather than a hard
@@ -402,11 +405,20 @@ public sealed class PdfSignatureValidator
         }
     }
 
-    private bool ValidateChainStep(CmsSignedData cmsData, List<string> errors, List<string> warnings)
+    private async Task<bool> ValidateChainStep(CmsSignedData cmsData, List<string> errors, List<string> warnings, CancellationToken ct = default)
     {
         try
         {
-            return ValidateCertificateChain(cmsData.SignerCertificate, cmsData.Certificates, errors, warnings);
+            // AIA chasing: on macOS/Linux, X509Chain.Build() does not automatically download
+            // intermediate certificates via AIA. We do it explicitly and add them to ExtraStore.
+            var aiaCerts = await CertificateChainUtility.DownloadAiaCertsAsync(
+                _httpClient, cmsData.SignerCertificate!, cmsData.Certificates, warnings, ct).ConfigureAwait(false);
+
+            IReadOnlyList<X509Certificate2> allCerts = aiaCerts.Count > 0
+                ? [.. cmsData.Certificates, .. aiaCerts]
+                : cmsData.Certificates;
+
+            return ValidateCertificateChain(cmsData.SignerCertificate, allCerts, errors, warnings);
         }
         // S2221: intentional broad catch — validation pipeline converts exceptions to error messages
         catch (Exception ex)

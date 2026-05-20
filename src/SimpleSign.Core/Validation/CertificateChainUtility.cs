@@ -94,12 +94,28 @@ internal static class CertificateChainUtility
         {
             foreach (var c in col)
             { yield return c; }
+            yield break;
+        }
+
+        // Third fallback: PKCS#7 certificate bags (.p7b/.p7c) — common in AIA caIssuers responses.
+        // These bundles often contain the full intermediate chain up to the root.
+        // X509CertificateLoader.LoadPkcs12Collection does NOT handle PKCS#7 on .NET 9+.
+        X509Certificate2Collection? p7bCol = null;
+        try
+        { p7bCol = CertificateLoader.LoadP7bCollection(bytes); }
+        catch (CryptographicException ex) { logger?.CertificateLoadingFailed(ex.Message); }
+
+        if (p7bCol is not null)
+        {
+            foreach (var c in p7bCol)
+            { yield return c; }
         }
     }
 
     /// <summary>
     /// Downloads intermediate certificates via AIA (Authority Information Access)
-    /// for a certificate and optional extra certificates.
+    /// using iterative BFS so that each downloaded intermediate's own AIA is also chased.
+    /// This is needed for chains with multiple intermediate CAs (e.g. ICP-Brasil).
     /// </summary>
     internal static async Task<List<X509Certificate2>> DownloadAiaCertsAsync(
         HttpClient httpClient,
@@ -111,12 +127,30 @@ internal static class CertificateChainUtility
         var result = new List<X509Certificate2>();
         var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-        await DownloadAiaForCertAsync(httpClient, cert, result, visited, warnings, ct).ConfigureAwait(false);
-
+        // BFS queue — seed with signer cert and any certs already in the CMS bag
+        var queue = new Queue<X509Certificate2>();
+        queue.Enqueue(cert);
         if (extraCerts is not null)
         {
             foreach (var c in extraCerts)
-            { await DownloadAiaForCertAsync(httpClient, c, result, visited, warnings, ct).ConfigureAwait(false); }
+            {
+                queue.Enqueue(c);
+            }
+        }
+
+        // Chase AIA iteratively: each newly downloaded cert is also enqueued so we
+        // follow the full chain up to the root (or until no AIA extension is found).
+        const int maxCerts = 20; // guard against pathological chains
+        while (queue.Count > 0 && result.Count < maxCerts)
+        {
+            var current = queue.Dequeue();
+            int countBefore = result.Count;
+            await DownloadAiaForCertAsync(httpClient, current, result, visited, warnings, ct).ConfigureAwait(false);
+            // Enqueue any newly discovered intermediates for further chasing
+            for (int i = countBefore; i < result.Count; i++)
+            {
+                queue.Enqueue(result[i]);
+            }
         }
 
         return result;

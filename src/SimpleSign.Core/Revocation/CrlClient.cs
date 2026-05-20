@@ -231,7 +231,21 @@ internal sealed class CrlClient
         try
         {
             var crlIssuerDn = new X500DistinguishedName(crlIssuerBytes);
-            return string.Equals(crlIssuerDn.Name, certIssuer.Name, StringComparison.OrdinalIgnoreCase);
+            if (string.Equals(crlIssuerDn.Name, certIssuer.Name, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            const X500DistinguishedNameFlags flags =
+                X500DistinguishedNameFlags.Reversed |
+                X500DistinguishedNameFlags.UseCommas |
+                X500DistinguishedNameFlags.DoNotUsePlusSign |
+                X500DistinguishedNameFlags.DoNotUseQuotes;
+
+            return string.Equals(
+                crlIssuerDn.Decode(flags),
+                certIssuer.Decode(flags),
+                StringComparison.OrdinalIgnoreCase);
         }
         catch
         {
@@ -334,4 +348,5 @@ internal sealed class CrlClient
         catch (AsnContentException ex) { logger?.CrlUrlExtensionParsingFailed(ex.Message); }
         return null;
     }
+
 }

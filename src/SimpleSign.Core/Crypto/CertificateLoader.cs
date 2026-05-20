@@ -70,4 +70,18 @@ internal static class CertificateLoader
         return col;
 #endif
     }
+
+    /// <summary>
+    /// Loads a collection of certificates from a PKCS#7 certificate bag (.p7b / .p7c).
+    /// Used for AIA caIssuers downloads which often return P7B bundles containing
+    /// the full intermediate chain up to the root.
+    /// </summary>
+    internal static X509Certificate2Collection LoadP7bCollection(byte[] data)
+    {
+        var col = new X509Certificate2Collection();
+#pragma warning disable SYSLIB0057 // No clean P7B API exists on .NET 8+ without this
+        col.Import(data);
+#pragma warning restore SYSLIB0057
+        return col;
+    }
 }

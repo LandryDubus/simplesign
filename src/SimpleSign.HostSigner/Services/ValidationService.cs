@@ -1,3 +1,4 @@
+using SimpleSign.Brasil;
 using SimpleSign.PAdES.Inspection;
 using SimpleSign.PAdES.Validation;
 
@@ -5,7 +6,11 @@ namespace SimpleSign.HostSigner.Services;
 
 internal static class ValidationService
 {
-    private static readonly PdfSignatureValidator _validator = new();
+    private static readonly PdfSignatureValidator _validator = new(
+        options: null,
+        httpClient: null,
+        logger: null,
+        trustAnchorProviders: new BrasilExtension().TrustAnchorProviders);
 
     public static async Task<List<ValidateResultDto>> ValidateAsync(string path)
     {

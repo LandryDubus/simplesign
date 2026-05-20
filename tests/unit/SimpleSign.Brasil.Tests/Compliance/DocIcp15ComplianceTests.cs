@@ -66,8 +66,8 @@ public sealed class DocIcp15ComplianceTests
         parsed.MessageDigest.ShouldNotBeEmpty();
     }
 
-    [Fact(DisplayName = "DocIcp15: AD-RB CMS contains SigningTime")]
-    public void ADRB_CMS_Contains_SigningTime()
+    [Fact(DisplayName = "DocIcp15: AD-RB CAdES does NOT include signingTime (not permitted by ETSI EN 319 122-1)")]
+    public void ADRB_CAdES_Does_Not_Contain_SigningTime()
     {
         using var cert = TestCertificateFactory.CreateSelfSignedCert();
         var data = "signing-time test"u8.ToArray();
@@ -75,8 +75,21 @@ public sealed class DocIcp15ComplianceTests
         var cms = CmsSignatureBuilder.Build(data, cert, HashAlgorithmName.SHA256);
         var parsed = CmsParser.Parse(cms);
 
+        parsed.SigningTime.ShouldBeNull(
+            "CAdES (ETSI EN 319 122-1 §5.2) does not permit the signingTime attribute in signed attributes");
+    }
+
+    [Fact(DisplayName = "DocIcp15: Legacy PKCS#7 (non-CAdES) CMS includes signingTime")]
+    public void Legacy_Pkcs7_CMS_Contains_SigningTime()
+    {
+        using var cert = TestCertificateFactory.CreateSelfSignedCert();
+        var data = "signing-time test"u8.ToArray();
+
+        var cms = CmsSignatureBuilder.Build(data, cert, HashAlgorithmName.SHA256, padesAttributes: false);
+        var parsed = CmsParser.Parse(cms);
+
         parsed.SigningTime.ShouldNotBeNull(
-            "AD-RB requires the signing-time signed attribute (DOC-ICP-15.01 §6.2.1)");
+            "Legacy PKCS#7/CMS signatures (padesAttributes=false) include the signingTime attribute");
     }
 
     [Theory(DisplayName = "DocIcp15: AD-RB policy OIDs detected (v1 and v2 arcs)")]

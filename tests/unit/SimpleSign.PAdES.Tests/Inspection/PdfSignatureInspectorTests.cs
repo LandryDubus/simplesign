@@ -87,15 +87,18 @@ public sealed class PdfSignatureInspectorTests
         signatureFieldInfo.SignatureAlgorithm.Name.ShouldContain("ECDSA");
     }
 
-    [Fact(DisplayName = "InspectAsync extracts signing time from CMS")]
+    [Fact(DisplayName = "InspectAsync extracts signing time from PDF /M entry (PAdES omits CMS signingTime)")]
     public async Task InspectAsync_SignedPdf_ExtractsSigningTime()
     {
         using X509Certificate2 cert = CreateRsaCert();
         byte[] pdfBytes = BuildMinimalPdf();
         using MemoryStream stream = new MemoryStream(await SimpleSigner.Document(pdfBytes).WithCertificate(cert).SignAsync());
         SignatureFieldInfo signatureFieldInfo = (await PdfSignatureInspector.InspectAsync(stream)).Signatures[0];
-        signatureFieldInfo.SigningTime.ShouldNotBeNull("");
-        signatureFieldInfo.SigningTime.Value.ShouldBe(DateTimeOffset.UtcNow, TimeSpan.FromMinutes(5.0), "");
+        // PAdES signatures do not include the CMS signingTime attribute (ETSI EN 319 122-1 §5.2 prohibits it).
+        signatureFieldInfo.SigningTime.ShouldBeNull("PAdES does not include the CMS signingTime attribute");
+        // The PDF /M entry carries the declared signing time.
+        signatureFieldInfo.PdfDeclaredSigningTime.ShouldNotBeNull("PDF /M entry should carry the declared signing time");
+        signatureFieldInfo.PdfDeclaredSigningTime!.Value.ShouldBe(DateTimeOffset.UtcNow, TimeSpan.FromMinutes(5.0), "");
     }
 
     [Fact(DisplayName = "InspectAsync extracts embedded certificates")]

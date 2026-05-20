@@ -279,13 +279,17 @@ public sealed class CmsSignatureBuilder
                 }
             }
 
-            // signingTime
-            using (writer.PushSequence())
+            // signingTime — PKCS#7/CMS legacy only.
+            // CAdES (ETSI EN 319 122-1 §5.2) does not permit signingTime in signed attributes.
+            if (!padesAttributes)
             {
-                writer.WriteObjectIdentifier(Oids.SigningTime);
-                using (writer.PushSetOf())
+                using (writer.PushSequence())
                 {
-                    writer.WriteUtcTime(time);
+                    writer.WriteObjectIdentifier(Oids.SigningTime);
+                    using (writer.PushSetOf())
+                    {
+                        writer.WriteUtcTime(time);
+                    }
                 }
             }
 

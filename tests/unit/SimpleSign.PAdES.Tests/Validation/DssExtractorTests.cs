@@ -165,7 +165,35 @@ public sealed class DssExtractorTests
         using var stream = new MemoryStream(data);
         var crls = await DssExtractor.TryReadDssDataAsync(stream, CancellationToken.None);
 
-        crls.Count().ShouldBe(1);
-        crls[0].ShouldBe(crlContent);
+        crls.Count().ShouldBe(1, "should extract exactly one CRL");
+        crls[0].ShouldBe(crlContent, "extracted bytes must match the original CRL content");
+    }
+
+    [Fact(DisplayName = "TryReadDssDataAsync handles CRLF before endstream (PDF EOL variant)")]
+    public async Task TryReadDssDataAsync_WithCrLfBeforeEndstream_ExtractsBytes()
+    {
+        // PDF spec §7.3.8.1 allows both \r\n and \n as the EOL before "endstream".
+        // This test verifies the DssExtractor handles the \r\n variant produced by
+        // some PDF generators (e.g., Microsoft Print to PDF, Adobe Acrobat).
+        var crlContent = new byte[] { 0xCA, 0xFE, 0xBA };
+        var sb = new StringBuilder();
+        sb.Append("%PDF-1.7\n");
+        sb.Append("1 0 obj << /Type /Catalog /DSS 5 0 R >> endobj\n");
+        sb.Append("5 0 obj << /CRLs [10 0 R] >> endobj\n");
+        sb.Append("10 0 obj << /Length 3 >>\nstream\n");
+        var prefix = Encoding.ASCII.GetBytes(sb.ToString());
+        // Use \r\n before endstream — this is the variant fixed in upstream commit eedf8a3
+        var suffix = Encoding.ASCII.GetBytes("\r\nendstream\nendobj\n%%EOF");
+
+        var data = new byte[prefix.Length + crlContent.Length + suffix.Length];
+        prefix.CopyTo(data, 0);
+        crlContent.CopyTo(data, prefix.Length);
+        suffix.CopyTo(data, prefix.Length + crlContent.Length);
+
+        using var stream = new MemoryStream(data);
+        var crls = await DssExtractor.TryReadDssDataAsync(stream, CancellationToken.None);
+
+        crls.Count().ShouldBe(1, "should extract exactly one CRL");
+        crls[0].ShouldBe(crlContent, "extracted bytes must match the original CRL content");
     }
 }

@@ -92,6 +92,63 @@ public sealed class CertificateChainUtilityTests
     [Fact(DisplayName = "Subject without CN returns full subject")]
     public void ShortName_WithoutCn_ReturnsFullSubject() => CertificateChainUtility.ShortName("O=Org").ShouldBe("O=Org", "");
 
+    [Fact(DisplayName = "PKCS#7 (.p7b) bytes load a collection of certificates")]
+    public void LoadCertsFromBytes_P7bBytes_ReturnsAllCertificates()
+    {
+        using var ca = TestCertificateFactory.CreateCaCert("CN=P7B CA Test, O=Tests, C=BR");
+        using var leaf = TestCertificateFactory.CreateLeafCert(ca, "CN=P7B Leaf Test, O=Tests, C=BR");
+
+        var collection = new X509Certificate2Collection { ca, leaf };
+#pragma warning disable SYSLIB0057
+        byte[] p7bBytes = collection.Export(X509ContentType.Pkcs7)!;
+#pragma warning restore SYSLIB0057
+
+        List<X509Certificate2> loaded = [.. CertificateChainUtility.LoadCertsFromBytes(p7bBytes)];
+
+        loaded.Count.ShouldBe(2, "P7B bundle should yield both the CA and leaf certificates");
+        loaded.ShouldContain(c => c.Thumbprint == ca.Thumbprint, "CA cert should be present");
+        loaded.ShouldContain(c => c.Thumbprint == leaf.Thumbprint, "leaf cert should be present");
+    }
+
+    [Fact(DisplayName = "BFS AIA chasing downloads certs beyond first level")]
+    public async Task DownloadAiaCertsAsync_MultiLevelAia_ChasesBeyondFirstLevel()
+    {
+        // Arrange: build a 3-level chain — leaf → intermediate → root
+        // leaf.AIA → "http://aia.test/intermediate.crt" (serves intermediate DER)
+        // intermediate.AIA → "http://aia.test/root.crt"    (serves root DER)
+        using var root = TestCertificateFactory.CreateCaCert("CN=Root CA, O=Tests, C=BR");
+        using var intermediate = CreateCertWithAia("http://aia.test/root.crt");
+        using var leaf = CreateCertWithAia("http://aia.test/intermediate.crt");
+
+        var urlMap = new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["http://aia.test/intermediate.crt"] = intermediate.RawData,
+            ["http://aia.test/root.crt"] = root.RawData,
+        };
+
+        using var httpClient = new HttpClient(new MockHttpHandler(async req =>
+        {
+            var url = req.RequestUri!.ToString();
+            return urlMap.TryGetValue(url, out var bytes)
+                ? new System.Net.Http.HttpResponseMessage(System.Net.HttpStatusCode.OK)
+                { Content = new ByteArrayContent(bytes) }
+                : new System.Net.Http.HttpResponseMessage(System.Net.HttpStatusCode.NotFound);
+        }));
+
+        var warnings = new List<string>();
+
+        // Act
+        var result = await CertificateChainUtility.DownloadAiaCertsAsync(
+            httpClient, leaf, null, warnings, CancellationToken.None);
+
+        // Assert: BFS should have followed leaf→intermediate→root (both levels)
+        result.ShouldContain(c => c.Thumbprint == intermediate.Thumbprint,
+            "first-level AIA cert (intermediate) must be downloaded");
+        result.ShouldContain(c => c.Thumbprint == root.Thumbprint,
+            "second-level AIA cert (root) must be chased recursively");
+        warnings.ShouldBeEmpty("no network errors expected");
+    }
+
     [Fact(DisplayName = "Certificate without AIA extension returns empty list")]
     public async Task DownloadAiaCertsAsync_NoAiaExtension_ReturnsEmpty()
     {

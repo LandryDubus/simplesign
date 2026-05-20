@@ -407,12 +407,20 @@ public sealed class PdfSignatureValidator
 
     private async Task<bool> ValidateChainStep(CmsSignedData cmsData, List<string> errors, List<string> warnings, CancellationToken ct = default)
     {
+        // Guard: signer cert can be null when CmsParser fails to identify it.
+        // ValidateCertificateChain handles null correctly, but DownloadAiaCertsAsync requires
+        // a non-null cert — skip AIA chasing in that case.
+        if (cmsData.SignerCertificate is null)
+        {
+            return ValidateCertificateChain(null, cmsData.Certificates, errors, warnings);
+        }
+
         try
         {
             // AIA chasing: on macOS/Linux, X509Chain.Build() does not automatically download
             // intermediate certificates via AIA. We do it explicitly and add them to ExtraStore.
             var aiaCerts = await CertificateChainUtility.DownloadAiaCertsAsync(
-                _httpClient, cmsData.SignerCertificate!, cmsData.Certificates, warnings, ct).ConfigureAwait(false);
+                _httpClient, cmsData.SignerCertificate, cmsData.Certificates, warnings, ct).ConfigureAwait(false);
 
             IReadOnlyList<X509Certificate2> allCerts = aiaCerts.Count > 0
                 ? [.. cmsData.Certificates, .. aiaCerts]

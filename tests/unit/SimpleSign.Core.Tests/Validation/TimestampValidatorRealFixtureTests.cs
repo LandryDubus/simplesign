@@ -1,4 +1,6 @@
+using System.Formats.Asn1;
 using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using Shouldly;
 using SimpleSign.Core.Crypto;
@@ -149,5 +151,170 @@ public sealed class TimestampValidatorRealFixtureTests
 
         result!.Value.ShouldBeTrue();
         warnings.ShouldContain(w => w.Contains("before signingTime", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact(DisplayName = "Validate identifies signer cert by issuerAndSerialNumber when multiple certs are present")]
+    public void Validate_MultiCertToken_SignerIdentifiedByIssuerAndSerial()
+    {
+        // Build a synthetic CMS TSA token where the SIGNER cert is embedded at position [1]
+        // and a DECOY cert is at position [0]. The upstream fix (eedf8a3) ensures the signer
+        // is correctly identified via issuerAndSerialNumber and moved to Certificates[0] before
+        // the chain validator is invoked.
+
+        using RSA signerKey = RSA.Create(2048);
+        using var signerCert = BuildSelfSignedCert(signerKey, "CN=TSA Signer, O=Test");
+
+        using RSA decoyKey = RSA.Create(2048);
+        using var decoyCert = BuildSelfSignedCert(decoyKey, "CN=Decoy Cert, O=Test");
+
+        // cmsData.Signature is the "pre-image" — ValidateHashMatch hashes it and compares
+        // to the hashedMessage inside TSTInfo. So tokenBytes is built with SHA256(sigValue).
+        byte[] sigValue = "unit-test-preimage"u8.ToArray();
+        byte[] hashedSig = SHA256.HashData(sigValue);
+        byte[] tokenBytes = BuildSyntheticTsaToken(signerKey, signerCert, decoyCert, hashedSig);
+
+        var cms = new CmsSignedData
+        {
+            Signature = sigValue,
+            SignatureTimestampToken = tokenBytes,
+        };
+
+        var warnings = new List<string>();
+        X509Certificate2? receivedSigner = null;
+
+        bool ChainValidator(
+            X509Certificate2? signer,
+            IReadOnlyList<X509Certificate2> embedded,
+            List<string> errors,
+            List<string> warns)
+        {
+            receivedSigner = signer;
+            return true;
+        }
+
+        var result = TimestampValidator.Validate(cms, warnings, ChainValidator);
+
+        result!.Value.ShouldBeTrue("synthetic token should validate successfully");
+        receivedSigner.ShouldNotBeNull("chain validator must receive a signer cert");
+        receivedSigner!.Thumbprint.ShouldBe(signerCert.Thumbprint,
+            "signer cert must be the ACTUAL signer (identified by issuerAndSerialNumber), not the decoy at position [0]");
+    }
+
+    /// <summary>
+    /// Builds a minimal but cryptographically valid RFC 3161 CMS timestamp token with two
+    /// embedded certificates: a decoy at position [0] and the real signer at position [1].
+    /// </summary>
+    private static byte[] BuildSyntheticTsaToken(
+        RSA signerKey,
+        System.Security.Cryptography.X509Certificates.X509Certificate2 signerCert,
+        System.Security.Cryptography.X509Certificates.X509Certificate2 decoyCert,
+        byte[] preImageHash)
+    {
+        byte[] tstInfoBytes;
+        {
+            var w = new AsnWriter(AsnEncodingRules.DER);
+            using (w.PushSequence())
+            {
+                w.WriteInteger(1);
+                w.WriteObjectIdentifier("1.2.3.4");
+                using (w.PushSequence())
+                {
+                    using (w.PushSequence())
+                    { w.WriteObjectIdentifier("2.16.840.1.101.3.4.2.1"); }
+                    w.WriteOctetString(preImageHash);
+                }
+                w.WriteInteger(1234567890);
+                w.WriteGeneralizedTime(DateTimeOffset.UtcNow);
+            }
+            tstInfoBytes = w.Encode();
+        }
+
+        byte[] signedAttrsBytes;
+        {
+            var w = new AsnWriter(AsnEncodingRules.DER);
+            using (w.PushSetOf())
+            {
+                using (w.PushSequence())
+                {
+                    w.WriteObjectIdentifier("1.2.840.113549.1.9.3");
+                    using (w.PushSetOf())
+                    { w.WriteObjectIdentifier("1.2.840.113549.1.9.16.1.4"); }
+                }
+                using (w.PushSequence())
+                {
+                    w.WriteObjectIdentifier("1.2.840.113549.1.9.4");
+                    using (w.PushSetOf())
+                    { w.WriteOctetString(SHA256.HashData(tstInfoBytes)); }
+                }
+            }
+            signedAttrsBytes = w.Encode();
+        }
+
+        byte[] attrsForSigning = (byte[])signedAttrsBytes.Clone();
+        attrsForSigning[0] = 0x31; // SET OF tag for signing
+        byte[] signature = signerKey.SignData(attrsForSigning, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+
+        var cmsWriter = new AsnWriter(AsnEncodingRules.DER);
+        using (cmsWriter.PushSequence())
+        {
+            cmsWriter.WriteObjectIdentifier("1.2.840.113549.1.7.2");
+            using (cmsWriter.PushSequence(new Asn1Tag(TagClass.ContextSpecific, 0, true)))
+            {
+                using (cmsWriter.PushSequence())
+                {
+                    cmsWriter.WriteInteger(3);
+                    using (cmsWriter.PushSetOf())
+                    {
+                        using (cmsWriter.PushSequence())
+                        { cmsWriter.WriteObjectIdentifier("2.16.840.1.101.3.4.2.1"); }
+                    }
+                    using (cmsWriter.PushSequence())
+                    {
+                        cmsWriter.WriteObjectIdentifier("1.2.840.113549.1.9.16.1.4");
+                        using (cmsWriter.PushSequence(new Asn1Tag(TagClass.ContextSpecific, 0, true)))
+                        {
+                            cmsWriter.WriteOctetString(tstInfoBytes);
+                        }
+                    }
+                    // Certs: decoy first, real signer second (tests the reordering fix)
+                    using (cmsWriter.PushSequence(new Asn1Tag(TagClass.ContextSpecific, 0, true)))
+                    {
+                        cmsWriter.WriteEncodedValue(decoyCert.RawData);
+                        cmsWriter.WriteEncodedValue(signerCert.RawData);
+                    }
+                    using (cmsWriter.PushSetOf())
+                    {
+                        using (cmsWriter.PushSequence())
+                        {
+                            cmsWriter.WriteInteger(1);
+                            using (cmsWriter.PushSequence())
+                            {
+                                cmsWriter.WriteEncodedValue(signerCert.IssuerName.RawData);
+                                cmsWriter.WriteIntegerUnsigned(signerCert.SerialNumberBytes.Span);
+                            }
+                            using (cmsWriter.PushSequence())
+                            { cmsWriter.WriteObjectIdentifier("2.16.840.1.101.3.4.2.1"); }
+                            byte[] signedAttrsCopy = (byte[])signedAttrsBytes.Clone();
+                            signedAttrsCopy[0] = 0xA0; // IMPLICIT [0] constructed
+                            cmsWriter.WriteEncodedValue(signedAttrsCopy);
+                            using (cmsWriter.PushSequence())
+                            {
+                                cmsWriter.WriteObjectIdentifier("1.2.840.113549.1.1.11");
+                                cmsWriter.WriteNull();
+                            }
+                            cmsWriter.WriteOctetString(signature);
+                        }
+                    }
+                }
+            }
+        }
+        return cmsWriter.Encode();
+    }
+
+    private static X509Certificate2 BuildSelfSignedCert(RSA key, string subject)
+    {
+        var req = new CertificateRequest(subject, key, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+        var cert = req.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddYears(1));
+        return X509CertificateLoader.LoadCertificate(cert.RawData);
     }
 }

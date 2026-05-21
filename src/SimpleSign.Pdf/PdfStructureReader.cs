@@ -21,10 +21,7 @@ public sealed class PdfStructureReader
     /// <summary>Maximum number of xref revisions to follow via /Prev chain.</summary>
     private const int MaxXrefRevisions = 100;
 
-    /// <summary>Search window for /DocMDP after /Perms (bytes).</summary>
-    private const int DocMdpSearchWindow = 512;
-
-    /// <summary>Search window for /P permission level after /Perms (bytes).</summary>
+    /// <summary>Search window for /P permission level after /TransformMethod /DocMDP (bytes).</summary>
     private const int PermissionSearchWindow = 2048;
 
     /// <summary>Maximum stream scan size when /Length is missing (10 MB).</summary>
@@ -41,8 +38,6 @@ public sealed class PdfStructureReader
     private static ReadOnlySpan<byte> EndStreamMarker => "endstream"u8;
     private static ReadOnlySpan<byte> ByteRangeKey => "/ByteRange"u8;
     private static ReadOnlySpan<byte> PrevKey => "/Prev "u8;
-    private static ReadOnlySpan<byte> PermsKey => "/Perms"u8;
-    private static ReadOnlySpan<byte> DocMdpKey => "/DocMDP"u8;
     private static ReadOnlySpan<byte> TransformMethodDocMdp => "/TransformMethod /DocMDP"u8;
     private static ReadOnlySpan<byte> PermissionKey => "/P "u8;
     private static ReadOnlySpan<byte> EncryptKey => "/Encrypt"u8;
@@ -293,32 +288,17 @@ public sealed class PdfStructureReader
     /// <summary>
     /// Core logic for DocMDP permission level detection on an already-buffered PDF span.
     /// Returns 0 if no DocMDP, or the permission level (1, 2, or 3).
+    ///
+    /// Per ITI VALIDAR developer guide, /Perms is NOT added to the catalog.
+    /// Detection is based solely on /TransformMethod /DocMDP in signature objects.
     /// </summary>
     private static int GetDocMdpPermissionLevel(ReadOnlySpan<byte> data)
     {
-        // The /P permission value lives in the TransformParams dictionary
-        // inside the signature object, NOT near /Perms in the catalog.
-        // Layout: /Perms << /DocMDP ref >> is in the catalog (just a reference).
-        // The actual /TransformMethod /DocMDP ... /P 2 is in the signature object.
-
-        // Confirm /Perms + /DocMDP exists in the document catalog
-        int permsPos = IndexOf(data, PermsKey, 0);
-        if (permsPos < 0)
-        {
-            return 0;
-        }
-
-        int searchEnd = Math.Min(permsPos + DocMdpSearchWindow, data.Length);
-        if (IndexOf(data[permsPos..searchEnd], DocMdpKey, 0) < 0)
-        {
-            return 0;
-        }
-
-        // Find /TransformMethod /DocMDP in the signature object (may be before /Perms)
+        // Find /TransformMethod /DocMDP in any signature object
         int tmPos = IndexOf(data, TransformMethodDocMdp, 0);
         if (tmPos < 0)
         {
-            return 1; // DocMDP exists but no TransformMethod — most restrictive
+            return 0;
         }
 
         // Search for /P within a bounded window after /TransformMethod /DocMDP
@@ -326,7 +306,7 @@ public sealed class PdfStructureReader
         int permKeyPos = IndexOf(data[tmPos..permSearchEnd], PermissionKey, 0);
         if (permKeyPos < 0)
         {
-            return 1;
+            return 1; // DocMDP exists but no explicit /P — most restrictive
         }
 
         // Skip whitespace after "/P "
@@ -599,7 +579,7 @@ public sealed class PdfStructureReader
 
         int absDictStart = trailerPos + dictStart;
         int dictEnd = FindMatchingDictEnd(data, absDictStart);
-        int searchEnd = dictEnd > absDictStart ? dictEnd + 2 : Math.Min(trailerPos + DocMdpSearchWindow, data.Length);
+        int searchEnd = dictEnd > absDictStart ? dictEnd + 2 : Math.Min(trailerPos + 512, data.Length);
 
         int prevKeyPos = IndexOf(data[trailerPos..searchEnd], PrevKey, 0);
         if (prevKeyPos < 0)

@@ -659,11 +659,15 @@ public sealed class Iso32000ComplianceTests
         text.ShouldContain($"/P {expectedP}");
     }
 
-    [Fact(DisplayName = "§12.8.2: DocMDP adds /Perms to catalog")]
-    public async Task DocMDP_AddsPermsToCatalog()
+    [Fact(DisplayName = "§12.8.2: DocMDP does NOT add /Perms to catalog (ITI VALIDAR compatibility)")]
+    public async Task DocMDP_DoesNotAddPermsToCatalog()
     {
+        // Per ITI VALIDAR developer guide: /Perms with /DocMDP in the catalog causes
+        // Adobe compatibility issues and must NOT be used. Only /Reference in the
+        // signature object is required for DocMDP.
         var (_, text) = await PrepareSignedPdf(options: DocMdpOptions(CertificationLevel.NoChanges));
-        text.ShouldMatch(@"/Perms << /DocMDP \d+ 0 R >>");
+        text.ShouldNotContain("/Perms");
+        text.ShouldContain("/TransformMethod /DocMDP");
     }
 
     // ── BuildXrefStream unit tests ─────────────────────────────────────────────

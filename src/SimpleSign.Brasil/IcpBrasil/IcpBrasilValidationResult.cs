@@ -13,6 +13,24 @@ public sealed class IcpBrasilValidationResult
     public IcpBrasilPolicy? DetectedPolicy { get; init; }
     /// <summary>Certificate level (A1–A4 for authentication, S1–S4 for confidentiality).</summary>
     public IcpBrasilCertificateLevel? CertificateLevel { get; init; }
+    /// <summary>CPF extracted from the SAN field (OID 2.16.76.1.3.1), if present (11 digits, no formatting).</summary>
+    public string? Cpf { get; init; }
+    /// <summary>CNPJ extracted from the SAN field (OID 2.16.76.1.3.3), if present (14 digits, no formatting).</summary>
+    public string? Cnpj { get; init; }
+    /// <summary>Formatted CPF as XXX.XXX.XXX-XX, or null if not available.</summary>
+    public string? CpfFormatted => Cpf?.Length == 11
+        ? $"{Cpf[..3]}.{Cpf[3..6]}.{Cpf[6..9]}-{Cpf[9..]}"
+        : Cpf;
+    /// <summary>Formatted CNPJ as XX.XXX.XXX/XXXX-XX, or null if not available.</summary>
+    public string? CnpjFormatted => Cnpj?.Length == 14
+        ? $"{Cnpj[..2]}.{Cnpj[2..5]}.{Cnpj[5..8]}/{Cnpj[8..12]}-{Cnpj[12..]}"
+        : Cnpj;
+    /// <summary>
+    /// Health professional registration info extracted from the SAN (CRM, CRO, or sequential).
+    /// Null when the certificate was not issued to a health professional.
+    /// Use this to verify prescriptions eletrônicas per CFM/CFF regulations.
+    /// </summary>
+    public HealthProfessionalInfo? HealthProfessional { get; init; }
     /// <summary>Certificate chain elements with individual validation results.</summary>
     public IReadOnlyList<IcpBrasilChainElement> ChainElements { get; init; } = [];
     /// <summary>Bundled AC Raiz (root CA) certificates used for chain building.</summary>

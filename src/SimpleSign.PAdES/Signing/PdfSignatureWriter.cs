@@ -171,7 +171,7 @@ public sealed class PdfSignatureWriter
         // EU DSS to flag the 1st signature as inconsistent.
         bool needCatalogUpdate = !reuseAcroForm || options.CertificationLevel is not null;
         byte[]? catalogBytes = needCatalogUpdate
-            ? BuildCatalogDictionary(catalogObjNum, inputMem.Span, acroFormObjNum, sigObjNum, options.CertificationLevel)
+            ? BuildCatalogDictionary(catalogObjNum, inputMem.Span, acroFormObjNum, options.CertificationLevel)
             : null;
 
         // Step 6: Write objects and compute byte offsets.
@@ -389,7 +389,7 @@ public sealed class PdfSignatureWriter
         {
             int existingAcroFormObjNum = PdfStructureParser.FindAcroFormObjNum(inputMem.Span, catalogObjNum);
             int acroFormObjNum = existingAcroFormObjNum > 0 ? existingAcroFormObjNum : (nextObjNum + 1);
-            byte[] catalogBytes = BuildCatalogDictionary(catalogObjNum, inputMem.Span, acroFormObjNum, sigObjNum, options.CertificationLevel);
+            byte[] catalogBytes = BuildCatalogDictionary(catalogObjNum, inputMem.Span, acroFormObjNum, options.CertificationLevel);
             long catalogObjOffset = outputStream.Position;
             await outputStream.WriteAsync(catalogBytes, cancellationToken).ConfigureAwait(false);
             objectOffsets[catalogObjNum] = catalogObjOffset;
@@ -525,7 +525,7 @@ public sealed class PdfSignatureWriter
 
     // ── Private: AcroForm & Catalog builders ─────────────────────────────────
 
-    private static byte[] BuildCatalogDictionary(int catalogObjNum, ReadOnlySpan<byte> data, int acroFormObjNum, int sigObjNum = 0, CertificationLevel? certLevel = null)
+    private static byte[] BuildCatalogDictionary(int catalogObjNum, ReadOnlySpan<byte> data, int acroFormObjNum, CertificationLevel? certLevel = null)
     {
         var (objStart, objEnd) = PdfStructureParser.FindObjectBytes(data, catalogObjNum);
         if (objStart >= 0)
@@ -534,13 +534,11 @@ public sealed class PdfSignatureWriter
             string updatedCatalog = PdfStructureParser.RemoveKeyFromDict(catalogText, "/AcroForm");
             if (certLevel is not null)
             {
+                // ITI guide: do NOT add /Perms with /DocMDP to the catalog (Adobe compatibility issues).
+                // The /Reference array in the signature object is sufficient for DocMDP.
                 updatedCatalog = PdfStructureParser.RemoveKeyFromDict(updatedCatalog, "/Perms");
             }
             string inserts = $"   /AcroForm {acroFormObjNum} 0 R\n";
-            if (certLevel is not null && sigObjNum > 0)
-            {
-                inserts += $"   /Perms << /DocMDP {sigObjNum} 0 R >>\n";
-            }
             updatedCatalog = PdfStructureParser.InsertIntoDict(updatedCatalog, inserts);
             if (!updatedCatalog.EndsWith('\n'))
             {
@@ -561,13 +559,10 @@ public sealed class PdfSignatureWriter
             string updatedCatalog = PdfStructureParser.RemoveKeyFromDict(fullObj, "/AcroForm");
             if (certLevel is not null)
             {
+                // ITI guide: do NOT add /Perms with /DocMDP to the catalog (Adobe compatibility issues).
                 updatedCatalog = PdfStructureParser.RemoveKeyFromDict(updatedCatalog, "/Perms");
             }
             string inserts = $"   /AcroForm {acroFormObjNum} 0 R\n";
-            if (certLevel is not null && sigObjNum > 0)
-            {
-                inserts += $"   /Perms << /DocMDP {sigObjNum} 0 R >>\n";
-            }
             updatedCatalog = PdfStructureParser.InsertIntoDict(updatedCatalog, inserts);
             if (!updatedCatalog.EndsWith('\n'))
             {
@@ -576,10 +571,9 @@ public sealed class PdfSignatureWriter
             return Encoding.Latin1.GetBytes(updatedCatalog);
         }
 
-        string permsStr = certLevel is not null && sigObjNum > 0
-            ? $" /Perms << /DocMDP {sigObjNum} 0 R >>"
-            : "";
-        return Encoding.Latin1.GetBytes($"{catalogObjNum} 0 obj\n<< /Type /Catalog /AcroForm {acroFormObjNum} 0 R{permsStr} >>\nendobj\n");
+        // ITI guide: do NOT add /Perms with /DocMDP to the catalog (Adobe compatibility issues).
+        // The /Reference array in the signature object is sufficient for DocMDP.
+        return Encoding.Latin1.GetBytes($"{catalogObjNum} 0 obj\n<< /Type /Catalog /AcroForm {acroFormObjNum} 0 R >>\nendobj\n");
     }
 
     internal static byte[] BuildAcroFormDictionary(int acroFormObjNum, ReadOnlySpan<byte> data, int existingAcroFormObjNum, int fieldObjNum, int catalogObjNum = 0)

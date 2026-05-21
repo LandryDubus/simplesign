@@ -38,14 +38,58 @@ public sealed class IcpBrasilChainValidator
     // Extra URLs (future versions not bundled) — used as online fallback
     private static readonly string[] ExtraAcRaizCertUrls = [];
 
-    // OIDs for ICP-Brasil certificate policies
+    // OIDs for ICP-Brasil certificate policies per DOC-ICP-15.03.
+    // Format: 2.16.76.1.7.1.{policy}.{certType}.{version}
+    //   policy:   1=AD-RB, 2=AD-RT, 3=AD-RV, 4=AD-RC, 5=AD-RA
+    //   certType: 1=PF (natural person), 2=PJ (legal entity)
+    //   version:  1=v1.0, 2=v2.0, 3=v3.0 (current)
     private static readonly Dictionary<IcpBrasilPolicy, string[]> PolicyOids = new()
     {
-        [IcpBrasilPolicy.AdRb] = ["2.16.76.1.7.1.1.2.3", "2.16.76.1.7.1.1.1.3"],
-        [IcpBrasilPolicy.AdRt] = ["2.16.76.1.7.1.2.2.3", "2.16.76.1.7.1.2.1.3"],
-        [IcpBrasilPolicy.AdRv] = ["2.16.76.1.7.1.3.2.3", "2.16.76.1.7.1.3.1.3"],
-        [IcpBrasilPolicy.AdRc] = ["2.16.76.1.7.1.4.2.3", "2.16.76.1.7.1.4.1.3"],
-        [IcpBrasilPolicy.AdRa] = ["2.16.76.1.7.1.5.2.3", "2.16.76.1.7.1.5.1.3"],
+        [IcpBrasilPolicy.AdRb] =
+        [
+            "2.16.76.1.7.1.1.2.3", // PJ v3 (current)
+            "2.16.76.1.7.1.1.1.3", // PF v3 (current)
+            "2.16.76.1.7.1.1.2.2", // PJ v2
+            "2.16.76.1.7.1.1.1.2", // PF v2
+            "2.16.76.1.7.1.1.2.1", // PJ v1
+            "2.16.76.1.7.1.1.1.1", // PF v1
+        ],
+        [IcpBrasilPolicy.AdRt] =
+        [
+            "2.16.76.1.7.1.2.2.3",
+            "2.16.76.1.7.1.2.1.3",
+            "2.16.76.1.7.1.2.2.2",
+            "2.16.76.1.7.1.2.1.2",
+            "2.16.76.1.7.1.2.2.1",
+            "2.16.76.1.7.1.2.1.1",
+        ],
+        [IcpBrasilPolicy.AdRv] =
+        [
+            "2.16.76.1.7.1.3.2.3",
+            "2.16.76.1.7.1.3.1.3",
+            "2.16.76.1.7.1.3.2.2",
+            "2.16.76.1.7.1.3.1.2",
+            "2.16.76.1.7.1.3.2.1",
+            "2.16.76.1.7.1.3.1.1",
+        ],
+        [IcpBrasilPolicy.AdRc] =
+        [
+            "2.16.76.1.7.1.4.2.3",
+            "2.16.76.1.7.1.4.1.3",
+            "2.16.76.1.7.1.4.2.2",
+            "2.16.76.1.7.1.4.1.2",
+            "2.16.76.1.7.1.4.2.1",
+            "2.16.76.1.7.1.4.1.1",
+        ],
+        [IcpBrasilPolicy.AdRa] =
+        [
+            "2.16.76.1.7.1.5.2.3",
+            "2.16.76.1.7.1.5.1.3",
+            "2.16.76.1.7.1.5.2.2",
+            "2.16.76.1.7.1.5.1.2",
+            "2.16.76.1.7.1.5.2.1",
+            "2.16.76.1.7.1.5.1.1",
+        ],
     };
 
     private readonly HttpClient _httpClient;
@@ -94,6 +138,8 @@ public sealed class IcpBrasilChainValidator
         var policy = DetectPolicy(certificate);
         bool isIcpBrasil = IsIcpBrasilCertificate(certificate);
         var certLevel = DetectCertificateLevel(certificate);
+        var (cpf, cnpj) = ExtractCpfCnpj(certificate, _logger);
+        var healthProfessional = ExtractHealthProfessional(certificate, _logger);
 
         if (!isIcpBrasil)
         {
@@ -155,6 +201,9 @@ public sealed class IcpBrasilChainValidator
                 IsIcpBrasilCertificate = isIcpBrasil,
                 DetectedPolicy = policy,
                 CertificateLevel = certLevel,
+                Cpf = cpf,
+                Cnpj = cnpj,
+                HealthProfessional = healthProfessional,
                 ChainElements = chainElements.AsReadOnly(),
                 AcRaizCertificates = acRaizCerts.AsReadOnly(),
                 Errors = errors.AsReadOnly(),
@@ -333,6 +382,78 @@ public sealed class IcpBrasilChainValidator
         catch (InvalidOperationException ex) { logger?.SanParsingFailed(ex.Message); }
 
         return (cpf, cnpj);
+    }
+
+    /// <summary>
+    /// Extracts health professional registration info from an ICP-Brasil certificate SAN.
+    /// Reads OIDs 2.16.76.1.3.4 (CRM), 2.16.76.1.3.5 (CRO), and 2.16.76.1.3.6 (sequential)
+    /// as defined in DOC-ICP-04 for electronic prescriptions (prescrições eletrônicas).
+    /// Returns <c>null</c> when no health professional OID is present.
+    /// </summary>
+    public static HealthProfessionalInfo? ExtractHealthProfessional(X509Certificate2 certificate, ILogger? logger = null)
+    {
+        ArgumentNullException.ThrowIfNull(certificate);
+
+        var sanExt = certificate.Extensions[Oids.SubjectAltName];
+        if (sanExt is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            var reader = new AsnReader(sanExt.RawData, AsnEncodingRules.BER);
+            var seq = reader.ReadSequence();
+            while (seq.HasData)
+            {
+                var tag = seq.PeekTag();
+                if (tag.TagClass == TagClass.ContextSpecific && tag.TagValue == 0)
+                {
+                    var otherName = seq.ReadSequence(tag);
+                    string oid = otherName.ReadObjectIdentifier();
+                    if (otherName.HasData)
+                    {
+                        var valueWrapper = otherName.ReadSequence(
+                            new Asn1Tag(TagClass.ContextSpecific, 0, true));
+                        byte[] rawValue = valueWrapper.ReadEncodedValue().ToArray();
+                        string textValue = ExtractStringFromAsn1Value(rawValue).Trim();
+
+                        if (oid == Constants.BrasilOids.IcpBrasilSanCrm && !string.IsNullOrWhiteSpace(textValue))
+                        {
+                            return new HealthProfessionalInfo
+                            {
+                                Council = HealthProfessionalCouncil.Crm,
+                                RegistrationNumber = textValue,
+                            };
+                        }
+                        else if (oid == Constants.BrasilOids.IcpBrasilSanCro && !string.IsNullOrWhiteSpace(textValue))
+                        {
+                            return new HealthProfessionalInfo
+                            {
+                                Council = HealthProfessionalCouncil.Cro,
+                                RegistrationNumber = textValue,
+                            };
+                        }
+                        else if (oid == Constants.BrasilOids.IcpBrasilSanSequential && !string.IsNullOrWhiteSpace(textValue))
+                        {
+                            return new HealthProfessionalInfo
+                            {
+                                Council = HealthProfessionalCouncil.Sequential,
+                                RegistrationNumber = textValue,
+                            };
+                        }
+                    }
+                }
+                else
+                {
+                    seq.ReadEncodedValue();
+                }
+            }
+        }
+        catch (AsnContentException ex) { logger?.SanParsingFailed(ex.Message); }
+        catch (InvalidOperationException ex) { logger?.SanParsingFailed(ex.Message); }
+
+        return null;
     }
 
     private static string ExtractStringFromAsn1Value(byte[] encoded)

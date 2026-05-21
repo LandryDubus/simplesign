@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.3] - 2026-05-21
+
+### Fixed (Security)
+
+- **Shadow Attack mitigation** — trailing unsigned content after the last signature's ByteRange is now validated structurally (requires `xref`/cross-reference stream + `startxref` + `%%EOF`); previously only checked for the `%%EOF` string, allowing arbitrary content injection disguised as a valid update
+- **Unknown hash OID in signingCertificateV2** — throws `NotSupportedException` instead of silently falling back to SHA-256; prevents an attacker from using a fake algorithm OID to bind a signature to a substitute certificate
+- **RSA-PSS NULL parameter** — `SignatureAlgorithmUsesNullParameter` now correctly returns `false` for RSA-PSS (`1.2.840.113549.1.1.10`); RFC 4055 requires `RSASSA-PSS-params`, not NULL; fixes rejection by strict validators (eIDAS, ICP-Brasil Verificador)
+- **OCSP CertID verification** — `ParseOcspResponse` now verifies the `CertID` in the response matches the certificate requested (issuerNameHash + serialNumber), as required by RFC 6960 §3.2; single-response fallback preserved for compatibility
+- **SSRF DNS rebinding bypass** — `UrlValidator.IsSafeUrl` now resolves hostnames to IP addresses before applying private-range checks, blocking rebinding attacks via domains that resolve to `127.0.0.1` or `169.254.169.254`; IPv4-mapped IPv6 addresses (`::ffff:x.x.x.x`) are also checked
+- **`HttpResponseMessage` leak on retry** — `ResilientHttp.Pipeline` now disposes the previous `HttpResponseMessage` in the `OnRetry` callback; previously each 5xx retry leaked a response and its underlying network stream
+- **TimestampValidator double-read** — TSA certificate bytes are now read before the `try` block in the ASN.1 loop; a `CryptographicException` on `LoadCertificate` no longer silently consumes the next certificate in the set
+- **`PdfByteRange.IsValid` overflow** — added guard for `Offset2 + Length2` overflow; a malformed PDF with near-max values could previously cause `CoversEntireFile` to incorrectly return `true`
+
+### Added
+
+- **`ValidarItiUrlBuilder`** — static helper to generate `https://validar.iti.gov.br/?document=<url>` links for QR code embedding in signed documents
+- **CPF/CNPJ on `IcpBrasilValidationResult`** — new properties `Cpf`, `Cnpj`, `CpfFormatted` (`XXX.XXX.XXX-XX`), and `CnpjFormatted` (`XX.XXX.XXX/XXXX-XX`) extracted from the certificate SAN
+- **Health professional data** — `IcpBrasilValidationResult.HealthProfessional` exposes CRM/CRO registration number and state code for e-prescriptions (DOC-ICP-04 OIDs `2.16.76.1.3.4`/`.3.5`/`.3.6`)
+- **Complete DOC-ICP-15.03 policy OIDs** — `PolicyOids` expanded from 2 to 6 variants per policy level, covering all combinations of version (v1/v2/v3) × certificate type (PF/PJ); previously AD-RB–AD-RA only recognised v3 certs
+- **Sponsor button** — `.github/FUNDING.yml` added (GitHub Sponsors via `eupassarin`)
+
 ## [0.2.2] - 2026-05-20
 
 ### Fixed
@@ -82,6 +103,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **HostSigner** — React/shadcn UI overhaul
 - **README** — comprehensive rewrite: lib-focused structure, real benchmark numbers, dependency clarity, merged enterprise features
 
+[0.2.3]: https://github.com/eupassarin/SimpleSign/releases/tag/v0.2.3
 [0.2.2]: https://github.com/eupassarin/SimpleSign/releases/tag/v0.2.2
 [0.2.1]: https://github.com/eupassarin/SimpleSign/releases/tag/v0.2.1
 [0.2.0]: https://github.com/eupassarin/SimpleSign/releases/tag/v0.2.0

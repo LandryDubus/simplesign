@@ -13,7 +13,7 @@
   <img src="https://img.shields.io/badge/.NET-8%20%7C%2010-512BD4?style=flat-square&logo=dotnet" alt=".NET 8 | 10" />
   <img src="https://img.shields.io/badge/License-MIT-green?style=flat-square" alt="MIT License" />
   <img src="https://img.shields.io/badge/AOT-Compatible-blueviolet?style=flat-square" alt="Native AOT" />
-  <img src="https://img.shields.io/badge/Tests-1%2C602-brightgreen?style=flat-square" alt="1,602 tests" />
+  <img src="https://img.shields.io/badge/Tests-1%2C643-brightgreen?style=flat-square" alt="1,643 tests" />
   <img src="https://img.shields.io/badge/No%20Crypto%20Deps-✓-blue?style=flat-square" alt="No third-party crypto dependencies" />
 </p>
 
@@ -24,6 +24,26 @@
 SimpleSign is a .NET library for creating and validating **digitally signed PDF documents** according to European (ETSI) and Brazilian (ICP-Brasil) standards, implementing PAdES (ETSI EN 319 142).
 
 All cryptography is handled by `System.Security.Cryptography` — **no third-party crypto libraries** are used. Runtime dependencies are limited to Polly (resilience), RecyclableMemoryStream (pooling), QRCoder (appearance QR codes), and Microsoft.Extensions abstractions — **nothing** touches your keys but the BCL.
+
+---
+
+## What's New in v0.2.3
+
+**Security hardening:**
+- 🛡️ **Shadow Attack mitigation** — trailing unsigned content is now structurally validated (not just checked for `%%EOF`)
+- 🔐 **OCSP CertID verification** — responses are matched to the requested certificate (RFC 6960 §3.2)
+- 🔒 **SSRF DNS rebinding protection** — hostnames are resolved before private-range checks; IPv4-mapped IPv6 covered
+- 🚫 **Unknown hash OID throws** instead of silently falling back to SHA-256 in `signingCertificateV2`
+- ✅ **RSA-PSS parameters fixed** — no longer emits `NULL` where RFC 4055 requires `RSASSA-PSS-params`
+
+**ICP-Brasil / ITI VALIDAR improvements:**
+- 🆔 **CPF & CNPJ** exposed on `IcpBrasilValidationResult` with formatted properties
+- 🏥 **Health professional data** (CRM/CRO) extracted from SAN — useful for e-prescriptions
+- 📋 **Complete DOC-ICP-15.03 policy OIDs** — all v1/v2/v3 × PF/PJ variants now recognised
+- 🔗 **`ValidarItiUrlBuilder`** — generate VALIDAR portal links for QR code embedding
+- 🚫 **`/Perms` removed from PDF catalog** — fixes "Assinatura Indeterminada" on the VALIDAR portal
+
+See the [full changelog](CHANGELOG.md) for details.
 
 ---
 
@@ -272,6 +292,34 @@ var result = await validator.ValidateAsync(signedPdf);
 // result.Level: AD_RB, AD_RT, AD_RV, AD_RC, AD_RA
 ```
 
+### CPF / CNPJ Extraction
+
+```csharp
+// CPF and CNPJ are automatically extracted from the certificate SAN
+Console.WriteLine(result.CpfFormatted);   // "123.456.789-09"
+Console.WriteLine(result.CnpjFormatted);  // "12.345.678/0001-90"
+```
+
+### Health Professional Data (e-Prescriptions)
+
+```csharp
+// CRM/CRO registration extracted from SAN (DOC-ICP-04)
+if (result.HealthProfessional is { } hp)
+{
+    Console.WriteLine($"Council: {hp.Council}");           // Crm / Cro
+    Console.WriteLine($"State:   {hp.StateCode}");         // "SP"
+    Console.WriteLine($"Number:  {hp.RegistrationNumber}"); // "SP123456"
+}
+```
+
+### VALIDAR ITI Portal Link
+
+```csharp
+// Generate a direct VALIDAR link for QR code embedding in a signed document
+string url = ValidarItiUrlBuilder.ForDocument("https://storage.example.com/doc.pdf");
+// → "https://validar.iti.gov.br/?document=https%3A%2F%2Fstorage..."
+```
+
 ### Gov.br Validation
 
 ```csharp
@@ -414,6 +462,12 @@ contract-signed.pdf  1/1 valid
 ## Contributing
 
 Contributions are welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) before submitting a pull request.
+
+---
+
+## Sponsoring
+
+If SimpleSign is useful to you or your organisation, consider [sponsoring the project on GitHub](https://github.com/sponsors/eupassarin). Your support helps keep the library maintained, secure, and free for everyone.
 
 ---
 

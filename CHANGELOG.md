@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.2] - 2026-05-20
+
+### Fixed
+
+- **CAdES signingTime** — `signingTime` signed attribute is no longer included; the attribute is not allowed by ETSI EN 319 122 and was causing conformance errors (CheckAllowedAttributes violation)
+- **Null guard in ValidateChainStep** — `PdfSignatureValidator.ValidateChainStep` no longer throws `NullReferenceException` when the signer certificate is absent; returns a clean validation error instead
+- **Async AIA chain fetching** — `PdfSignatureValidator.ValidateChainStep` is now async and pre-fetches AIA certificates before `X509Chain.Build()`, fixing silent chain failures on macOS/Linux where auto-fetch is unreliable
+- **BFS AIA chasing** — `CertificateChainUtility` now performs breadth-first multi-tier AIA chasing, enabling full ICP-Brasil intermediate chain resolution
+- **P7B certificate bags** — `CertificateLoader` and `CertificateChainUtility.LoadCertsFromBytes` now handle PKCS#7 certificate bags (`.p7b`)
+- **ICP-Brasil trust anchors** — `HostSigner` and `ValidationService` now inject `BrasilExtension` trust anchor providers so ICP-Brasil chains validate correctly
+
 ## [0.2.1] - 2026-05-19
 
 ### Fixed
@@ -71,5 +82,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **HostSigner** — React/shadcn UI overhaul
 - **README** — comprehensive rewrite: lib-focused structure, real benchmark numbers, dependency clarity, merged enterprise features
 
+[0.2.2]: https://github.com/eupassarin/SimpleSign/releases/tag/v0.2.2
 [0.2.1]: https://github.com/eupassarin/SimpleSign/releases/tag/v0.2.1
 [0.2.0]: https://github.com/eupassarin/SimpleSign/releases/tag/v0.2.0

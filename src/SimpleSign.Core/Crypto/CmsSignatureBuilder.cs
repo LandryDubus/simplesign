@@ -475,6 +475,7 @@ public sealed class CmsSignatureBuilder
     {
         Oids.EcdsaSha256 or Oids.EcdsaSha384 or Oids.EcdsaSha512 => false,
         Oids.Ed25519 or Oids.Ed448 => false,
+        Oids.RsaPss => false,
         _ => true
     };
     #endregion

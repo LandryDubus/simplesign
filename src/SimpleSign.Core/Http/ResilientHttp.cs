@@ -36,6 +36,11 @@ internal static class ResilientHttp
                     .Handle<HttpRequestException>()
                     .Handle<TaskCanceledException>()
                     .HandleResult(r => r.StatusCode >= HttpStatusCode.InternalServerError),
+                OnRetry = args =>
+                {
+                    args.Outcome.Result?.Dispose();
+                    return default;
+                },
             })
             .Build();
 

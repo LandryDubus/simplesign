@@ -169,6 +169,12 @@ internal sealed class OcspClient
             throw new InvalidDataException("OCSP response is empty.");
         }
 
+        // Compute expected CertID fields for matching (RFC 6960 §3.2)
+#pragma warning disable CA5350 // OCSP RFC 2560 mandates SHA-1 for CertID
+        byte[] expectedIssuerNameHash = SHA1.HashData(cert.IssuerName.RawData);
+        byte[] expectedSerialNumber = cert.SerialNumberBytes.ToArray();
+#pragma warning restore CA5350
+
         // RFC 6960: responseBytes [0] EXPLICIT ResponseBytes
         // ResponseBytes ::= SEQUENCE { responseType OID, response OCTET STRING }
         // The [0] EXPLICIT wrapper holds the *encoded* inner SEQUENCE — we must unwrap
@@ -247,27 +253,46 @@ internal sealed class OcspClient
             tbsResponseData.ReadEncodedValue(); // producedAt
 
             var responses = tbsResponseData.ReadSequence();
+            int? firstCertStatus = null;
+            bool foundMatch = false;
             while (responses.HasData)
             {
                 var single = responses.ReadSequence();
-                single.ReadSequence(); // CertID
+
+                // CertID ::= SEQUENCE { hashAlgorithm, issuerNameHash, issuerKeyHash, serialNumber }
+                // Verify that this response is for the certificate we requested (RFC 6960 §3.2)
+                var certIdSeq = single.ReadSequence();
+                certIdSeq.ReadSequence(); // hashAlgorithm — skip (we know it's SHA-1 from our request)
+                byte[] respIssuerNameHash = certIdSeq.ReadOctetString();
+                certIdSeq.ReadOctetString(); // issuerKeyHash — skip (not always available for matching)
+                var respSerialNumber = certIdSeq.ReadIntegerBytes().ToArray();
 
                 var certStatusTag = single.PeekTag();
-                if (certStatusTag.TagClass == TagClass.ContextSpecific)
+                int? statusValue = certStatusTag.TagClass == TagClass.ContextSpecific ? certStatusTag.TagValue : null;
+
+                // Track the first response as fallback (single-response OCSP is the common case)
+                firstCertStatus ??= statusValue;
+
+                bool certIdMatches = respIssuerNameHash.AsSpan().SequenceEqual(expectedIssuerNameHash) &&
+                                     respSerialNumber.AsSpan().SequenceEqual(expectedSerialNumber);
+                if (!certIdMatches)
                 {
-                    switch (certStatusTag.TagValue)
-                    {
-                        case 0:
-                            logger?.OcspStatusGood();
-                            return true;  // good
-                        case 1:
-                            logger?.OcspStatusRevoked();
-                            return false; // revoked
-                        case 2:
-                            throw new InvalidOperationException("OCSP response indicates certificate status is 'unknown'.");
-                    }
+                    continue;
+                }
+
+                foundMatch = true;
+                if (statusValue.HasValue)
+                {
+                    return HandleCertStatus(statusValue.Value, logger);
                 }
                 break;
+            }
+
+            // Fallback: if no CertID matched but there's exactly one response, use it
+            // (most OCSP responders return a single SingleResponse per request)
+            if (!foundMatch && firstCertStatus.HasValue)
+            {
+                return HandleCertStatus(firstCertStatus.Value, logger);
             }
 
             throw new InvalidDataException("OCSP response does not contain a valid certificate status.");
@@ -276,6 +301,28 @@ internal sealed class OcspClient
         {
             responderCert?.Dispose();
         }
+    }
+
+    private static bool HandleCertStatus(int statusValue, ILogger? logger) => statusValue switch
+    {
+        0 => LogAndReturn(true, logger),
+        1 => LogAndReturn(false, logger),
+        2 => throw new InvalidOperationException("OCSP response indicates certificate status is 'unknown'."),
+        _ => throw new InvalidDataException($"OCSP response contains unexpected cert status tag: {statusValue}.")
+    };
+
+    private static bool LogAndReturn(bool isGood, ILogger? logger)
+    {
+        if (isGood)
+        {
+            logger?.OcspStatusGood();
+        }
+        else
+        {
+            logger?.OcspStatusRevoked();
+        }
+
+        return isGood;
     }
 
     internal static bool VerifyOcspSignature(X509Certificate2 responderCert, byte[] tbsData, byte[] signature, string sigAlgOid, ILogger? logger = null)

@@ -48,8 +48,9 @@ internal static class IntegrityVerifier
             if (isLastSignature)
             {
                 // PAdES B-LT: DSS/VRI are appended after the last approval signature as a valid
-                // incremental update. Check if the trailing content is a legitimate PDF update
-                // (contains %%EOF) rather than arbitrary tampering.
+                // incremental update. Validate that trailing content has the structure of a
+                // legitimate PDF incremental update (xref/cross-reference stream + trailer + %%EOF)
+                // rather than arbitrary content injection (Shadow Attack mitigation).
                 bool trailingContentIsValidUpdate = false;
                 if (pdfStream.CanSeek && expectedEnd < pdfStream.Length)
                 {
@@ -62,7 +63,7 @@ internal static class IntegrityVerifier
                         int read = await pdfStream.ReadAsync(trailing.AsMemory(0, trailingSize), cancellationToken).ConfigureAwait(false);
                         if (read > 0)
                         {
-                            trailingContentIsValidUpdate = trailing.AsSpan(0, read).IndexOf("%%EOF"u8) >= 0;
+                            trailingContentIsValidUpdate = IsValidIncrementalUpdate(trailing.AsSpan(0, read));
                         }
                     }
                     finally
@@ -136,7 +137,7 @@ internal static class IntegrityVerifier
             string message = $"ByteRange does not cover entire PDF. Expected {pdfStream.Length} bytes but ByteRange ends at {expectedEnd}.";
             if (isLastSignature)
             {
-                // Check if trailing content is a valid incremental update (contains %%EOF)
+                // Check if trailing content is a valid incremental update
                 bool trailingContentIsValidUpdate = false;
                 if (expectedEnd < pdfStream.Length)
                 {
@@ -149,7 +150,7 @@ internal static class IntegrityVerifier
                         int read = await pdfStream.ReadAsync(trailing.AsMemory(0, trailingSize), cancellationToken).ConfigureAwait(false);
                         if (read > 0)
                         {
-                            trailingContentIsValidUpdate = trailing.AsSpan(0, read).IndexOf("%%EOF"u8) >= 0;
+                            trailingContentIsValidUpdate = IsValidIncrementalUpdate(trailing.AsSpan(0, read));
                         }
                     }
                     finally
@@ -384,5 +385,34 @@ internal static class IntegrityVerifier
             hash.AppendData(buffer, 0, read);
             remaining -= read;
         }
+    }
+
+    /// <summary>
+    /// Validates that trailing content has the structural markers of a legitimate PDF
+    /// incremental update rather than arbitrary injected content (Shadow Attack mitigation).
+    /// Requires: xref/cross-reference stream marker, startxref pointer, and %%EOF terminator.
+    /// </summary>
+    private static bool IsValidIncrementalUpdate(ReadOnlySpan<byte> trailing)
+    {
+        // Must contain %%EOF marker
+        if (trailing.IndexOf("%%EOF"u8) < 0)
+        {
+            return false;
+        }
+
+        // Must contain startxref keyword (points to xref table/stream)
+        if (trailing.IndexOf("startxref"u8) < 0)
+        {
+            return false;
+        }
+
+        // Must contain either traditional xref table or a cross-reference stream object.
+        // Traditional xref starts with "xref" keyword.
+        // Cross-reference streams use /Type /XRef inside a stream object.
+        bool hasTraditionalXref = trailing.IndexOf("xref"u8) >= 0;
+        bool hasCrossRefStream = trailing.IndexOf("/Type /XRef"u8) >= 0 ||
+                                 trailing.IndexOf("/Type/XRef"u8) >= 0;
+
+        return hasTraditionalXref || hasCrossRefStream;
     }
 }

@@ -6,12 +6,14 @@ namespace SimpleSign.Core.Http;
 /// <summary>
 /// Validates URLs to prevent SSRF (Server-Side Request Forgery) attacks.
 /// Blocks requests to localhost, private/reserved IP ranges, and non-HTTP(S) schemes.
+/// Resolves hostnames to IP addresses before validation to prevent DNS rebinding.
 /// </summary>
 internal static class UrlValidator
 {
     /// <summary>
     /// Validates that a URL is safe for outbound HTTP requests (CRL, OCSP, AIA, TSA).
     /// Blocks localhost, private IPs, link-local, and non-HTTP(S) schemes.
+    /// Resolves hostnames and validates all resolved addresses.
     /// </summary>
     internal static bool IsSafeUrl(string url)
     {
@@ -41,6 +43,24 @@ internal static class UrlValidator
             return IsPrivateOrReserved(ip);
         }
 
+        // Resolve hostname and check all resolved IPs to prevent DNS rebinding
+        try
+        {
+            var addresses = Dns.GetHostAddresses(host);
+            foreach (var address in addresses)
+            {
+                if (IsPrivateOrReserved(address))
+                {
+                    return true;
+                }
+            }
+        }
+        catch (SocketException)
+        {
+            // DNS resolution failed — allow through (HTTP client will handle the connection failure).
+            // Blocking here would break offline scenarios and test environments.
+        }
+
         return false;
     }
 
@@ -51,9 +71,19 @@ internal static class UrlValidator
             return true;
         }
 
-        if (ip.AddressFamily == AddressFamily.InterNetworkV6 && ip.IsIPv6LinkLocal)
+        if (ip.AddressFamily == AddressFamily.InterNetworkV6)
         {
-            return true;
+            if (ip.IsIPv6LinkLocal)
+            {
+                return true;
+            }
+
+            // Check IPv4-mapped IPv6 addresses (::ffff:x.x.x.x)
+            if (ip.IsIPv4MappedToIPv6)
+            {
+                var mapped = ip.MapToIPv4();
+                return IsPrivateOrReserved(mapped);
+            }
         }
 
         byte[] bytes = ip.GetAddressBytes();

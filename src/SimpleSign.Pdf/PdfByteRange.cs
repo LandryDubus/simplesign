@@ -61,6 +61,12 @@ public sealed class PdfByteRange
                 return false;
             }
 
+            // Guard against Offset2 + Length2 overflow (used in CoversEntireFile)
+            if (Offset2 > long.MaxValue - Length2)
+            {
+                return false;
+            }
+
             // Guard against Length1 + Length2 overflow for array allocation
             if (Length1 + Length2 > int.MaxValue)
             {

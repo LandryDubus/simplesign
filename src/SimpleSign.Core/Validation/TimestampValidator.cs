@@ -159,9 +159,10 @@ internal static class TimestampValidator
                 var certsWrapper = tsaSd.ReadSequence(new Asn1Tag(TagClass.ContextSpecific, 0, true));
                 while (certsWrapper.HasData)
                 {
+                    var certBytes = certsWrapper.ReadEncodedValue().ToArray();
                     try
-                    { tsaCerts.Add(CertificateLoader.LoadCertificate(certsWrapper.ReadEncodedValue().ToArray())); }
-                    catch (CryptographicException ex) { logger?.TsaCertLoadingFailed(ex.Message); certsWrapper.ReadEncodedValue(); }
+                    { tsaCerts.Add(CertificateLoader.LoadCertificate(certBytes)); }
+                    catch (CryptographicException ex) { logger?.TsaCertLoadingFailed(ex.Message); }
                 }
             }
             // Skip CRLs [1] OPTIONAL

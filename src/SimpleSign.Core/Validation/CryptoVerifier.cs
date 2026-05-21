@@ -93,10 +93,13 @@ internal static class CryptoVerifier
 #pragma warning disable CA5350 // SHA-1 is required for validating legacy V1 signingCertificate attributes
             byte[] actualCertHash = cmsData.SigningCertificateHashAlgorithmOid switch
             {
+                null or "" => SHA256.HashData(certData), // SHA-256 is default for V2 when no OID specified
+                Oids.Sha256 => SHA256.HashData(certData),
                 Oids.Sha384 => SHA384.HashData(certData),
                 Oids.Sha512 => SHA512.HashData(certData),
                 Oids.Sha1 => SHA1.HashData(certData),
-                _ => SHA256.HashData(certData) // SHA-256 (default for V2) and unknown OIDs
+                _ => throw new NotSupportedException(
+                    $"Unsupported hash algorithm OID '{cmsData.SigningCertificateHashAlgorithmOid}' in signingCertificateV2 attribute.")
             };
 #pragma warning restore CA5350
 

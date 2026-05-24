@@ -145,14 +145,14 @@ public sealed class BatchSignerBuilderTests
         builder.EnableLtv.ShouldBeTrue();
     }
 
-    [Fact(DisplayName = "WithArchivalTimestamp stores URL and implies LTV")]
-    public void WithArchivalTimestamp_EnablesLtvAndStoresUrl()
+    [Fact(DisplayName = "WithArchivalTimestamp stores URL (no longer implies LTV)")]
+    public void WithArchivalTimestamp_StoresUrl()
     {
         using var cert = TestCertificateFactory.CreateSelfSignedCert();
         var builder = BatchSigner.Create(cert).WithArchivalTimestamp("http://tsa.example.com");
 
         builder.ArchivalTsaUrl.ShouldBe("http://tsa.example.com");
-        builder.EnableLtv.ShouldBeTrue();
+        builder.EnableLtv.ShouldBeFalse();
     }
 
     [Fact(DisplayName = "Build with LTV but no TSA throws SigningException")]

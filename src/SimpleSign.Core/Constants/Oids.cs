@@ -139,6 +139,13 @@ internal static class Oids
 
     #endregion
 
+    #region OCSP
+
+    /// <summary>id-pkix-ocsp-nocheck (RFC 6960 §4.2.2.2.1) — marks OCSP responder certs as exempt from revocation checking.</summary>
+    internal const string OcspNoCheck = "1.3.6.1.5.5.7.48.1.5";
+
+    #endregion
+
     #region Extended Key Usage
 
     /// <summary>Microsoft Document Signing EKU.</summary>

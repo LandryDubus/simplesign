@@ -422,15 +422,16 @@ public sealed class SignerBuilder
         }
 
         // 4. Applies timestamp, if configured
+        byte[]? timestampTokenBytes = null;
         if (_tsaUrl is not null)
         {
             _logger.TimestampRequested(opId, _tsaUrl);
             var httpClient = _httpClient ?? _httpClientProvider.GetClient();
             var tsaClient = new TimestampClient(httpClient, _tsaUrl, _logger);
-            byte[] tsToken = await tsaClient.GetTimestampAsync(
+            timestampTokenBytes = await tsaClient.GetTimestampAsync(
                 TimestampClient.ExtractSignatureValue(cms), _hashAlgorithm, cancellationToken).ConfigureAwait(false);
-            cms = TimestampClient.EmbedTimestampInCms(cms, tsToken);
-            _logger.TimestampEmbedded(opId, tsToken.Length);
+            cms = TimestampClient.EmbedTimestampInCms(cms, timestampTokenBytes);
+            _logger.TimestampEmbedded(opId, timestampTokenBytes.Length);
         }
 
         // 5. Inserts the CMS into the PDF
@@ -455,7 +456,7 @@ public sealed class SignerBuilder
                 chain.Insert(0, _certificate!);
             }
 
-            byte[] ltvPdf = await ltvEmbedder.EmbedLtvDataAsync(signedPdf, chain, cancellationToken).ConfigureAwait(false);
+            byte[] ltvPdf = await ltvEmbedder.EmbedLtvDataAsync(signedPdf, chain, timestampTokenBytes, cancellationToken).ConfigureAwait(false);
 
             // Detect whether DSS was actually embedded (EmbedLtvDataAsync returns the original
             // reference when revocation data was unavailable — no data, no DSS, same object back).
@@ -569,24 +570,45 @@ public sealed class SignerBuilder
     /// <summary>
     /// Enables LTV (Long-Term Validation) by embedding DSS with CRLs, OCSP responses, and VRI
     /// in the signed PDF. Requires an HttpClient for downloading revocation data.
+    /// Requires a timestamp (call <see cref="WithTimestamp(string)"/> first) — PAdES B-LT needs B-T.
     /// </summary>
-    public SignerBuilder WithLtv() => new(
-        _inputPdf, _certificate, _chain, _tsaUrl, _hashAlgorithm,
-        _fieldOptions, _httpClient, _logger, _externalSigner,
-        _signatureAlgorithmOid, enableLtv: true, archivalTsaUrl: _archivalTsaUrl, operationId: _operationId,
-        metadata: _metadata, padesAttributes: _padesAttributes);
+    /// <exception cref="InvalidOperationException">Thrown if no TSA URL has been configured.</exception>
+    public SignerBuilder WithLtv()
+    {
+        if (_tsaUrl is null)
+        {
+            throw new InvalidOperationException(
+                "LTV requires a signature timestamp. Call .WithTimestamp(url) before .WithLtv() to produce PAdES B-LT.");
+        }
+
+        return new(
+            _inputPdf, _certificate, _chain, _tsaUrl, _hashAlgorithm,
+            _fieldOptions, _httpClient, _logger, _externalSigner,
+            _signatureAlgorithmOid, enableLtv: true, archivalTsaUrl: _archivalTsaUrl, operationId: _operationId,
+            metadata: _metadata, padesAttributes: _padesAttributes);
+    }
 
     /// <summary>
     /// Enables PAdES-B-LTA by adding a document-level timestamp (DocTimeStamp) after LTV embedding.
     /// This is the highest level of PAdES compliance, guaranteeing archival validation.
-    /// Implies <see cref="WithLtv"/> — LTV is automatically enabled.
+    /// Requires LTV to be enabled (call <see cref="WithLtv"/> first).
     /// </summary>
     /// <param name="tsaUrl">TSA URL for the archival timestamp. If null, uses the same TSA as WithTimestamp.</param>
-    public SignerBuilder WithArchivalTimestamp(string? tsaUrl = null) => new(
-        _inputPdf, _certificate, _chain, _tsaUrl, _hashAlgorithm,
-        _fieldOptions, _httpClient, _logger, _externalSigner,
-        _signatureAlgorithmOid, enableLtv: true, archivalTsaUrl: tsaUrl ?? _tsaUrl, operationId: _operationId,
-        metadata: _metadata, padesAttributes: _padesAttributes);
+    /// <exception cref="InvalidOperationException">Thrown if LTV has not been enabled.</exception>
+    public SignerBuilder WithArchivalTimestamp(string? tsaUrl = null)
+    {
+        if (!_enableLtv)
+        {
+            throw new InvalidOperationException(
+                "Archival timestamp (B-LTA) requires LTV. Call .WithLtv() before .WithArchivalTimestamp() to produce PAdES B-LTA.");
+        }
+
+        return new(
+            _inputPdf, _certificate, _chain, _tsaUrl, _hashAlgorithm,
+            _fieldOptions, _httpClient, _logger, _externalSigner,
+            _signatureAlgorithmOid, enableLtv: true, archivalTsaUrl: tsaUrl ?? _tsaUrl, operationId: _operationId,
+            metadata: _metadata, padesAttributes: _padesAttributes);
+    }
 
     private SignerBuilder With(
         X509Certificate2? certificate = null,

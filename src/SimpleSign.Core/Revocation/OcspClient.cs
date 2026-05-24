@@ -28,8 +28,8 @@ internal sealed class OcspClient
 
     internal async Task<bool> CheckOcspAsync(X509Certificate2 cert, string ocspUrl, CancellationToken ct)
     {
-        var (isValid, _) = await FetchOcspResponseAsync(cert, issuerCert: null, ocspUrl, ct).ConfigureAwait(false);
-        return isValid;
+        var result = await FetchOcspResponseAsync(cert, issuerCert: null, ocspUrl, ct).ConfigureAwait(false);
+        return result.IsValid;
     }
 
     internal async Task<bool> CheckOcspWithChainAsync(
@@ -45,15 +45,15 @@ internal sealed class OcspClient
         {
             _logger.OcspIssuerCertNotFound(cert.Subject);
         }
-        var (isValid, _) = await FetchOcspResponseAsync(cert, issuerCert, ocspUrl, ct).ConfigureAwait(false);
-        return isValid;
+        var result = await FetchOcspResponseAsync(cert, issuerCert, ocspUrl, ct).ConfigureAwait(false);
+        return result.IsValid;
     }
 
     /// <summary>
-    /// Fetches an OCSP response and returns both the revocation status and the raw response bytes.
-    /// The raw bytes can be embedded in the PDF DSS dictionary for LTV (Long-Term Validation).
+    /// Fetches an OCSP response and returns the revocation status, raw response bytes,
+    /// and all responder certificates embedded in the response (for DSS inclusion).
     /// </summary>
-    internal async Task<(bool IsValid, byte[] ResponseBytes)> FetchOcspResponseAsync(
+    internal async Task<OcspFetchResult> FetchOcspResponseAsync(
         X509Certificate2 cert,
         X509Certificate2? issuerCert,
         string ocspUrl,
@@ -72,8 +72,8 @@ internal sealed class OcspClient
 
         byte[] ocspResponse = await response.Content.ReadAsByteArrayAsync(ct).ConfigureAwait(false);
         _logger.OcspResponseReceived(ocspResponse.Length);
-        bool isValid = ParseOcspResponse(ocspResponse, cert, _logger);
-        return (isValid, ocspResponse);
+        var (isValid, responderCerts) = ParseOcspResponseWithCerts(ocspResponse, cert, _logger);
+        return new OcspFetchResult(isValid, ocspResponse, responderCerts);
     }
     #endregion
 
@@ -303,6 +303,136 @@ internal sealed class OcspClient
         }
     }
 
+    /// <summary>
+    /// Parses an OCSPResponse and returns both the revocation status and all responder
+    /// certificates embedded in the response. The certificates are NOT disposed by this method —
+    /// the caller owns them and must include them in DSS for LTV.
+    /// </summary>
+    internal static (bool IsValid, IReadOnlyList<X509Certificate2> ResponderCertificates) ParseOcspResponseWithCerts(
+        byte[] ocspResponseBytes, X509Certificate2 cert, ILogger? logger = null)
+    {
+        var responderCerts = new List<X509Certificate2>();
+
+        var reader = new AsnReader(ocspResponseBytes, AsnEncodingRules.BER);
+        var ocspResponse = reader.ReadSequence();
+
+        var statusEncoded = ocspResponse.ReadEncodedValue().Span;
+        int status = statusEncoded.Length >= 3 ? statusEncoded[2] : -1;
+        if (status != 0)
+        {
+            throw new InvalidOperationException($"OCSP response status is not 'successful': {status}");
+        }
+
+        if (!ocspResponse.HasData)
+        {
+            throw new InvalidDataException("OCSP response is empty.");
+        }
+
+#pragma warning disable CA5350
+        byte[] expectedIssuerNameHash = SHA1.HashData(cert.IssuerName.RawData);
+        byte[] expectedSerialNumber = cert.SerialNumberBytes.ToArray();
+#pragma warning restore CA5350
+
+        var responseBytesWrapper = ocspResponse.ReadSequence(new Asn1Tag(TagClass.ContextSpecific, 0, true));
+        var respBytes = responseBytesWrapper.ReadSequence();
+        _ = respBytes.ReadObjectIdentifier();
+        var basicOcspBytes = respBytes.ReadOctetString();
+
+        var basicReader = new AsnReader(basicOcspBytes, AsnEncodingRules.BER);
+        var basicOcsp = basicReader.ReadSequence();
+
+        byte[] tbsResponseDataRaw = basicOcsp.PeekEncodedValue().ToArray();
+        var tbsResponseData = basicOcsp.ReadSequence();
+
+        var sigAlgSeq = basicOcsp.ReadSequence();
+        string sigAlgOid = sigAlgSeq.ReadObjectIdentifier();
+        byte[] ocspSignature = basicOcsp.ReadBitString(out _);
+
+        // Extract ALL certificates from certs [0] OPTIONAL
+        X509Certificate2? firstCert = null;
+        if (basicOcsp.HasData && basicOcsp.PeekTag() == new Asn1Tag(TagClass.ContextSpecific, 0, true))
+        {
+            var certsWrapper = basicOcsp.ReadSequence(new Asn1Tag(TagClass.ContextSpecific, 0, true));
+            if (certsWrapper.HasData)
+            {
+                var certSeq = certsWrapper.ReadSequence();
+                while (certSeq.HasData)
+                {
+                    try
+                    {
+                        var loadedCert = CertificateLoader.LoadCertificate(certSeq.ReadEncodedValue().ToArray());
+                        responderCerts.Add(loadedCert);
+                        firstCert ??= loadedCert;
+                    }
+                    catch (CryptographicException ex)
+                    {
+                        logger?.OcspResponderCertLoadingFailed(ex.Message);
+                        if (certSeq.HasData)
+                        {
+                            certSeq.ReadEncodedValue();
+                        }
+                    }
+                }
+            }
+        }
+
+        // Verify signature using first responder cert
+        if (firstCert is not null)
+        {
+            bool sigValid = VerifyOcspSignature(firstCert, tbsResponseDataRaw, ocspSignature, sigAlgOid, logger);
+            if (!sigValid)
+            {
+                throw new InvalidOperationException("OCSP response signature verification failed.");
+            }
+        }
+
+        // Parse tbsResponseData for cert status
+        if (tbsResponseData.HasData && tbsResponseData.PeekTag() == new Asn1Tag(TagClass.ContextSpecific, 0, true))
+        {
+            tbsResponseData.ReadEncodedValue(); // version
+        }
+        tbsResponseData.ReadEncodedValue(); // responderID
+        tbsResponseData.ReadEncodedValue(); // producedAt
+
+        var responses = tbsResponseData.ReadSequence();
+        int? firstCertStatus = null;
+        bool foundMatch = false;
+        while (responses.HasData)
+        {
+            var single = responses.ReadSequence();
+            var certIdSeq = single.ReadSequence();
+            certIdSeq.ReadSequence(); // hashAlgorithm
+            byte[] respIssuerNameHash = certIdSeq.ReadOctetString();
+            certIdSeq.ReadOctetString(); // issuerKeyHash
+            var respSerialNumber = certIdSeq.ReadIntegerBytes().ToArray();
+
+            var certStatusTag = single.PeekTag();
+            int? statusValue = certStatusTag.TagClass == TagClass.ContextSpecific ? certStatusTag.TagValue : null;
+            firstCertStatus ??= statusValue;
+
+            bool certIdMatches = respIssuerNameHash.AsSpan().SequenceEqual(expectedIssuerNameHash) &&
+                                 respSerialNumber.AsSpan().SequenceEqual(expectedSerialNumber);
+            if (!certIdMatches)
+            {
+                continue;
+            }
+
+            foundMatch = true;
+            if (statusValue.HasValue)
+            {
+                return (HandleCertStatus(statusValue.Value, logger), responderCerts);
+            }
+            break;
+        }
+
+        if (!foundMatch && firstCertStatus.HasValue)
+        {
+            return (HandleCertStatus(firstCertStatus.Value, logger), responderCerts);
+        }
+
+        throw new InvalidDataException("OCSP response does not contain a valid certificate status.");
+    }
+
     private static bool HandleCertStatus(int statusValue, ILogger? logger) => statusValue switch
     {
         0 => LogAndReturn(true, logger),
@@ -434,3 +564,12 @@ internal sealed class OcspClient
     #endregion
 
 }
+
+/// <summary>
+/// Result of an OCSP fetch operation, including revocation status, raw response bytes,
+/// and all responder certificates found in the response.
+/// </summary>
+internal sealed record OcspFetchResult(
+    bool IsValid,
+    byte[] ResponseBytes,
+    IReadOnlyList<X509Certificate2> ResponderCertificates);

@@ -344,11 +344,13 @@ public sealed class BatchSigner : IAsyncDisposable
             return this;
         }
 
-        /// <summary>Enables archival timestamp (PAdES-B-LTA). Implies LTV.</summary>
+        /// <summary>
+        /// Enables archival timestamp (PAdES-B-LTA).
+        /// Requires <see cref="WithLtv"/> to be called first.
+        /// </summary>
         public BatchSignerBuilder WithArchivalTimestamp(string tsaUrl)
         {
             ArchivalTsaUrl = tsaUrl;
-            EnableLtv = true;
             return this;
         }
 
@@ -377,6 +379,11 @@ public sealed class BatchSigner : IAsyncDisposable
             if (EnableLtv && TsaUrl is null && ArchivalTsaUrl is null)
             {
                 throw new SigningException("LTV requires a timestamp. Call WithTimestamp() before enabling LTV, or use WithArchivalTimestamp().");
+            }
+
+            if (ArchivalTsaUrl is not null && !EnableLtv)
+            {
+                throw new SigningException("Archival timestamp (B-LTA) requires LTV. Call .WithLtv() before .WithArchivalTimestamp() to produce PAdES B-LTA.");
             }
 
             return new(this);

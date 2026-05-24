@@ -296,52 +296,52 @@ public sealed class SignerBuilderEdgeCaseTests
         actualValue.ShouldNotBeNull("");
     }
 
-    [Fact(DisplayName = "WithLtv without timestamp URL does not throw exception in builder")]
-    public void WithLtv_NoTimestamp_DoesNotThrow()
+    [Fact(DisplayName = "WithLtv without timestamp URL throws InvalidOperationException at builder call")]
+    public void WithLtv_NoTimestamp_ThrowsInvalidOperationException()
     {
-        SignerBuilder actualValue = SimpleSigner.Document(BuildMinimalPdf()).WithLtv();
-        actualValue.ShouldNotBeNull("");
+        var act = () => SimpleSigner.Document(BuildMinimalPdf()).WithLtv();
+        Should.Throw<InvalidOperationException>(act)
+            .Message.ShouldContain("WithTimestamp");
     }
 
-    [Fact(DisplayName = "WithLtv without timestamp throws SigningException at sign-time")]
-    public async Task WithLtv_NoTimestamp_ThrowsAtSignTime()
+    [Fact(DisplayName = "WithLtv without timestamp throws InvalidOperationException (not deferred to sign-time)")]
+    public void WithLtv_NoTimestamp_ThrowsAtBuilderTime()
     {
         using var cert = TestCertificateFactory.CreateSelfSignedCert("CN=LTV No TSA Test");
-        var builder = SimpleSigner.Document(BuildMinimalPdf())
+        var act = () => SimpleSigner.Document(BuildMinimalPdf())
             .WithCertificate(cert)
             .WithLtv();
 
-        var act = () => builder.SignAsync();
-        var ex2 = await Should.ThrowAsync<SigningException>(act);
-        ex2.Message.ShouldContain("LTV requires a timestamp");
+        Should.Throw<InvalidOperationException>(act)
+            .Message.ShouldContain("WithTimestamp");
     }
 
     [Fact(DisplayName = "WithArchivalTimestamp without URL uses configured timestamp URL")]
     public void WithArchivalTimestamp_NullUrl_UsesConfiguredTimestamp()
     {
-        SignerBuilder actualValue = SimpleSigner.Document(BuildMinimalPdf()).WithTimestamp("http://tsa.example.com").WithArchivalTimestamp();
+        SignerBuilder actualValue = SimpleSigner.Document(BuildMinimalPdf()).WithTimestamp("http://tsa.example.com").WithLtv().WithArchivalTimestamp();
         actualValue.ShouldNotBeNull("");
     }
 
     [Fact(DisplayName = "WithArchivalTimestamp with own URL does not use timestamp URL")]
     public void WithArchivalTimestamp_ExplicitUrl_UsesProvidedUrl()
     {
-        SignerBuilder actualValue = SimpleSigner.Document(BuildMinimalPdf()).WithTimestamp("http://tsa.example.com").WithArchivalTimestamp("http://archival-tsa.example.com");
+        SignerBuilder actualValue = SimpleSigner.Document(BuildMinimalPdf()).WithTimestamp("http://tsa.example.com").WithLtv().WithArchivalTimestamp("http://archival-tsa.example.com");
         actualValue.ShouldNotBeNull("");
     }
 
     [Fact(DisplayName = "WithLtv enables LTV and returns new instance")]
     public void WithLtv_ReturnsNewInstance()
     {
-        SignerBuilder signerBuilder = SimpleSigner.Document(BuildMinimalPdf());
+        SignerBuilder signerBuilder = SimpleSigner.Document(BuildMinimalPdf()).WithTimestamp("http://tsa.example.com");
         SignerBuilder actualValue = signerBuilder.WithLtv();
         actualValue.ShouldNotBeSameAs(signerBuilder, "");
     }
 
-    [Fact(DisplayName = "WithArchivalTimestamp implies LTV and returns new instance")]
+    [Fact(DisplayName = "WithArchivalTimestamp requires LTV and returns new instance")]
     public void WithArchivalTimestamp_ImpliesLtv_ReturnsNewInstance()
     {
-        SignerBuilder signerBuilder = SimpleSigner.Document(BuildMinimalPdf());
+        SignerBuilder signerBuilder = SimpleSigner.Document(BuildMinimalPdf()).WithTimestamp("http://tsa.example.com").WithLtv();
         SignerBuilder actualValue = signerBuilder.WithArchivalTimestamp("http://tsa.example.com");
         actualValue.ShouldNotBeSameAs(signerBuilder, "");
     }

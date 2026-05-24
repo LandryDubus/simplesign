@@ -149,7 +149,7 @@ public sealed class SimpleSignerBuilderTests
     [Fact(DisplayName = "WithLtv returns new instance")]
     public void WithLtv_ReturnsNewInstance()
     {
-        var builder = SimpleSigner.Document([0x25]);
+        var builder = SimpleSigner.Document([0x25]).WithTimestamp("http://tsa.example.com");
         var builder2 = builder.WithLtv();
         builder2.ShouldNotBeSameAs(builder);
     }
@@ -157,7 +157,7 @@ public sealed class SimpleSignerBuilderTests
     [Fact(DisplayName = "WithArchivalTimestamp returns new instance")]
     public void WithArchivalTimestamp_ReturnsNewInstance()
     {
-        var builder = SimpleSigner.Document([0x25]);
+        var builder = SimpleSigner.Document([0x25]).WithTimestamp("http://tsa.example.com").WithLtv();
         var builder2 = builder.WithArchivalTimestamp("http://tsa.example.com");
         builder2.ShouldNotBeSameAs(builder);
     }
@@ -166,7 +166,8 @@ public sealed class SimpleSignerBuilderTests
     public void WithArchivalTimestamp_NullUrl_UsesTimestampUrl()
     {
         var builder = SimpleSigner.Document([0x25])
-            .WithTimestamp("http://tsa.example.com");
+            .WithTimestamp("http://tsa.example.com")
+            .WithLtv();
         var builder2 = builder.WithArchivalTimestamp();
         builder2.ShouldNotBeNull();
     }

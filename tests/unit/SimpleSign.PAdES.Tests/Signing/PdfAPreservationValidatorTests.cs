@@ -54,7 +54,7 @@ public sealed class PdfAPreservationValidatorTests
         };
         var issues = PdfAPreservationValidator.Validate(PdfALevel.A1b, options);
         issues.Count().ShouldBe(1);
-        issues.First().Severity.ShouldBe(PdfAIssueSeverity.Warning);
+        issues.First().Severity.ShouldBe(PdfAIssueSeverity.Error);
     }
 
     [Fact]

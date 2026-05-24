@@ -71,9 +71,9 @@ public static class PdfAPreservationValidator
             if (appearance.BackgroundImagePng is { Length: > 0 })
             {
                 issues.Add(new PdfACompatibilityIssue(
-                    PdfAIssueSeverity.Warning,
-                    "PNG background images may contain transparency, which is forbidden in PDF/A-1. " +
-                    "Ensure the image has no alpha channel, or use JPEG instead."));
+                    PdfAIssueSeverity.Error,
+                    "PNG background images may contain transparency, which is forbidden in PDF/A-1 (ISO 19005-1). " +
+                    "Use JPEG instead, or ensure the PNG has no alpha channel and convert to JPEG before signing."));
             }
         }
 

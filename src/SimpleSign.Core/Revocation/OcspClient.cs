@@ -313,6 +313,26 @@ internal sealed class OcspClient
     {
         var responderCerts = new List<X509Certificate2>();
 
+        try
+        {
+            return ParseOcspResponseWithCertsCore(ocspResponseBytes, cert, responderCerts, logger);
+        }
+        catch
+        {
+            // Dispose all loaded certs before re-throwing to avoid resource leaks
+            foreach (var c in responderCerts)
+            {
+                c.Dispose();
+            }
+
+            throw;
+        }
+    }
+
+    private static (bool IsValid, IReadOnlyList<X509Certificate2> ResponderCertificates) ParseOcspResponseWithCertsCore(
+        byte[] ocspResponseBytes, X509Certificate2 cert, List<X509Certificate2> responderCerts, ILogger? logger)
+    {
+
         var reader = new AsnReader(ocspResponseBytes, AsnEncodingRules.BER);
         var ocspResponse = reader.ReadSequence();
 
@@ -367,10 +387,7 @@ internal sealed class OcspClient
                     catch (CryptographicException ex)
                     {
                         logger?.OcspResponderCertLoadingFailed(ex.Message);
-                        if (certSeq.HasData)
-                        {
-                            certSeq.ReadEncodedValue();
-                        }
+                        // Element already consumed by ReadEncodedValue above — just skip
                     }
                 }
             }

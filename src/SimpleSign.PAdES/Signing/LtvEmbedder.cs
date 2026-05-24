@@ -79,6 +79,10 @@ public sealed class LtvEmbedder
                 {
                     allCerts.Add(tsaCert);
                 }
+                else
+                {
+                    tsaCert.Dispose();
+                }
             }
         }
 
@@ -128,6 +132,10 @@ public sealed class LtvEmbedder
                             {
                                 allCerts.Add(respCert);
                                 nextRound.Add(respCert);
+                            }
+                            else
+                            {
+                                respCert.Dispose();
                             }
                         }
 

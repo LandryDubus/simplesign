@@ -89,11 +89,7 @@ internal static class TsaCertificateExtractor
                 }
                 catch (CryptographicException)
                 {
-                    // Skip malformed certificate entries
-                    if (certsSet.HasData)
-                    {
-                        certsSet.ReadEncodedValue();
-                    }
+                    // Element already consumed by ReadEncodedValue above — just skip
                 }
             }
         }

@@ -17,6 +17,18 @@ namespace SimpleSign.PAdES.Validation;
 /// Orchestrates integrity, cryptographic, chain, and revocation verification
 /// by delegating to focused verifier classes.
 /// </summary>
+/// <example>
+/// <code>
+/// var validator = new PdfSignatureValidator(new ValidationOptions
+/// {
+///     CheckRevocation = true,
+///     TrustSystemRoots = true,
+/// });
+/// var results = await validator.ValidateAsync(File.OpenRead("signed.pdf"));
+/// foreach (var r in results)
+///     Console.WriteLine($"{r.FieldName}: Valid={r.IsValid}, Signer={r.SignerName}");
+/// </code>
+/// </example>
 public sealed class PdfSignatureValidator
 {
     private readonly ValidationOptions _options;

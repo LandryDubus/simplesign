@@ -1,0 +1,400 @@
+# SimpleSign — Complete API Reference for LLMs
+
+> Pure .NET library for PAdES (PDF Advanced Electronic Signatures). Sign, validate, inspect PDF documents. ETSI EN 319 142 compliant. No third-party crypto. Native AOT compatible. .NET 8 / .NET 10.
+
+## Installation
+
+```bash
+# Most common — full PAdES signing & validation
+dotnet add package SimpleSign.PAdES
+
+# Brazilian PKI (ICP-Brasil, Gov.br, Lei 14.063)
+dotnet add package SimpleSign.Brasil
+
+# HTML to PDF conversion (independent, no signing)
+dotnet add package SimpleSign.HtmlToPdf
+
+# Everything
+dotnet add package SimpleSign
+```
+
+## Namespaces
+
+```csharp
+using SimpleSign.PAdES;              // SimpleSigner, DeferredSigner, BatchSigner
+using SimpleSign.PAdES.Validation;   // PdfSignatureValidator, ValidationOptions
+using SimpleSign.PAdES.Inspection;   // PdfSignatureInspector
+using SimpleSign.Core.Crypto;        // TsaPool, HashAlgorithmName
+using SimpleSign.Brasil;             // IcpBrasilValidator, GovBrValidator
+using SimpleSign.Brasil.Extensions;  // IcpBrasilValidationResult extensions
+```
+
+---
+
+## Signing API
+
+### Simple Sign (one-shot)
+
+```csharp
+using SimpleSign.PAdES;
+using System.Security.Cryptography.X509Certificates;
+
+var cert = new X509Certificate2("cert.pfx", "password");
+var pdf = File.ReadAllBytes("document.pdf");
+
+byte[] signedPdf = await SimpleSigner
+    .Document(pdf)
+    .WithCertificate(cert)
+    .SignAsync();
+
+File.WriteAllBytes("signed.pdf", signedPdf);
+```
+
+### Full Builder Options
+
+```csharp
+byte[] signedPdf = await SimpleSigner
+    .Document(pdf)
+    .WithCertificate(cert)
+    // Conformance level (default: B-B)
+    .WithLevel(PAdESLevel.B_LTA)          // B-B | B-T | B-LT | B-LTA
+    // Timestamp authority
+    .WithTimestamp("http://timestamp.digicert.com")
+    // Long-term validation (embeds OCSP + CRL)
+    .WithLtv()
+    // Visible signature appearance
+    .WithAppearance(appearance => appearance
+        .OnPage(1)
+        .AtPosition(100, 100, 300, 150)   // x, y, width, height
+        .WithText("Signed by {signer}\n{date}")
+        .WithImage(logoBytes)
+        .WithQrCode("https://verify.example.com/{id}"))
+    // Metadata
+    .WithReason("Contract approval")
+    .WithLocation("São Paulo, Brazil")
+    .WithSignerName("Jane Doe")
+    .WithContactInfo("jane@example.com")
+    // Hash algorithm (default: SHA-256)
+    .WithHashAlgorithm(HashAlgorithmName.SHA384)
+    // Custom HTTP client for TSA/OCSP/CRL
+    .WithHttpClient(httpClient)
+    // Logging
+    .WithLogger(logger)
+    .SignAsync();
+```
+
+### Deferred Signing (Two-Phase)
+
+Use when the private key is on a client device (web apps, mobile, HSM):
+
+```csharp
+using SimpleSign.PAdES;
+
+// Phase 1: Server prepares the hash
+var prepared = await DeferredSigner.PrepareAsync(pdfBytes, cert);
+byte[] hashToSign = prepared.HashToSign;  // Send to client
+
+// Phase 2: Client signs with private key (any algorithm: RSA, ECDSA, etc.)
+byte[] clientSignature = SignWithPrivateKey(hashToSign);
+
+// Phase 3: Server embeds the signature
+byte[] signedPdf = await DeferredSigner.CompleteAsync(prepared.SessionData, clientSignature);
+```
+
+#### Deferred Builder Pattern
+
+```csharp
+var builder = new DeferredSignerBuilder(pdfBytes, cert)
+    .WithSignerName("Jane Doe")
+    .WithReason("Contract approval")
+    .WithTimestamp("http://timestamp.digicert.com")
+    .WithLtv()
+    .WithAppearance(a => a.OnPage(1).AtPosition(50, 50, 200, 80));
+
+var prepared = await builder.PrepareAsync();
+byte[] signature = await clientDevice.SignAsync(prepared.HashToSign);
+byte[] signedPdf = await builder.CompleteAsync(prepared.SessionData, signature);
+```
+
+### Batch Signing
+
+Sign multiple documents with shared resources (connection pool, cert):
+
+```csharp
+using SimpleSign.PAdES;
+
+var batch = BatchSigner.Create(cert)
+    .WithTimestamp("http://timestamp.digicert.com")
+    .WithLtv()
+    .WithConcurrency(8)
+    .Build();
+
+var documents = new[] { pdf1, pdf2, pdf3 };
+var results = await batch.SignAsync(documents);
+
+Console.WriteLine($"Succeeded: {results.Succeeded}");
+Console.WriteLine($"Failed: {results.Failed}");
+Console.WriteLine($"Time: {results.ElapsedMs}ms");
+```
+
+### TSA Connection Pool
+
+Resilient timestamp authority with automatic failover:
+
+```csharp
+using SimpleSign.Core.Crypto;
+
+var pool = new TsaPool([
+    "http://timestamp.digicert.com",
+    "http://tsa.starfieldtech.com",
+    "http://timestamp.sectigo.com"
+]);
+
+// Use with signer
+var signed = await SimpleSigner.Document(pdf)
+    .WithCertificate(cert)
+    .WithTimestampPool(pool)
+    .SignAsync();
+```
+
+---
+
+## Validation API
+
+### Validate Signatures
+
+```csharp
+using SimpleSign.PAdES.Validation;
+
+var validator = new PdfSignatureValidator(new ValidationOptions
+{
+    CheckRevocation = true,          // OCSP + CRL
+    TrustSystemRoots = true,         // Use OS certificate store
+    AllowExpiredSigningCert = false,  // Reject expired certs
+    RequireTimestamp = false,         // Don't require TSA timestamp
+});
+
+var results = await validator.ValidateAsync(File.OpenRead("signed.pdf"));
+
+foreach (var r in results)
+{
+    Console.WriteLine($"Field: {r.FieldName}");
+    Console.WriteLine($"  Valid: {r.IsValid}");
+    Console.WriteLine($"  Integrity: {r.IsIntegrityValid}");
+    Console.WriteLine($"  Chain: {r.IsCertificateChainValid}");
+    Console.WriteLine($"  Timestamp: {r.HasValidTimestamp}");
+    Console.WriteLine($"  Signer: {r.SignerName}");
+    Console.WriteLine($"  Time: {r.SigningTime}");
+    Console.WriteLine($"  Level: {r.ConformanceLevel}");  // B-B, B-T, etc.
+}
+```
+
+### Custom Trust Anchors
+
+```csharp
+var validator = new PdfSignatureValidator(new ValidationOptions
+{
+    TrustAnchors = new[] { rootCaCert, intermediateCaCert },
+    CheckRevocation = true,
+});
+```
+
+---
+
+## Inspection API
+
+Fast metadata extraction without cryptographic validation:
+
+```csharp
+using SimpleSign.PAdES.Inspection;
+
+var result = await PdfSignatureInspector.InspectAsync(File.OpenRead("doc.pdf"));
+
+Console.WriteLine($"Signatures: {result.Signatures.Count}");
+foreach (var sig in result.Signatures)
+{
+    Console.WriteLine($"  {sig.FieldName}: {sig.SignerName}");
+    Console.WriteLine($"    Time: {sig.SigningTime}");
+    Console.WriteLine($"    Algorithm: {sig.DigestAlgorithm}");
+    Console.WriteLine($"    Has Timestamp: {sig.HasTimestamp}");
+    Console.WriteLine($"    Certificate: {sig.Certificate.Subject}");
+}
+```
+
+---
+
+## Brazilian PKI (ICP-Brasil)
+
+### Chain Validation with ICP-Brasil
+
+```csharp
+using SimpleSign.Brasil;
+
+var validator = new IcpBrasilValidator();
+var results = await validator.ValidateAsync(File.OpenRead("signed.pdf"));
+
+foreach (var r in results)
+{
+    if (r is IcpBrasilValidationResult icpResult)
+    {
+        Console.WriteLine($"CPF: {icpResult.Cpf}");
+        Console.WriteLine($"CNPJ: {icpResult.Cnpj}");
+        Console.WriteLine($"Policy: {icpResult.PolicyName}");
+    }
+}
+```
+
+### CPF/CNPJ Extraction
+
+```csharp
+using SimpleSign.Brasil.Extensions;
+
+var result = await validator.ValidateAsync(stream);
+var icpResult = result.First() as IcpBrasilValidationResult;
+string cpf = icpResult.CpfFormatted;    // "123.456.789-00"
+string cnpj = icpResult.CnpjFormatted;  // "12.345.678/0001-00"
+```
+
+### Health Professional Data (e-Prescriptions)
+
+```csharp
+var healthData = icpResult.HealthProfessional;
+Console.WriteLine($"CRM: {healthData.RegistrationNumber}");
+Console.WriteLine($"Council: {healthData.ProfessionalCouncil}");
+Console.WriteLine($"State: {healthData.State}");
+```
+
+### VALIDAR ITI Portal Link
+
+Generate verification URLs for QR code embedding:
+
+```csharp
+using SimpleSign.Brasil;
+
+string validarUrl = ValidarItiUrlBuilder.Build(signedPdfBytes);
+// https://validar.iti.gov.br/validar?...
+```
+
+---
+
+## Extension Points
+
+| Extension | Interface / Pattern |
+|---|---|
+| Custom trust anchors | `ITrustAnchorProvider` |
+| Custom hash algorithm | `HashAlgorithmName` parameter |
+| External signer (HSM/KMS) | `Func<byte[], Task<byte[]>>` callback |
+| Custom HTTP | `IHttpClientProvider` / `HttpClient` injection |
+| Custom logging | `ILogger<T>` injection |
+| Country extensions | `ICountryExtension` |
+| Chain validation | `IChainValidationProvider` |
+| Certificate caching | `ICertificateCache` |
+
+---
+
+## HTML to PDF
+
+Independent module — no signing dependency:
+
+```csharp
+using SimpleSign.HtmlToPdf;
+
+byte[] pdf = HtmlToPdfConverter.Html(htmlString)
+    .WithPageSize(PageSize.A4)
+    .WithMargins(top: 40, right: 40, bottom: 40, left: 40)
+    .Convert();
+
+File.WriteAllBytes("output.pdf", pdf);
+```
+
+---
+
+## Error Handling
+
+```csharp
+try
+{
+    var signed = await SimpleSigner.Document(pdf)
+        .WithCertificate(cert)
+        .SignAsync();
+}
+catch (SigningException ex) when (ex.InnerException is TimeoutException)
+{
+    // TSA timeout — retry or use pool
+}
+catch (SigningException ex)
+{
+    // General signing failure
+    Console.WriteLine(ex.Message);
+}
+catch (InvalidPdfException ex)
+{
+    // PDF is malformed or encrypted
+}
+```
+
+---
+
+## Common Integration Patterns
+
+### ASP.NET Core Minimal API
+
+```csharp
+app.MapPost("/sign", async (IFormFile file, [FromServices] X509Certificate2 cert) =>
+{
+    using var ms = new MemoryStream();
+    await file.CopyToAsync(ms);
+
+    var signed = await SimpleSigner.Document(ms.ToArray())
+        .WithCertificate(cert)
+        .WithTimestamp("http://timestamp.digicert.com")
+        .WithLtv()
+        .SignAsync();
+
+    return Results.File(signed, "application/pdf", "signed.pdf");
+});
+```
+
+### Dependency Injection
+
+```csharp
+// Register certificate from configuration
+builder.Services.AddSingleton(sp =>
+{
+    var config = sp.GetRequiredService<IConfiguration>();
+    return new X509Certificate2(config["Cert:Path"]!, config["Cert:Password"]!);
+});
+
+// Register validator
+builder.Services.AddSingleton(new PdfSignatureValidator(new ValidationOptions
+{
+    CheckRevocation = true,
+    TrustSystemRoots = true,
+}));
+```
+
+### Azure Key Vault / HSM Integration
+
+```csharp
+// Use external signer callback for HSM-based keys
+var signed = await SimpleSigner.Document(pdf)
+    .WithCertificate(publicCert)  // Public cert only (no private key)
+    .WithExternalSigner(async hash =>
+    {
+        // Sign hash using Azure Key Vault, AWS KMS, Google Cloud KMS, etc.
+        return await keyVaultClient.SignAsync(keyId, SignatureAlgorithm.RS256, hash);
+    })
+    .WithTimestamp("http://timestamp.digicert.com")
+    .SignAsync();
+```
+
+---
+
+## Requirements
+
+- .NET 8 or .NET 10 (multi-target)
+- No native/COM dependencies
+- No third-party cryptography
+- Runs on Windows, macOS, Linux
+- Native AOT compatible
+- MIT licensed

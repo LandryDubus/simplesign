@@ -1,0 +1,75 @@
+# SimpleSign
+
+> Pure .NET library for PAdES (PDF Advanced Electronic Signatures) — sign, validate, and inspect digitally signed PDF documents. No third-party crypto dependencies. Native AOT compatible. Targets .NET 8 and .NET 10.
+
+SimpleSign implements ETSI EN 319 142 (PAdES) with conformance levels B-B, B-T, B-LT, and B-LTA. All cryptography uses `System.Security.Cryptography` from the BCL — no BouncyCastle, no native libraries.
+
+## Core API
+
+```csharp
+// Sign a PDF
+var signed = await SimpleSigner.Document(pdfBytes)
+    .WithCertificate(cert)
+    .WithTimestamp("http://timestamp.digicert.com")
+    .WithLtv()
+    .SignAsync();
+
+// Validate signatures
+var results = await new PdfSignatureValidator(new ValidationOptions
+{
+    CheckRevocation = true,
+    TrustSystemRoots = true
+}).ValidateAsync(stream);
+
+// Inspect (fast, no crypto)
+var info = await PdfSignatureInspector.InspectAsync(stream);
+
+// Deferred signing (hash on server, sign on client)
+var prepared = await DeferredSigner.PrepareAsync(pdfBytes, cert);
+byte[] signedPdf = await DeferredSigner.CompleteAsync(prepared.SessionData, clientSignature);
+
+// Batch signing
+var batch = BatchSigner.Create(cert).WithTimestamp(url).WithLtv().Build();
+var results = await batch.SignAsync(documents);
+```
+
+## Packages
+
+```
+dotnet add package SimpleSign.PAdES   # PDF signing & validation (most common)
+dotnet add package SimpleSign.Brasil  # ICP-Brasil, Gov.br, Lei 14.063
+dotnet add package SimpleSign         # Meta-package (all)
+```
+
+## Package Map
+
+```
+SimpleSign (meta-package)
+├── SimpleSign.PAdES     PAdES B-B/T/LT/LTA signing & validation
+│   ├── SimpleSign.Pdf   PDF structure parser
+│   └── SimpleSign.Core  Crypto primitives, CMS, TSA, revocation
+├── SimpleSign.Brasil    ICP-Brasil + Gov.br extensions
+└── SimpleSign.HtmlToPdf Pure-.NET HTML→PDF converter
+```
+
+## Docs
+
+- [API Reference](docs/api/): Full XML-documented public API
+- [Architecture](docs/architecture.md): Internal design
+- [Conformance](docs/conformance.md): ETSI standards compliance
+- [Interoperability](docs/interoperability.md): Cross-platform testing
+- [Performance](docs/performance.md): Benchmarks and optimization
+
+## Key Constraints
+
+- .NET 8+ required (multi-targets net8.0 and net10.0)
+- No third-party cryptography (all via System.Security.Cryptography)
+- Native AOT compatible
+- No native/COM dependencies — runs on Windows, macOS, Linux
+- MIT licensed
+
+## Optional
+
+- [Samples](samples/): Working examples for common scenarios
+- [CHANGELOG](CHANGELOG.md): Version history
+- [CONTRIBUTING](CONTRIBUTING.md): How to contribute

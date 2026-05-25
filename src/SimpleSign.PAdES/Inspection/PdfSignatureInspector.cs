@@ -12,6 +12,13 @@ namespace SimpleSign.PAdES.Inspection;
 /// Inspects a PDF document and extracts detailed information about all digital signatures.
 /// This is a read-only, offline operation — no network calls, no validation.
 /// </summary>
+/// <example>
+/// <code>
+/// var result = await PdfSignatureInspector.InspectAsync(File.OpenRead("doc.pdf"));
+/// foreach (var sig in result.Signatures)
+///     Console.WriteLine($"{sig.FieldName}: {sig.SignerName} at {sig.SigningTime}");
+/// </code>
+/// </example>
 public static partial class PdfSignatureInspector
 {
     /// <summary>

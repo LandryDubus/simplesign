@@ -18,7 +18,7 @@
     <RepositoryType>git</RepositoryType>
     <AllowUnsafeBlocks>false</AllowUnsafeBlocks>
     <Copyright>Copyright © SimpleSign Contributors</Copyright>
-    <PackageTags>pdf;pades;digital-signature;icp-brasil;govbr;signing;validation;pkcs7;cms;rfc3161</PackageTags>
+    <PackageTags>pdf;pades;digital-signature;electronic-signature;sign-pdf;pdf-signing;validate-signature;icp-brasil;govbr;etsi;pkcs7;cms;rfc3161;timestamp;x509;certificate;native-aot;no-bouncycastle</PackageTags>
     <PackageProjectUrl>https://github.com/eupassarin/SimpleSign</PackageProjectUrl>
     <PackageIcon>icon.png</PackageIcon>
     <!-- SourceLink: embed source in PDB for debugger step-through -->

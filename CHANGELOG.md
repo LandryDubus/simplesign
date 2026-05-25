@@ -5,6 +5,40 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-05-25
+
+### Added
+
+- **AI-first documentation** — `llms.txt`, `llms-full.txt` (llmstxt.org standard), `CLAUDE.md`, `AGENTS.md`, `.github/copilot-instructions.md` for AI agent discoverability
+- **`samples/README.md`** — scenario-to-code index for AI agents and developers
+- **ETSI conformance: OcspNoCheck** — OID `1.3.6.1.5.5.7.48.1.5` now prevents infinite recursion in revocation checking (RFC 6960 §4.2.2.2.1)
+- **ETSI conformance: OCSP responder certs in DSS** — `OcspClient` returns all responder certificates from OCSP responses for DSS `/Certs` inclusion (Annex A §A.2.2)
+- **`TsaCertificateExtractor`** — new utility to extract certificates from RFC 3161 timestamp tokens for DSS inclusion
+- **VRI `/TS` stream** — VRI dictionaries now include signature timestamp tokens and `/Type /VRI` (required by ETSI EN 319 142-1)
+- **LTV iterative stabilisation** — revocation loop replaced with queue-based stabilisation that chases OCSP responder certs and respects OcspNoCheck
+- **Fluent API guards** — `WithLtv()` throws immediately without timestamp; `WithArchivalTimestamp()` throws without LTV
+
+### Fixed
+
+- **VRI key computation** — parses DER length to exclude trailing zero padding, producing correct SHA-1 hashes
+- **Certificate deduplication in DSS** — uses thumbprint-keyed map to avoid duplicate embeddings
+- **Certificate leak in LtvEmbedder** — duplicate certs now properly disposed in stabilisation loop
+- **Double-read in TsaCertificateExtractor** — AsnReader consumption fixed in catch block
+- **Double-read in OcspClient** — same fix applied
+- **OCSP responder cert disposal** — `ParseOcspResponseWithCerts` wraps in try/catch to dispose on parse failure
+
+### Changed (Breaking)
+
+- **`WithLtv()` now requires `WithTimestamp()`** — calling `.WithLtv()` without a preceding `.WithTimestamp()` throws `InvalidOperationException`
+- **`WithArchivalTimestamp()` requires LTV** — calling `.WithArchivalTimestamp()` without `.WithLtv()` throws `InvalidOperationException`
+- **`BatchSigner.WithArchivalTimestamp()`** — no longer implicitly enables LTV
+- **PDF/A-1 PNG severity** — changed from Warning to Error (absolute prohibition per ISO 19005-1)
+
+### Improved
+
+- **NuGet package metadata** — enhanced `PackageTags` and `Description` for better discoverability by AI agents and package search
+- **XML documentation** — added `<example>` tags to `PdfSignatureValidator` and `PdfSignatureInspector`
+
 ## [0.2.3] - 2026-05-21
 
 ### Fixed (Security)

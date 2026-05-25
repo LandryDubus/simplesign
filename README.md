@@ -27,21 +27,21 @@ All cryptography is handled by `System.Security.Cryptography` — **no third-par
 
 ---
 
-## What's New in v0.2.3
+## What's New in v0.3.0
 
-**Security hardening:**
-- 🛡️ **Shadow Attack mitigation** — trailing unsigned content is now structurally validated (not just checked for `%%EOF`)
-- 🔐 **OCSP CertID verification** — responses are matched to the requested certificate (RFC 6960 §3.2)
-- 🔒 **SSRF DNS rebinding protection** — hostnames are resolved before private-range checks; IPv4-mapped IPv6 covered
-- 🚫 **Unknown hash OID throws** instead of silently falling back to SHA-256 in `signingCertificateV2`
-- ✅ **RSA-PSS parameters fixed** — no longer emits `NULL` where RFC 4055 requires `RSASSA-PSS-params`
+**ETSI EN 319 142-1 conformance:**
+- 📋 **OcspNoCheck extension** — prevents infinite recursion in revocation checking (RFC 6960 §4.2.2.2.1)
+- 📦 **Full DSS certificate coverage** — OCSP responder certs and TSA certs now extracted and embedded
+- 🔑 **VRI key computation fixed** — correct SHA-1 hashes per spec
+- 🔄 **Iterative LTV stabilisation** — queue-based revocation data collection with cert chasing
 
-**ICP-Brasil / ITI VALIDAR improvements:**
-- 🆔 **CPF & CNPJ** exposed on `IcpBrasilValidationResult` with formatted properties
-- 🏥 **Health professional data** (CRM/CRO) extracted from SAN — useful for e-prescriptions
-- 📋 **Complete DOC-ICP-15.03 policy OIDs** — all v1/v2/v3 × PF/PJ variants now recognised
-- 🔗 **`ValidarItiUrlBuilder`** — generate VALIDAR portal links for QR code embedding
-- 🚫 **`/Perms` removed from PDF catalog** — fixes "Assinatura Indeterminada" on the VALIDAR portal
+**AI-first instrumentation:**
+- 🤖 **`llms.txt`** / **`llms-full.txt`** — AI-readable documentation (llmstxt.org standard)
+- 🧠 **`CLAUDE.md`** / **`AGENTS.md`** / **`.github/copilot-instructions.md`** — instructions for AI coding agents
+
+**Breaking changes:**
+- ⚠️ `WithLtv()` now requires `WithTimestamp()` to be called first
+- ⚠️ `WithArchivalTimestamp()` now requires `WithLtv()` to be called first
 
 See the [full changelog](CHANGELOG.md) for details.
 

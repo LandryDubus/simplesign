@@ -31,14 +31,59 @@ internal sealed class RevocationChecker
     /// <exception cref="ValidationException">
     /// No OCSP or CRL URL found — revocation status is indeterminate.
     /// </exception>
-    internal async Task<(bool IsNotRevoked, RevocationSource Source)> CheckRevocationAsync(
+    internal Task<(bool IsNotRevoked, RevocationSource Source)> CheckRevocationAsync(
         X509Certificate2 cert,
         IReadOnlyList<X509Certificate2> chain,
         IReadOnlyList<byte[]> embeddedCrls,
         CancellationToken ct,
+        DateTimeOffset? signingTime = null) =>
+        CheckRevocationAsync(cert, chain, embeddedCrls, [], ct, signingTime);
+
+    /// <summary>
+    /// Checks if a certificate has been revoked using available revocation mechanisms including embedded OCSPs.
+    /// Priority: embedded DSS OCSPs → embedded DSS CRLs → online OCSP → online CRL.
+    /// </summary>
+    /// <exception cref="ValidationException">
+    /// No OCSP or CRL URL found — revocation status is indeterminate.
+    /// </exception>
+    internal async Task<(bool IsNotRevoked, RevocationSource Source)> CheckRevocationAsync(
+        X509Certificate2 cert,
+        IReadOnlyList<X509Certificate2> chain,
+        IReadOnlyList<byte[]> embeddedCrls,
+        IReadOnlyList<byte[]> embeddedOcsps,
+        CancellationToken ct,
         DateTimeOffset? signingTime = null)
     {
-        // 1. Check embedded DSS CRLs first (offline/archival validation)
+        // 0. Check embedded DSS OCSPs first (most current offline data)
+        if (embeddedOcsps.Count > 0)
+        {
+            _logger.CheckingEmbeddedOcsps(embeddedOcsps.Count, cert.Subject);
+            var issuerCert = chain.FirstOrDefault(c =>
+                c.SubjectName.RawData.AsSpan().SequenceEqual(cert.IssuerName.RawData)) ??
+                chain.FirstOrDefault(c => string.Equals(c.Subject, cert.Issuer, StringComparison.OrdinalIgnoreCase));
+            foreach (var ocspBytes in embeddedOcsps)
+            {
+                try
+                {
+                    bool? result = _ocspClient.CheckEmbeddedOcspResponse(cert, issuerCert, ocspBytes, signingTime);
+                    if (result == true)
+                    {
+                        return (true, RevocationSource.EmbeddedOcsp);
+                    }
+                    if (result == false)
+                    {
+                        _logger.CertificateRevokedInOcsp(cert.Subject);
+                        return (false, RevocationSource.EmbeddedOcsp);
+                    }
+                }
+                catch (Exception ex) when (ex is AsnContentException or CryptographicException or InvalidDataException)
+                {
+                    _logger.EmbeddedOcspValidationFailed(ex.Message);
+                }
+            }
+        }
+
+        // 1. Check embedded DSS CRLs (offline/archival validation)
         if (embeddedCrls.Count > 0)
         {
             _logger.CheckingEmbeddedCrls(embeddedCrls.Count, cert.Subject);

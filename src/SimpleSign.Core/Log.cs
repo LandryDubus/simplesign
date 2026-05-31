@@ -41,6 +41,18 @@ internal static partial class Log
         Message = "Embedded CRL skipped (not relevant for cert '{Subject}')")]
     internal static partial void EmbeddedCrlSkipped(this ILogger logger, string subject);
 
+    [LoggerMessage(EventId = 2417, Level = LogLevel.Debug,
+        Message = "Checking {Count} embedded OCSP response(s) for {Subject}")]
+    internal static partial void CheckingEmbeddedOcsps(this ILogger logger, int count, string subject);
+
+    [LoggerMessage(EventId = 2418, Level = LogLevel.Warning,
+        Message = "Certificate revoked (found in embedded OCSP): {Subject}")]
+    internal static partial void CertificateRevokedInOcsp(this ILogger logger, string subject);
+
+    [LoggerMessage(EventId = 2419, Level = LogLevel.Warning,
+        Message = "Embedded OCSP validation failed: {Message}")]
+    internal static partial void EmbeddedOcspValidationFailed(this ILogger logger, string message);
+
     // ── CRL Client (25xx) ────────────────────────────────────────────
 
     [LoggerMessage(EventId = 2510, Level = LogLevel.Debug,

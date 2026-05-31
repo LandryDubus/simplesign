@@ -317,4 +317,37 @@ public sealed class CrlClientTests
         var act = async () => await client.CheckCrlAsync(cert, "http://example.com/test.crl", CancellationToken.None);
         await Should.ThrowAsync<HttpRequestException>(act);
     }
+
+    // ── ExtractCrlIssuerDn ───────────────────────────────────────────────────
+
+    [Fact(DisplayName = "ExtractCrlIssuerDn extracts issuer DN from valid CRL")]
+    public void ExtractCrlIssuerDn_ValidCrl_ReturnsIssuerBytes()
+    {
+        using var cert = TestCertificateFactory.CreateSelfSignedCert();
+        byte[] crl = BuildCrl(cert.SubjectName.RawData);
+
+        byte[]? issuerDn = CrlClient.ExtractCrlIssuerDn(crl);
+
+        issuerDn.ShouldNotBeNull();
+        issuerDn.ShouldBe(cert.SubjectName.RawData);
+    }
+
+    [Fact(DisplayName = "ExtractCrlIssuerDn extracts issuer DN from v2 CRL")]
+    public void ExtractCrlIssuerDn_V2Crl_ReturnsIssuerBytes()
+    {
+        using var cert = TestCertificateFactory.CreateSelfSignedCert();
+        byte[] crl = BuildCrl(cert.SubjectName.RawData, v2: true);
+
+        byte[]? issuerDn = CrlClient.ExtractCrlIssuerDn(crl);
+
+        issuerDn.ShouldNotBeNull();
+        issuerDn.ShouldBe(cert.SubjectName.RawData);
+    }
+
+    [Fact(DisplayName = "ExtractCrlIssuerDn returns null for invalid data")]
+    public void ExtractCrlIssuerDn_InvalidData_ReturnsNull()
+    {
+        byte[]? issuerDn = CrlClient.ExtractCrlIssuerDn([0x00, 0x01, 0x02]);
+        issuerDn.ShouldBeNull();
+    }
 }

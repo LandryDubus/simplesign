@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -121,13 +122,14 @@ public sealed class PdfSignatureValidator
             return [];
         }
 
-        var embeddedCrls = await DssExtractor.TryReadDssDataAsync(pdfStream, cancellationToken, _logger).ConfigureAwait(false);
+        var dssData = await DssExtractor.TryReadFullDssDataAsync(pdfStream, cancellationToken, _logger).ConfigureAwait(false);
 
         var results = new List<SignatureValidationResult>(fields.Count);
         for (int i = 0; i < fields.Count; i++)
         {
             bool isLast = i == fields.Count - 1;
-            var result = await ValidateFieldAsync(pdfStream, fields[i], embeddedCrls, cancellationToken, isLast).ConfigureAwait(false);
+            var (embeddedCrls, embeddedOcsps) = GetRevocationDataForField(fields[i], dssData);
+            var result = await ValidateFieldAsync(pdfStream, fields[i], embeddedCrls, embeddedOcsps, cancellationToken, isLast).ConfigureAwait(false);
             results.Add(result);
         }
 
@@ -157,9 +159,10 @@ public sealed class PdfSignatureValidator
             return null;
         }
 
-        var embeddedCrls = await DssExtractor.TryReadDssDataAsync(pdfStream, cancellationToken, _logger).ConfigureAwait(false);
+        var dssData = await DssExtractor.TryReadFullDssDataAsync(pdfStream, cancellationToken, _logger).ConfigureAwait(false);
+        var (embeddedCrls, embeddedOcsps) = GetRevocationDataForField(field, dssData);
         bool isLast = fields[^1].FieldName == fieldName;
-        return await ValidateFieldAsync(pdfStream, field, embeddedCrls, cancellationToken, isLast).ConfigureAwait(false);
+        return await ValidateFieldAsync(pdfStream, field, embeddedCrls, embeddedOcsps, cancellationToken, isLast).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -236,6 +239,7 @@ public sealed class PdfSignatureValidator
         Stream pdfStream,
         PdfSignatureField field,
         IReadOnlyList<byte[]> embeddedCrls,
+        IReadOnlyList<byte[]> embeddedOcsps,
         CancellationToken cancellationToken,
         bool isLastSignature = true)
     {
@@ -266,7 +270,7 @@ public sealed class PdfSignatureValidator
         // Route document timestamps to a dedicated validation path
         if (field.IsDocumentTimestamp)
         {
-            return await ValidateDocumentTimestampAsync(pdfStream, field, cmsData, embeddedCrls, errors, warnings, isLastSignature, cancellationToken).ConfigureAwait(false);
+            return await ValidateDocumentTimestampAsync(pdfStream, field, cmsData, embeddedCrls, embeddedOcsps, errors, warnings, isLastSignature, cancellationToken).ConfigureAwait(false);
         }
 
         // 1b. Validate contentType signed attribute (RFC 5652 §5.3)
@@ -297,7 +301,7 @@ public sealed class PdfSignatureValidator
 
         // 5. Revocation (optional — requires network)
         var (notRevoked, revocationSource) = await ValidateRevocationIfEnabled(
-            field, cmsData, embeddedCrls, errors, warnings, cancellationToken).ConfigureAwait(false);
+            field, cmsData, embeddedCrls, embeddedOcsps, errors, warnings, cancellationToken).ConfigureAwait(false);
 
         return new SignatureValidationResult
         {
@@ -330,6 +334,7 @@ public sealed class PdfSignatureValidator
         PdfSignatureField field,
         CmsSignedData cmsData,
         IReadOnlyList<byte[]> embeddedCrls,
+        IReadOnlyList<byte[]> embeddedOcsps,
         List<string> errors,
         List<string> warnings,
         bool isLastSignature,
@@ -372,7 +377,7 @@ public sealed class PdfSignatureValidator
 
         // 4. Revocation (optional)
         var (notRevoked, revocationSource) = await ValidateRevocationIfEnabled(
-            field, cmsData, embeddedCrls, errors, warnings, cancellationToken).ConfigureAwait(false);
+            field, cmsData, embeddedCrls, embeddedOcsps, errors, warnings, cancellationToken).ConfigureAwait(false);
 
         return new SignatureValidationResult
         {
@@ -453,6 +458,7 @@ public sealed class PdfSignatureValidator
         PdfSignatureField field,
         CmsSignedData cmsData,
         IReadOnlyList<byte[]> embeddedCrls,
+        IReadOnlyList<byte[]> embeddedOcsps,
         List<string> errors,
         List<string> warnings,
         CancellationToken cancellationToken)
@@ -469,7 +475,7 @@ public sealed class PdfSignatureValidator
         try
         {
             var (notRevoked, source) = await _revocationChecker.CheckRevocationAsync(
-                cmsData.SignerCertificate, cmsData.Certificates, embeddedCrls, cancellationToken, signingTime).ConfigureAwait(false);
+                cmsData.SignerCertificate, cmsData.Certificates, embeddedCrls, embeddedOcsps, cancellationToken, signingTime).ConfigureAwait(false);
             if (!notRevoked)
             {
                 _logger.CertificateRevocationFailed(field.FieldName);
@@ -488,6 +494,54 @@ public sealed class PdfSignatureValidator
             // entry in a CRL or OCSP "revoked" response sets IsNotRevoked = false.
             return (true, RevocationSource.Indeterminate);
         }
+    }
+
+    /// <summary>
+    /// Gets the revocation data (CRLs + OCSPs) for a specific signature field.
+    /// Uses VRI-specific data if available, falls back to global DSS arrays.
+    /// </summary>
+    private static (IReadOnlyList<byte[]> Crls, IReadOnlyList<byte[]> Ocsps) GetRevocationDataForField(
+        PdfSignatureField field,
+        DssValidationData dssData)
+    {
+        // Compute SHA-1 hash of the signature /Contents for VRI lookup
+        if (field.ContentsBytes is { Length: > 0 } contentsBytes && dssData.VriEntries.Count > 0)
+        {
+            int derLength = Signing.LtvEmbedder.ComputeDerTotalLength(contentsBytes);
+#pragma warning disable CA5350 // VRI key is defined as SHA-1 by PAdES spec
+            byte[] hash = SHA1.HashData(contentsBytes.AsSpan(0, derLength));
+#pragma warning restore CA5350
+            string hashHex = Convert.ToHexString(hash);
+
+            if (dssData.VriEntries.TryGetValue(hashHex, out var vriData))
+            {
+                // Merge VRI-specific data with global data for comprehensive revocation check
+                var mergedCrls = MergeByteArrays(vriData.Crls, dssData.GlobalCrls);
+                var mergedOcsps = MergeByteArrays(vriData.Ocsps, dssData.GlobalOcsps);
+                return (mergedCrls, mergedOcsps);
+            }
+        }
+
+        // No VRI match — use global DSS data
+        return (dssData.GlobalCrls, dssData.GlobalOcsps);
+    }
+
+    private static IReadOnlyList<byte[]> MergeByteArrays(IReadOnlyList<byte[]> primary, IReadOnlyList<byte[]> secondary)
+    {
+        if (primary.Count == 0)
+        {
+            return secondary;
+        }
+
+        if (secondary.Count == 0)
+        {
+            return primary;
+        }
+
+        var merged = new List<byte[]>(primary.Count + secondary.Count);
+        merged.AddRange(primary);
+        merged.AddRange(secondary);
+        return merged;
     }
 
     #region Certificate chain validation

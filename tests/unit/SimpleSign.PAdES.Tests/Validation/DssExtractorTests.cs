@@ -196,4 +196,100 @@ public sealed class DssExtractorTests
         crls.Count().ShouldBe(1, "should extract exactly one CRL");
         crls[0].ShouldBe(crlContent, "extracted bytes must match the original CRL content");
     }
+
+    // ── ParseExistingDss (DSS merge support) ────────────────────────────────
+
+    [Fact(DisplayName = "ParseExistingDss returns empty when no DSS present")]
+    public void ParseExistingDss_NoDss_ReturnsEmpty()
+    {
+        var data = Encoding.ASCII.GetBytes("plain pdf without dss");
+        var result = DssExtractor.ParseExistingDss(data);
+        result.CrlObjRefs.ShouldBeEmpty();
+        result.OcspObjRefs.ShouldBeEmpty();
+        result.CertObjRefs.ShouldBeEmpty();
+        result.VriEntries.ShouldBeEmpty();
+    }
+
+    [Fact(DisplayName = "ParseExistingDss extracts CRL, OCSP, and Cert object refs")]
+    public void ParseExistingDss_WithArrays_ParsesRefs()
+    {
+        const string body =
+            "%PDF-1.7\n" +
+            "1 0 obj << /Type /Catalog /DSS 5 0 R >> endobj\n" +
+            "5 0 obj << /CRLs [10 0 R 11 0 R] /OCSPs [20 0 R] /Certs [30 0 R 31 0 R 32 0 R] >> endobj\n" +
+            "%%EOF";
+        var data = Encoding.ASCII.GetBytes(body);
+
+        var result = DssExtractor.ParseExistingDss(data);
+
+        result.CrlObjRefs.ShouldBe([10, 11]);
+        result.OcspObjRefs.ShouldBe([20]);
+        result.CertObjRefs.ShouldBe([30, 31, 32]);
+    }
+
+    [Fact(DisplayName = "ParseExistingDss extracts VRI entries")]
+    public void ParseExistingDss_WithVri_ParsesHashKeys()
+    {
+        const string body =
+            "%PDF-1.7\n" +
+            "1 0 obj << /Type /Catalog /DSS 5 0 R >> endobj\n" +
+            "5 0 obj << /CRLs [10 0 R] /VRI << /ABCDEF0123456789ABCDEF0123456789ABCDEF01 50 0 R /1234567890ABCDEF1234567890ABCDEF12345678 51 0 R >> >> endobj\n" +
+            "%%EOF";
+        var data = Encoding.ASCII.GetBytes(body);
+
+        var result = DssExtractor.ParseExistingDss(data);
+
+        result.VriEntries.Count.ShouldBe(2);
+        result.VriEntries["ABCDEF0123456789ABCDEF0123456789ABCDEF01"].ShouldBe(50);
+        result.VriEntries["1234567890ABCDEF1234567890ABCDEF12345678"].ShouldBe(51);
+    }
+
+    // ── TryReadFullDssDataAsync (VRI-aware validation) ──────────────────────
+
+    [Fact(DisplayName = "TryReadFullDssDataAsync returns empty for non-PDF stream")]
+    public async Task TryReadFullDssDataAsync_NoDss_ReturnsEmpty()
+    {
+        using var stream = new MemoryStream(Encoding.ASCII.GetBytes("not a pdf"));
+        var result = await DssExtractor.TryReadFullDssDataAsync(stream, CancellationToken.None);
+        result.GlobalCrls.ShouldBeEmpty();
+        result.GlobalOcsps.ShouldBeEmpty();
+        result.GlobalCerts.ShouldBeEmpty();
+        result.VriEntries.ShouldBeEmpty();
+    }
+
+    [Fact(DisplayName = "TryReadFullDssDataAsync extracts global OCSPs and Certs")]
+    public async Task TryReadFullDssDataAsync_WithOcspsAndCerts_ExtractsAll()
+    {
+        var ocspContent = new byte[] { 0x30, 0x03, 0x0A, 0x01, 0x00 };
+        var certContent = new byte[] { 0x30, 0x82, 0x01, 0x00 };
+
+        var sb = new StringBuilder();
+        sb.Append("%PDF-1.7\n");
+        sb.Append("1 0 obj << /Type /Catalog /DSS 5 0 R >> endobj\n");
+        sb.Append("5 0 obj << /OCSPs [10 0 R] /Certs [11 0 R] >> endobj\n");
+        sb.Append($"10 0 obj << /Length {ocspContent.Length} >>\nstream\n");
+        var prefix1 = Encoding.ASCII.GetBytes(sb.ToString());
+        var mid1 = Encoding.ASCII.GetBytes($"\nendstream\nendobj\n11 0 obj << /Length {certContent.Length} >>\nstream\n");
+        var suffix = Encoding.ASCII.GetBytes("\nendstream\nendobj\n%%EOF");
+
+        var data = new byte[prefix1.Length + ocspContent.Length + mid1.Length + certContent.Length + suffix.Length];
+        int pos = 0;
+        prefix1.CopyTo(data, pos);
+        pos += prefix1.Length;
+        ocspContent.CopyTo(data, pos);
+        pos += ocspContent.Length;
+        mid1.CopyTo(data, pos);
+        pos += mid1.Length;
+        certContent.CopyTo(data, pos);
+        pos += certContent.Length;
+        suffix.CopyTo(data, pos);
+
+        using var stream = new MemoryStream(data);
+        var result = await DssExtractor.TryReadFullDssDataAsync(stream, CancellationToken.None);
+
+        result.GlobalOcsps.Count.ShouldBe(1);
+        result.GlobalOcsps[0].ShouldBe(ocspContent);
+        result.GlobalCerts.Count.ShouldBe(1);
+        result.GlobalCerts[0].ShouldBe(certContent);
+    }
 }

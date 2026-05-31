@@ -349,4 +349,37 @@ internal sealed class CrlClient
         return null;
     }
 
+    /// <summary>
+    /// Extracts the issuer DN (Distinguished Name) raw bytes from a DER-encoded CRL.
+    /// Used by the LTV stabilisation loop to identify CRL issuers that differ from
+    /// the certificate issuer (indirect CRL issuers).
+    /// Returns null if the CRL cannot be parsed.
+    /// </summary>
+    internal static byte[]? ExtractCrlIssuerDn(byte[] crlBytes, ILogger? logger = null)
+    {
+        try
+        {
+            var crlReader = new AsnReader(crlBytes, AsnEncodingRules.BER);
+            var certList = crlReader.ReadSequence();
+            var tbsCrl = certList.ReadSequence();
+
+            // version Version OPTIONAL — bare INTEGER
+            if (tbsCrl.HasData && tbsCrl.PeekTag() == new Asn1Tag(TagClass.Universal, (int)UniversalTagNumber.Integer, false))
+            {
+                tbsCrl.ReadEncodedValue();
+            }
+
+            // signature AlgorithmIdentifier
+            tbsCrl.ReadSequence();
+
+            // issuer Name
+            return tbsCrl.ReadEncodedValue().ToArray();
+        }
+        catch (Exception ex) when (ex is AsnContentException or CryptographicException or InvalidOperationException)
+        {
+            logger?.CrlUrlExtensionParsingFailed($"Failed to extract CRL issuer: {ex.Message}");
+            return null;
+        }
+    }
+
 }

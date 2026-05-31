@@ -157,6 +157,33 @@ public sealed class LtvEmbedder
                         if (crl is not null)
                         {
                             crlData.Add(crl);
+
+                            // Chase CRL issuer certificate if it differs from the cert's issuer (indirect CRL)
+                            var crlIssuerDn = CrlClient.ExtractCrlIssuerDn(crl, _logger);
+                            if (crlIssuerDn is not null)
+                            {
+                                // Check if any cert in the working set has this DN as subject
+                                bool crlIssuerFound = allCerts.Any(c =>
+                                    c.SubjectName.RawData.AsSpan().SequenceEqual(crlIssuerDn));
+
+                                if (!crlIssuerFound)
+                                {
+                                    // Try to fetch the CRL issuer cert via AIA caIssuers
+                                    var crlIssuerCert = await TryFetchCrlIssuerCertAsync(crlIssuerDn, cert, cancellationToken).ConfigureAwait(false);
+                                    if (crlIssuerCert is not null &&
+                                        !processedThumbprints.Contains(crlIssuerCert.Thumbprint) &&
+                                        !allCerts.Any(c => c.Thumbprint.Equals(crlIssuerCert.Thumbprint, StringComparison.OrdinalIgnoreCase)))
+                                    {
+                                        allCerts.Add(crlIssuerCert);
+                                        nextRound.Add(crlIssuerCert);
+                                        _logger.LtvProcessingCert($"CRL issuer discovered: {crlIssuerCert.Subject}");
+                                    }
+                                    else
+                                    {
+                                        crlIssuerCert?.Dispose();
+                                    }
+                                }
+                            }
                         }
                     }
                     catch (HttpRequestException ex)
@@ -184,7 +211,10 @@ public sealed class LtvEmbedder
         // Extract signature /Contents hashes for VRI
         var signatureHashes = ExtractSignatureContentHashes(signedPdf);
 
-        return AppendDssDictionary(signedPdf, crlData, ocspData, allCerts, signatureHashes, timestampTokenBytes);
+        // Parse existing DSS for merge (multi-signature support)
+        var existingDss = Validation.DssExtractor.ParseExistingDss(signedPdf);
+
+        return AppendDssDictionary(signedPdf, crlData, ocspData, allCerts, signatureHashes, existingDss, timestampTokenBytes);
     }
 
     /// <summary>
@@ -311,6 +341,7 @@ public sealed class LtvEmbedder
         List<byte[]> ocsps,
         IReadOnlyList<X509Certificate2> certs,
         List<string> signatureHashes,
+        ExistingDssData existingDss,
         byte[]? timestampTokenBytes = null)
     {
         int nextObj = FindNextObjectNumber(signedPdf);
@@ -420,32 +451,50 @@ public sealed class LtvEmbedder
             vriEntries.Add((sigHash, vriObjNum));
         }
 
-        // Write DSS dictionary
+        // Write DSS dictionary — merge existing refs with new refs
         long dssOffset = result.Position;
         xrefMap[dssObjNum] = dssOffset;
+
+        // Merge existing object refs with newly written refs
+        var allCrlRefs = MergeRefs(existingDss.CrlObjRefs, crlRefs);
+        var allOcspRefs = MergeRefs(existingDss.OcspObjRefs, ocspRefs);
+        var allCertRefs = MergeRefs(existingDss.CertObjRefs, certRefs);
+
+        // Merge VRI entries: preserve prior entries + add new ones
+        var allVriEntries = new List<(string Hash, int ObjNum)>();
+        foreach (var (hash, objNum) in existingDss.VriEntries)
+        {
+            // Keep prior VRI entries unless overwritten by a new entry with same hash
+            if (!vriEntries.Any(v => v.Hash.Equals(hash, StringComparison.OrdinalIgnoreCase)))
+            {
+                allVriEntries.Add((hash, objNum));
+            }
+        }
+
+        allVriEntries.AddRange(vriEntries);
 
         var dssSb = new System.Text.StringBuilder();
         dssSb.Append($"{dssObjNum} 0 obj\n");
         dssSb.Append("<< /Type /DSS\n");
-        if (crlRefs is not [])
+        if (allCrlRefs is not [])
         {
-            dssSb.Append($"   /CRLs [{string.Join(" ", crlRefs)}]\n");
+            dssSb.Append($"   /CRLs [{string.Join(" ", allCrlRefs)}]\n");
         }
 
-        if (ocspRefs is not [])
+        if (allOcspRefs is not [])
         {
-            dssSb.Append($"   /OCSPs [{string.Join(" ", ocspRefs)}]\n");
+            dssSb.Append($"   /OCSPs [{string.Join(" ", allOcspRefs)}]\n");
         }
 
-        if (certRefs is not [])
+        if (allCertRefs is not [])
         {
-            dssSb.Append($"   /Certs [{string.Join(" ", certRefs)}]\n");
+            dssSb.Append($"   /Certs [{string.Join(" ", allCertRefs)}]\n");
         }
 
-        if (vriEntries is not [])
+        if (allVriEntries is not [])
         {
             dssSb.Append("   /VRI <<\n");
-            foreach (var (hash, objNum) in vriEntries)
+            foreach (var (hash, objNum) in allVriEntries)
             {
                 dssSb.Append($"      /{hash} {objNum} 0 R\n");
             }
@@ -533,6 +582,38 @@ public sealed class LtvEmbedder
         }
 
         return ms.ToArray();
+    }
+
+    /// <summary>
+    /// Merges existing object references (from prior DSS) with newly written references.
+    /// Existing refs are formatted as "N 0 R" strings. Deduplication is by object number.
+    /// </summary>
+    private static List<string> MergeRefs(IReadOnlyList<int> existingObjNums, List<string> newRefs)
+    {
+        var merged = new List<string>();
+        var seen = new HashSet<int>();
+
+        // Add existing references first (preserves prior data)
+        foreach (int objNum in existingObjNums)
+        {
+            if (seen.Add(objNum))
+            {
+                merged.Add($"{objNum} 0 R");
+            }
+        }
+
+        // Add new references, skipping duplicates
+        foreach (string r in newRefs)
+        {
+            // Extract obj number from "N 0 R" string
+            int spaceIdx = r.IndexOf(' ');
+            if (spaceIdx > 0 && int.TryParse(r.AsSpan(0, spaceIdx), out int num) && seen.Add(num))
+            {
+                merged.Add(r);
+            }
+        }
+
+        return merged;
     }
 
     private static string BuildDssXrefAndTrailer(
@@ -746,4 +827,44 @@ public sealed class LtvEmbedder
     /// </summary>
     private static bool HasOcspNoCheckExtension(X509Certificate2 cert) =>
         cert.Extensions[Oids.OcspNoCheck] is not null;
+
+    /// <summary>
+    /// Attempts to fetch the CRL issuer certificate via the cert's AIA caIssuers URL.
+    /// Returns the certificate if found and its subject matches the expected CRL issuer DN.
+    /// Returns null if the certificate cannot be fetched or doesn't match.
+    /// </summary>
+    private async Task<X509Certificate2?> TryFetchCrlIssuerCertAsync(
+        byte[] expectedIssuerDn,
+        X509Certificate2 currentCert,
+        CancellationToken ct)
+    {
+        // Try caIssuers from the current cert's AIA extension
+        var caIssuersUrl = OcspClient.GetCaIssuersUrl(currentCert);
+        if (caIssuersUrl is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            var certBytes = await ResilientHttp.GetBytesAsync(_httpClient, caIssuersUrl, logger: _logger, ct: ct).ConfigureAwait(false);
+            if (certBytes is null)
+            {
+                return null;
+            }
+
+            var fetchedCert = CertificateLoader.LoadCertificate(certBytes);
+            if (fetchedCert.SubjectName.RawData.AsSpan().SequenceEqual(expectedIssuerDn))
+            {
+                return fetchedCert;
+            }
+
+            fetchedCert.Dispose();
+            return null;
+        }
+        catch (Exception ex) when (ex is HttpRequestException or CryptographicException)
+        {
+            return null;
+        }
+    }
 }

@@ -75,6 +75,29 @@ internal sealed class OcspClient
         var (isValid, responderCerts) = ParseOcspResponseWithCerts(ocspResponse, cert, _logger);
         return new OcspFetchResult(isValid, ocspResponse, responderCerts);
     }
+
+    /// <summary>
+    /// Checks an embedded OCSP response against a certificate.
+    /// Returns: true = good (not revoked), false = revoked, null = not relevant for this cert or unparseable.
+    /// </summary>
+    internal bool? CheckEmbeddedOcspResponse(
+        X509Certificate2 cert,
+        X509Certificate2? issuerCert,
+        byte[] ocspResponseBytes,
+        DateTimeOffset? signingTime = null)
+    {
+        try
+        {
+            bool isValid = ParseOcspResponse(ocspResponseBytes, cert, _logger);
+            return isValid;
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or InvalidDataException or AsnContentException or CryptographicException)
+        {
+            // Response doesn't apply to this cert or is malformed
+            return null;
+        }
+    }
+
     #endregion
 
     #region Static methods

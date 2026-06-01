@@ -27,21 +27,13 @@ All cryptography is handled by `System.Security.Cryptography` — **no third-par
 
 ---
 
-## What's New in v0.3.0
+## What's New in v0.3.1
 
-**ETSI EN 319 142-1 conformance:**
-- 📋 **OcspNoCheck extension** — prevents infinite recursion in revocation checking (RFC 6960 §4.2.2.2.1)
-- 📦 **Full DSS certificate coverage** — OCSP responder certs and TSA certs now extracted and embedded
-- 🔑 **VRI key computation fixed** — correct SHA-1 hashes per spec
-- 🔄 **Iterative LTV stabilisation** — queue-based revocation data collection with cert chasing
-
-**AI-first instrumentation:**
-- 🤖 **`llms.txt`** / **`llms-full.txt`** — AI-readable documentation (llmstxt.org standard)
-- 🧠 **`CLAUDE.md`** / **`AGENTS.md`** / **`.github/copilot-instructions.md`** — instructions for AI coding agents
-
-**Breaking changes:**
-- ⚠️ `WithLtv()` now requires `WithTimestamp()` to be called first
-- ⚠️ `WithArchivalTimestamp()` now requires `WithLtv()` to be called first
+**ETSI EN 319 142-1 — multi-signature & validation improvements:**
+- 🔀 **DSS merge** — multi-signature PDFs now preserve all prior VRI entries and revocation data
+- 🔍 **VRI-aware validation** — per-signature revocation lookup via SHA-1 VRI keys
+- 🔗 **CRL issuer chase** — LTV loop now fully general for indirect CRL issuers
+- 📦 **Embedded OCSP support** — offline OCSP validation from DSS/VRI data
 
 See the [full changelog](CHANGELOG.md) for details.
 

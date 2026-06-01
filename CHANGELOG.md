@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1] - 2026-06-01
+
+### Added
+
+- **DSS merge for multi-signature PDFs** — `LtvEmbedder` now reads existing DSS dictionaries and merges prior VRI entries, CRL/OCSP/Cert object references with new data instead of replacing them. Counter-signatures and multi-party signing workflows now preserve all revocation data.
+- **VRI-aware validation path** — `PdfSignatureValidator` computes SHA-1 of each signature's `/Contents` and looks up per-signature VRI entries from the DSS, falling back to global arrays. Enables correct per-signature revocation validation in multi-signer documents.
+- **Full DSS extraction** — `DssExtractor.TryReadFullDssDataAsync` returns structured `DssValidationData` with global CRLs/OCSPs/Certs and per-VRI entries (new `DssValidationData` and `VriData` record types).
+- **Embedded OCSP validation** — `RevocationChecker` and `OcspClient` now support validating embedded OCSP responses from DSS/VRI without network access (priority: embedded OCSP → embedded CRL → online OCSP → online CRL).
+- **CRL issuer certificate chase** — LTV stabilisation loop now detects indirect CRL issuers (issuer DN ≠ cert issuer DN) and fetches their certificates via AIA `caIssuers`, making the loop fully general for all PKI topologies.
+- **`CrlClient.ExtractCrlIssuerDn`** — new static method to parse CRL issuer Distinguished Name from DER-encoded CRL bytes.
+- **`OcspClient.CheckEmbeddedOcspResponse`** — new instance method for offline OCSP response validation against a target certificate.
+
+### Fixed
+
+- **DSS replacement in multi-signature scenarios** — prior VRI entries and revocation data are no longer lost when adding a second signature with LTV enabled.
+
 ## [0.3.0] - 2026-05-25
 
 ### Added

@@ -4,6 +4,7 @@ using System.Security.Cryptography.X509Certificates;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using SimpleSign.Core.Constants;
+using SimpleSign.Core.Crypto;
 using SimpleSign.Core.Http;
 using SimpleSign.Core.Validation;
 
@@ -81,6 +82,11 @@ internal sealed class CrlClient
             // signatureAlgorithm (outer)
             var crlSigAlgSeq = crlSeq.ReadSequence();
             string crlSigAlgOid = crlSigAlgSeq.ReadObjectIdentifier();
+            byte[]? crlSigAlgParams = null;
+            if (crlSigAlgSeq.HasData)
+            {
+                crlSigAlgParams = crlSigAlgSeq.ReadEncodedValue().ToArray();
+            }
 
             // signatureValue BIT STRING (outer)
             byte[] crlSignature = crlSeq.ReadBitString(out _);
@@ -112,7 +118,7 @@ internal sealed class CrlClient
             // The caller falls through to an online CRL download as a safe fallback.
             if (issuerCert is not null)
             {
-                bool sigValid = VerifyCrlSignature(issuerCert, tbsCrlRaw, crlSignature, crlSigAlgOid, logger);
+                bool sigValid = VerifyCrlSignature(issuerCert, tbsCrlRaw, crlSignature, crlSigAlgOid, crlSigAlgParams, logger);
                 if (!sigValid)
                 {
                     logger?.CrlSignatureVerificationFailed("CRL signature check failed — falling back to online CRL");
@@ -253,22 +259,29 @@ internal sealed class CrlClient
         }
     }
 
-    internal static bool VerifyCrlSignature(X509Certificate2 issuerCert, byte[] tbsData, byte[] signature, string sigAlgOid, ILogger? logger = null)
+    internal static bool VerifyCrlSignature(
+        X509Certificate2 issuerCert,
+        byte[] tbsData,
+        byte[] signature,
+        string sigAlgOid,
+        byte[]? sigAlgParams = null,
+        ILogger? logger = null)
     {
         try
         {
             using var rsa = issuerCert.GetRSAPublicKey();
             if (rsa is not null)
             {
-                var hashAlg = sigAlgOid switch
-                {
-                    Oids.RsaSha256 => HashAlgorithmName.SHA256,
-                    Oids.RsaSha384 => HashAlgorithmName.SHA384,
-                    Oids.RsaSha512 => HashAlgorithmName.SHA512,
-                    Oids.RsaSha1 => HashAlgorithmName.SHA1,
-                    Oids.RsaPss => HashAlgorithmName.SHA256,
-                    _ => HashAlgorithmName.SHA256
-                };
+                var hashAlg = sigAlgOid == Oids.RsaPss
+                    ? CryptoUtility.ParsePssHashAlgorithm(sigAlgParams ?? [])
+                    : sigAlgOid switch
+                    {
+                        Oids.RsaSha256 => HashAlgorithmName.SHA256,
+                        Oids.RsaSha384 => HashAlgorithmName.SHA384,
+                        Oids.RsaSha512 => HashAlgorithmName.SHA512,
+                        Oids.RsaSha1 => HashAlgorithmName.SHA1,
+                        _ => HashAlgorithmName.SHA256
+                    };
                 var padding = sigAlgOid == Oids.RsaPss ? RSASignaturePadding.Pss : RSASignaturePadding.Pkcs1;
                 return rsa.VerifyData(tbsData, signature, hashAlg, padding);
             }

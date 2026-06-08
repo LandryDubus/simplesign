@@ -114,4 +114,4 @@ NOTES
 - **MINOR** (0.x.0): New public API surface, deprecations
 - **MAJOR** (x.0.0): Breaking changes to public API
 
-Current version: `0.3.1`
+Current version: `0.3.2`

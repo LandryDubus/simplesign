@@ -506,8 +506,10 @@ public sealed class PdfSignatureWriter
         {
             fieldDict.Append($"   /P {pageObjNum} 0 R\n");
         }
-        // /F 132 = Print (4) + Locked (128) for visible; /F 0 for invisible (ISO 32000 §12.5.3)
-        fieldDict.Append($"   /F {(hasAppearance ? 132 : 0)}\n");
+        // /F 132 = Print (4) + Locked (128) — required for both visible and invisible
+        // signature widgets in PDF/A-2/3 (ISO 19005-3 §6.3.2 Test 2). Invisibility is
+        // conveyed by /Rect [0 0 0 0] + the absence of /AP, not by clearing the Print flag.
+        fieldDict.Append("   /F 132\n");
         fieldDict.Append("   /Border [0 0 0]\n");
         if (hasAppearance)
         {
@@ -897,7 +899,10 @@ public sealed class PdfSignatureWriter
     {
         string dictContent = Encoding.Latin1.GetString(data.Slice(dictStart, objEnd - dictStart));
         string fieldRef = $"{fieldObjNum} 0 R";
-        string pageText = $"{pageObjNum} 0 obj {dictContent}";
+        // EOL after 'obj' is required by ISO 19005-3 §6.1.9 Test 1 (a single space fails
+        // the spacingCompliesPDFA check). dictContent starts with '<<' so we get a clean
+        // "obj\n<<".
+        string pageText = $"{pageObjNum} 0 obj\n{dictContent}";
 
         int annotsPos = pageText.IndexOf("/Annots [", StringComparison.Ordinal);
         if (annotsPos < 0)
@@ -1088,10 +1093,14 @@ public sealed class PdfSignatureWriter
 
     private static string AppendAnnots(string pageObj, string fieldRef)
     {
-        int insertPos = pageObj.LastIndexOf(">>\nendobj", StringComparison.Ordinal);
+        // Normalise CRLF → LF so the sentinel matches Windows / iText / Adobe source PDFs.
+        // If the sentinel is not found, fall back to the depth-aware top-level dictionary
+        // close so we don't insert into a nested dictionary.
+        string normalised = pageObj.Replace("\r\n", "\n", StringComparison.Ordinal);
+        int insertPos = normalised.LastIndexOf(">>\nendobj", StringComparison.Ordinal);
         if (insertPos < 0)
         {
-            insertPos = pageObj.LastIndexOf(">>", StringComparison.Ordinal);
+            insertPos = PdfStructureParser.FindOutermostDictClose(normalised);
         }
         if (insertPos < 0)
         {
@@ -1100,13 +1109,13 @@ public sealed class PdfSignatureWriter
 
         string[] parts =
         [
-            pageObj.Substring(0, insertPos),
+            normalised.Substring(0, insertPos),
             "   /Annots [",
             fieldRef,
             "]\n",
             null!
         ];
-        parts[4] = pageObj[insertPos..];
+        parts[4] = normalised[insertPos..];
         return string.Concat(parts);
     }
 

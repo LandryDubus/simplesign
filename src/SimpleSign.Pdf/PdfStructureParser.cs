@@ -782,37 +782,77 @@ internal static class PdfStructureParser
     }
 
     /// <summary>
-    /// Removes a key-value line from a PDF dictionary string.
+    /// Removes a key-value line from a PDF dictionary string. Normalises CRLF to LF
+    /// so the key search and line terminator work uniformly across source PDFs
+    /// produced on Windows / by iText / Adobe (CRLF) and macOS / Linux (LF).
     /// </summary>
     public static string RemoveKeyFromDict(string obj, string key)
     {
-        int keyPos = obj.IndexOf(key, StringComparison.Ordinal);
+        string normalised = obj.Replace("\r\n", "\n", StringComparison.Ordinal);
+        int keyPos = normalised.IndexOf(key, StringComparison.Ordinal);
         if (keyPos < 0)
         {
             return obj;
         }
 
-        int lineEnd = obj.IndexOf('\n', keyPos);
-        lineEnd = (lineEnd >= 0) ? (lineEnd + 1) : obj.Length;
-        return string.Concat(obj.AsSpan(0, keyPos), obj.AsSpan(lineEnd));
+        int lineEnd = normalised.IndexOf('\n', keyPos);
+        lineEnd = (lineEnd >= 0) ? (lineEnd + 1) : normalised.Length;
+        return string.Concat(normalised.AsSpan(0, keyPos), normalised.AsSpan(lineEnd));
     }
 
     /// <summary>
-    /// Inserts a new key-value line into a PDF dictionary string, just before the closing <c>&gt;&gt;\nendobj</c>.
+    /// Inserts a new key-value line into a PDF dictionary string, just before the closing
+    /// <c>&gt;&gt;\nendobj</c>. CRLF input is normalised to LF so the sentinel matches
+    /// source PDFs produced on Windows / by iText / Adobe. If the sentinel is not found
+    /// (e.g. unusual line endings), falls back to a depth-aware search for the closing
+    /// <c>&gt;&gt;</c> of the top-level dictionary so the insert lands at the correct
+    /// level instead of inside a nested dictionary.
     /// </summary>
     public static string InsertIntoDict(string obj, string toInsert)
     {
-        int insertPos = obj.LastIndexOf(">>\nendobj", StringComparison.Ordinal);
+        string normalised = obj.Replace("\r\n", "\n", StringComparison.Ordinal);
+        int insertPos = normalised.LastIndexOf(">>\nendobj", StringComparison.Ordinal);
         if (insertPos < 0)
         {
-            insertPos = obj.LastIndexOf(">>", StringComparison.Ordinal);
+            insertPos = FindOutermostDictClose(normalised);
         }
         if (insertPos < 0)
         {
             return obj;
         }
 
-        return string.Concat(obj.AsSpan(0, insertPos), toInsert, obj.AsSpan(insertPos));
+        return string.Concat(normalised.AsSpan(0, insertPos), toInsert, normalised.AsSpan(insertPos));
+    }
+
+    /// <summary>
+    /// Finds the offset of the closing <c>&gt;&gt;</c> of the top-level dictionary by
+    /// tracking dictionary nesting depth. Returns the last <c>&gt;&gt;</c> that brings
+    /// the depth from 1 back to 0, or -1 if no top-level dictionary is found.
+    /// Avoids matching a <c>&gt;&gt;</c> inside a nested dictionary value such as
+    /// <c>/DR &lt;&lt; /Font &lt;&lt; … &gt;&gt; &gt;&gt;</c>.
+    /// </summary>
+    public static int FindOutermostDictClose(string text)
+    {
+        int depth = 0;
+        int lastTopLevelClose = -1;
+        for (int i = 0; i < text.Length - 1; i++)
+        {
+            if (text[i] == '<' && text[i + 1] == '<')
+            {
+                depth++;
+                i++;
+            }
+            else if (text[i] == '>' && text[i + 1] == '>')
+            {
+                depth--;
+                if (depth == 0)
+                {
+                    lastTopLevelClose = i;
+                }
+                i++;
+            }
+        }
+        return lastTopLevelClose;
     }
 
     /// <summary>

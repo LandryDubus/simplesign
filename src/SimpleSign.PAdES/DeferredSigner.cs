@@ -171,6 +171,7 @@ public static class DeferredSigner
             byte[] cms = CmsSignatureBuilder.BuildSignedData(
                 session.DigestOid,
                 session.SignatureAlgorithmOid,
+                HashAlgorithmFromDigestOid(session.DigestOid),
                 session.SignedAttributes,
                 rawSignature,
                 certificate,
@@ -250,6 +251,22 @@ public static class DeferredSigner
                 "Provide SignatureAlgorithmOid explicitly in DeferredSigningOptions.")
         };
     }
+
+    /// <summary>
+    /// Maps a digest algorithm OID (as stored in the deferred signing session) back to a
+    /// <see cref="HashAlgorithmName"/>. Used to thread the hash through to
+    /// <see cref="CmsSignatureBuilder.BuildSignedData"/> so the RSASSA-PSS-params
+    /// structure (RFC 4055 §3.1) can be emitted for PSS signatures.
+    /// </summary>
+    private static HashAlgorithmName HashAlgorithmFromDigestOid(string digestOid) => digestOid switch
+    {
+        Oids.Sha256 => HashAlgorithmName.SHA256,
+        Oids.Sha384 => HashAlgorithmName.SHA384,
+        Oids.Sha512 => HashAlgorithmName.SHA512,
+        Oids.Sha1 => HashAlgorithmName.SHA1,
+        _ => throw new NotSupportedException(
+            $"Unsupported digest OID '{digestOid}' in deferred signing session.")
+    };
 }
 
 /// <summary>Result of the deferred signing preparation phase.</summary>

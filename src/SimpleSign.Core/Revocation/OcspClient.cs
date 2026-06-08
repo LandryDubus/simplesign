@@ -216,9 +216,14 @@ internal sealed class OcspClient
         byte[] tbsResponseDataRaw = basicOcsp.PeekEncodedValue().ToArray();
         var tbsResponseData = basicOcsp.ReadSequence();
 
-        // signatureAlgorithm
+        // signatureAlgorithm — extract the OID and any RSASSA-PSS-params bytes
         var sigAlgSeq = basicOcsp.ReadSequence();
         string sigAlgOid = sigAlgSeq.ReadObjectIdentifier();
+        byte[]? sigAlgParams = null;
+        if (sigAlgSeq.HasData)
+        {
+            sigAlgParams = sigAlgSeq.ReadEncodedValue().ToArray();
+        }
 
         // signature BIT STRING
         byte[] ocspSignature = basicOcsp.ReadBitString(out _);
@@ -259,7 +264,7 @@ internal sealed class OcspClient
             // Verify OCSP response signature
             if (responderCert is not null)
             {
-                bool sigValid = VerifyOcspSignature(responderCert, tbsResponseDataRaw, ocspSignature, sigAlgOid, logger);
+                bool sigValid = VerifyOcspSignature(responderCert, tbsResponseDataRaw, ocspSignature, sigAlgOid, sigAlgParams, logger);
                 if (!sigValid)
                 {
                     throw new InvalidOperationException("OCSP response signature verification failed.");
@@ -389,6 +394,11 @@ internal sealed class OcspClient
 
         var sigAlgSeq = basicOcsp.ReadSequence();
         string sigAlgOid = sigAlgSeq.ReadObjectIdentifier();
+        byte[]? sigAlgParams = null;
+        if (sigAlgSeq.HasData)
+        {
+            sigAlgParams = sigAlgSeq.ReadEncodedValue().ToArray();
+        }
         byte[] ocspSignature = basicOcsp.ReadBitString(out _);
 
         // Extract ALL certificates from certs [0] OPTIONAL
@@ -419,7 +429,7 @@ internal sealed class OcspClient
         // Verify signature using first responder cert
         if (firstCert is not null)
         {
-            bool sigValid = VerifyOcspSignature(firstCert, tbsResponseDataRaw, ocspSignature, sigAlgOid, logger);
+            bool sigValid = VerifyOcspSignature(firstCert, tbsResponseDataRaw, ocspSignature, sigAlgOid, sigAlgParams, logger);
             if (!sigValid)
             {
                 throw new InvalidOperationException("OCSP response signature verification failed.");
@@ -495,22 +505,29 @@ internal sealed class OcspClient
         return isGood;
     }
 
-    internal static bool VerifyOcspSignature(X509Certificate2 responderCert, byte[] tbsData, byte[] signature, string sigAlgOid, ILogger? logger = null)
+    internal static bool VerifyOcspSignature(
+        X509Certificate2 responderCert,
+        byte[] tbsData,
+        byte[] signature,
+        string sigAlgOid,
+        byte[]? sigAlgParams = null,
+        ILogger? logger = null)
     {
         try
         {
             using var rsa = responderCert.GetRSAPublicKey();
             if (rsa is not null)
             {
-                var hashAlg = sigAlgOid switch
-                {
-                    Oids.RsaSha256 => HashAlgorithmName.SHA256,
-                    Oids.RsaSha384 => HashAlgorithmName.SHA384,
-                    Oids.RsaSha512 => HashAlgorithmName.SHA512,
-                    Oids.RsaSha1 => HashAlgorithmName.SHA1,
-                    Oids.RsaPss => HashAlgorithmName.SHA256,
-                    _ => HashAlgorithmName.SHA256
-                };
+                var hashAlg = sigAlgOid == Oids.RsaPss
+                    ? CryptoUtility.ParsePssHashAlgorithm(sigAlgParams ?? [])
+                    : sigAlgOid switch
+                    {
+                        Oids.RsaSha256 => HashAlgorithmName.SHA256,
+                        Oids.RsaSha384 => HashAlgorithmName.SHA384,
+                        Oids.RsaSha512 => HashAlgorithmName.SHA512,
+                        Oids.RsaSha1 => HashAlgorithmName.SHA1,
+                        _ => HashAlgorithmName.SHA256
+                    };
                 var padding = sigAlgOid == Oids.RsaPss ? RSASignaturePadding.Pss : RSASignaturePadding.Pkcs1;
                 return rsa.VerifyData(tbsData, signature, hashAlg, padding);
             }

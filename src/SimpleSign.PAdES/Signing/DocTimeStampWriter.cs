@@ -85,7 +85,7 @@ public static class DocTimeStampWriter
         {
             fieldDict.Append($"   /P {pageObjNum} 0 R\n");
         }
-        fieldDict.Append("   /F 0\n");
+        fieldDict.Append("   /F 132\n");
         fieldDict.Append("   /Rect [0 0 0 0]\n");
         fieldDict.Append(">>\nendobj\n");
 

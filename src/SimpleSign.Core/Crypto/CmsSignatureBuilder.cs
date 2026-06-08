@@ -63,7 +63,7 @@ public sealed class CmsSignatureBuilder
         List<X509Certificate2> allCerts = [certificate, .. (extraCertificates ?? [])];
 
         (logger ?? NullLogger.Instance).CmsBuildStarted(digestOid, signatureOid, certificate.Subject);
-        return BuildSignedData(digestOid, signatureOid, signedAttrs, signature, certificate, allCerts,
+        return BuildSignedData(digestOid, signatureOid, hashAlgorithm, signedAttrs, signature, certificate, allCerts,
             extraAttributes?.Count ?? 0, logger);
     }
 
@@ -128,7 +128,7 @@ public sealed class CmsSignatureBuilder
         List<X509Certificate2> allCerts = [certificate, .. (extraCertificates ?? [])];
 
         (logger ?? NullLogger.Instance).CmsBuildStarted(digestOid, signatureAlgorithmOid, certificate.Subject);
-        return BuildSignedData(digestOid, signatureAlgorithmOid, signedAttrs, signature, certificate, allCerts,
+        return BuildSignedData(digestOid, signatureAlgorithmOid, hashAlgorithm, signedAttrs, signature, certificate, allCerts,
             extraAttributes?.Count ?? 0, logger);
     }
 
@@ -137,6 +137,7 @@ public sealed class CmsSignatureBuilder
     internal static byte[] BuildSignedData(
         string digestOid,
         string signatureOid,
+        HashAlgorithmName hashAlgorithm,
         byte[] signedAttrs,
         byte[] signature,
         X509Certificate2 signerCert,
@@ -199,7 +200,7 @@ public sealed class CmsSignatureBuilder
                     // signerInfos SET
                     using (writer.PushSetOf())
                     {
-                        BuildSignerInfo(writer, digestOid, signatureOid,
+                        BuildSignerInfo(writer, digestOid, signatureOid, hashAlgorithm,
                                         signedAttrs, signature, signerCert);
                     }
                 }
@@ -215,6 +216,7 @@ public sealed class CmsSignatureBuilder
         AsnWriter writer,
         string digestOid,
         string signatureOid,
+        HashAlgorithmName hashAlg,
         byte[] signedAttrs,
         byte[] signature,
         X509Certificate2 cert)
@@ -250,7 +252,11 @@ public sealed class CmsSignatureBuilder
             using (writer.PushSequence())
             {
                 writer.WriteObjectIdentifier(signatureOid);
-                if (SignatureAlgorithmUsesNullParameter(signatureOid))
+                if (signatureOid == Oids.RsaPss)
+                {
+                    WriteRsaPssParams(writer, hashAlg);
+                }
+                else if (SignatureAlgorithmUsesNullParameter(signatureOid))
                 {
                     writer.WriteNull();
                 }
@@ -258,6 +264,54 @@ public sealed class CmsSignatureBuilder
 
             // signature OCTET STRING
             writer.WriteOctetString(signature);
+        }
+    }
+
+    /// <summary>
+    /// Writes the <c>RSASSA-PSS-params</c> structure (RFC 4055 §3.1) that must accompany the
+    /// <c>id-RSASSA-PSS</c> OID in <c>signatureAlgorithm</c>. The params declare the hash
+    /// algorithm, the mask-generation function (always id-mgf1 with the same hash), and the
+    /// salt length (always equal to the hash output size per RFC defaults).
+    /// </summary>
+    private static void WriteRsaPssParams(AsnWriter writer, HashAlgorithmName hashAlg)
+    {
+        (string hashOid, int saltLength) = hashAlg switch
+        {
+            _ when hashAlg == HashAlgorithmName.SHA256 => (Oids.Sha256, 32),
+            _ when hashAlg == HashAlgorithmName.SHA384 => (Oids.Sha384, 48),
+            _ when hashAlg == HashAlgorithmName.SHA512 => (Oids.Sha512, 64),
+            _ => throw new NotSupportedException(
+                $"No RSASSA-PSS-params defined for hash '{hashAlg.Name}'.")
+        };
+
+        // RSASSA-PSS-params ::= SEQUENCE { ... }
+        using (writer.PushSequence())
+        {
+            // hashAlgorithm [0] EXPLICIT AlgorithmIdentifier
+            using (writer.PushSequence(new Asn1Tag(TagClass.ContextSpecific, 0, true)))
+            using (writer.PushSequence())
+            {
+                writer.WriteObjectIdentifier(hashOid);
+                writer.WriteNull();
+            }
+
+            // maskGenAlgorithm [1] EXPLICIT MaskGenAlgorithm = id-mgf1 with the same hash
+            using (writer.PushSequence(new Asn1Tag(TagClass.ContextSpecific, 1, true)))
+            using (writer.PushSequence())
+            {
+                writer.WriteObjectIdentifier(Oids.Mgf1);
+                using (writer.PushSequence())
+                {
+                    writer.WriteObjectIdentifier(hashOid);
+                    writer.WriteNull();
+                }
+            }
+
+            // saltLength [2] EXPLICIT INTEGER
+            using (writer.PushSequence(new Asn1Tag(TagClass.ContextSpecific, 2, true)))
+            {
+                writer.WriteInteger(saltLength);
+            }
         }
     }
 

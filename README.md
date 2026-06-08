@@ -13,7 +13,7 @@
   <img src="https://img.shields.io/badge/.NET-8%20%7C%2010-512BD4?style=flat-square&logo=dotnet" alt=".NET 8 | 10" />
   <img src="https://img.shields.io/badge/License-MIT-green?style=flat-square" alt="MIT License" />
   <img src="https://img.shields.io/badge/AOT-Compatible-blueviolet?style=flat-square" alt="Native AOT" />
-  <img src="https://img.shields.io/badge/Tests-1%2C643-brightgreen?style=flat-square" alt="1,643 tests" />
+  <img src="https://img.shields.io/badge/Tests-1%2C230-brightgreen?style=flat-square" alt="1,230 tests" />
   <img src="https://img.shields.io/badge/No%20Crypto%20Deps-✓-blue?style=flat-square" alt="No third-party crypto dependencies" />
 </p>
 
@@ -27,13 +27,13 @@ All cryptography is handled by `System.Security.Cryptography` — **no third-par
 
 ---
 
-## What's New in v0.3.1
+## What's New in v0.3.2
 
-**ETSI EN 319 142-1 — multi-signature & validation improvements:**
-- 🔀 **DSS merge** — multi-signature PDFs now preserve all prior VRI entries and revocation data
-- 🔍 **VRI-aware validation** — per-signature revocation lookup via SHA-1 VRI keys
-- 🔗 **CRL issuer chase** — LTV loop now fully general for indirect CRL issuers
-- 📦 **Embedded OCSP support** — offline OCSP validation from DSS/VRI data
+**PS256 / PS384 / PS512 conformance + PDF/A preservation + external-signer chain:**
+- 🔐 **RFC 4055 §3.1 conformance** — PSS signatures now emit the `RSASSA-PSS-params` structure (hash + MGF1 + salt length) instead of an empty parameter; Adobe Acrobat, EU DSS, iText, and eIDAS validators accept the output
+- 🌐 **PSS-params-aware revocation** — OCSP, CRL, and TSA signature verification honour the hash declared in the PSS params; PS384/PS512 responses no longer silently fail or use the wrong hash
+- 📄 **PDF/A-2/3 conformance** — signing now sets the `/F 132` (Print + Locked) flag on every widget, uses `LF` after `obj` in incremental updates, and normalises CRLF source PDFs so dict inserts land at the correct depth (no nested-dict corruption)
+- 🔗 **External signer with pre-fetched chain** — two new `WithExternalSigner(..., chain)` overloads let HSM / cloud-KMS callers supply intermediates directly, skipping AIA HTTP fetches during LTV
 
 See the [full changelog](CHANGELOG.md) for details.
 

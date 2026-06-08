@@ -45,6 +45,9 @@ internal static class Oids
     /// <summary>RSA-PSS (id-RSASSA-PSS) — signature algorithm with PSS padding.</summary>
     internal const string RsaPss = "1.2.840.113549.1.1.10";
 
+    /// <summary>id-mgf1 — Mask Generation Function 1 (RFC 4055 §3.1).</summary>
+    internal const string Mgf1 = "1.2.840.113549.1.1.8";
+
     /// <summary>RSA encryption (rsaEncryption) — public key algorithm OID.</summary>
     internal const string RsaEncryption = "1.2.840.113549.1.1.1";
 

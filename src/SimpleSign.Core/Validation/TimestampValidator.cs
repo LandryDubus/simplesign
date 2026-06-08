@@ -28,7 +28,8 @@ internal static class TimestampValidator
         byte[]? SignedAttrs,
         byte[]? Signature,
         string? DigestOid,
-        string? SignatureAlgOid);
+        string? SignatureAlgOid,
+        byte[]? SignatureAlgParams);
 
     /// <summary>Validates the timestamp token in a CMS signature.</summary>
     /// <returns>true = valid, false = invalid, null = absent.</returns>
@@ -142,6 +143,7 @@ internal static class TimestampValidator
         byte[]? tsaSignerInfoSignature = null;
         string? tsaSignerDigestOid = null;
         string? tsaSignerSigAlgOid = null;
+        byte[]? tsaSignerSigAlgParams = null;
         ReadOnlyMemory<byte> signerIssuerRaw = default;
         ReadOnlyMemory<byte> signerSerialBytes = default;
         try
@@ -191,6 +193,10 @@ internal static class TimestampValidator
                     }
                     var sigAlgSeq2 = si.ReadSequence();
                     tsaSignerSigAlgOid = sigAlgSeq2.ReadObjectIdentifier();
+                    if (sigAlgSeq2.HasData)
+                    {
+                        tsaSignerSigAlgParams = sigAlgSeq2.ReadEncodedValue().ToArray();
+                    }
                     tsaSignerInfoSignature = si.ReadOctetString();
                 }
             }
@@ -212,7 +218,7 @@ internal static class TimestampValidator
             }
         }
 
-        return new ParsedTsaSignerInfo(tsaCerts, tsaSignerInfoSignedAttrs, tsaSignerInfoSignature, tsaSignerDigestOid, tsaSignerSigAlgOid);
+        return new ParsedTsaSignerInfo(tsaCerts, tsaSignerInfoSignedAttrs, tsaSignerInfoSignature, tsaSignerDigestOid, tsaSignerSigAlgOid, tsaSignerSigAlgParams);
     }
 
     private static bool VerifyTsaSignature(ParsedTsaSignerInfo tsaData, List<string> warnings)
@@ -237,6 +243,14 @@ internal static class TimestampValidator
             Oids.Sha1 => HashAlgorithmName.SHA1,
             _ => HashAlgorithmName.SHA256
         };
+
+        // For RSA-PSS, the RSASSA-PSS-params are authoritative (RFC 4055 §3.1) — override
+        // the digest-algorithm-derived hash with the one carried in the signatureAlgorithm
+        // parameters when present.
+        if (tsaData.SignatureAlgOid == Oids.RsaPss && tsaData.SignatureAlgParams is not null)
+        {
+            tsaHashAlg = CryptoUtility.ParsePssHashAlgorithm(tsaData.SignatureAlgParams);
+        }
 
         bool tsaSigValid = false;
         using (var rsa = tsaData.Certificates[0].GetRSAPublicKey())

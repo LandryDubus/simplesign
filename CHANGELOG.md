@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.2] - 2026-06-08
+
+### Added
+
+- **RFC 4055 §3.1 RSASSA-PSS-params** — `CmsSignatureBuilder` now emits the full `RSASSA-PSS-params` structure (hashAlgorithm + maskGenAlgorithm with id-mgf1 + same hash + saltLength) when signing with `id-RSASSA-PSS`, instead of leaving the parameters field empty. Required for acceptance by Adobe Acrobat, EU DSS, iText, and eIDAS validators (PS256 / PS384 / PS512).
+- **`Oids.Mgf1`** — new `1.2.840.113549.1.1.8` constant for the id-mgf1 mask-generation function used inside the PSS params.
+- **`CryptoUtility.ParsePssHashAlgorithm`** — parses the hash OID from a DER-encoded `RSASSA-PSS-params` structure (RFC 4055 §3.1); returns SHA-256 as the RFC default when the params are absent or the hash OID is unrecognised.
+- **External signer chain overloads** — two new `SignerBuilder.WithExternalSigner(..., chain)` overloads (one with explicit OID, one with auto-detection) let HSM / cloud-KMS callers supply the pre-fetched intermediate certificate chain, avoiding redundant AIA HTTP requests during LTV embedding.
+- **PSS-params-aware revocation verification** — `OcspClient.VerifyOcspSignature`, `CrlClient.VerifyCrlSignature`, and `TimestampValidator.VerifyTsaSignature` now accept and honour the `RSASSA-PSS-params` from the response / token; PS384 and PS512 responses are no longer silently verified with SHA-256.
+- **PDF/A-2/3 conformance tests** — new `PdfAConformanceTests` covering the `/F 132` Print flag, `LF` after `obj` in incremental updates, CRLF-aware `AppendAnnots` / `InsertIntoDict`, and end-to-end signing of a PDF/A-3b-labelled document.
+- **PS256/PS384/PS512 test coverage** — round-trip signing and validation for all three PSS hash variants, plus parser/params assertions in `Phase3ProductionTests`.
+
+### Fixed
+
+- **PDF/A-2/3 conformance after signing** — `BuildFieldAnnotation` previously emitted `/F 0` for invisible signature widgets, failing ISO 19005-3 §6.3.2 Test 2 (the Print flag must be set even when the widget is invisible). The widget now always carries `/F 132` (Print + Locked). `DocTimeStampWriter` had the same bug; also fixed.
+- **Indirect-object EOL after `obj`** — `BuildUpdatedPageObject` previously wrote `"N 0 obj <<"` with a single space, failing ISO 19005-3 §6.1.9 Test 1 (`spacingCompliesPDFA`). Now writes `"N 0 obj\n<<"`.
+- **CRLF source PDF corruption** — `AppendAnnots` and `InsertIntoDict` used `LastIndexOf(">>\nendobj")` which never matched on Windows / iText / Adobe source PDFs (CRLF line endings), falling back to a depth-blind `LastIndexOf(">>")` that could insert new keys inside a nested dictionary. Both now normalise CRLF → LF and fall back to a depth-aware `FindOutermostDictClose` that finds the closing `>>` of the top-level dictionary.
+- **PS384/PS512 OCSP, CRL, and TSA verification** — previously all PSS signatures were verified with SHA-256 regardless of the actual hash, causing silent acceptance / rejection mismatches in revocation validation.
+
+### Improved
+
+- **`Iso32000ComplianceTests.Widget_InvisibleHasF0AndZeroRect`** — renamed and updated to assert `/F 132` (reflecting the corrected behaviour); the previous test enshrined the bug.
+- **PSS signing is now interoperable with all major validators** — Adobe Acrobat Reader, EU DSS, iText, and eIDAS-compliant validators now accept the produced signatures for PS256, PS384, and PS512 (previously rejected as malformed due to the missing params).
+
 ## [0.3.1] - 2026-06-01
 
 ### Added
@@ -153,6 +177,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **HostSigner** — React/shadcn UI overhaul
 - **README** — comprehensive rewrite: lib-focused structure, real benchmark numbers, dependency clarity, merged enterprise features
 
+[0.3.1]: https://github.com/eupassarin/SimpleSign/releases/tag/v0.3.1
+[0.3.0]: https://github.com/eupassarin/SimpleSign/releases/tag/v0.3.0
 [0.2.3]: https://github.com/eupassarin/SimpleSign/releases/tag/v0.2.3
 [0.2.2]: https://github.com/eupassarin/SimpleSign/releases/tag/v0.2.2
 [0.2.1]: https://github.com/eupassarin/SimpleSign/releases/tag/v0.2.1

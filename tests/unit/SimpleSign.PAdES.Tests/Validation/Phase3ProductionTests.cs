@@ -1,3 +1,4 @@
+using System.Formats.Asn1;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
@@ -612,4 +613,185 @@ public sealed class Phase3ProductionTests
 
     [Fact(DisplayName = "Ed448 OID constant has correct value")]
     public void Oids_Ed448_HasCorrectValue() => Oids.Ed448.ShouldBe("1.3.101.113");
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // RSASSA-PSS variants (PS256 / PS384 / PS512) — RFC 4055 §3.1 conformance
+    // ══════════════════════════════════════════════════════════════════════════
+
+    private static X509Certificate2 CreatePssCert(HashAlgorithmName hash, string subject = "CN=PSS Test")
+    {
+        using var rsa = RSA.Create(2048);
+        var req = new CertificateRequest(subject, rsa, hash, RSASignaturePadding.Pss);
+        req.CertificateExtensions.Add(new X509KeyUsageExtension(X509KeyUsageFlags.DigitalSignature, false));
+        var cert = req.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddYears(1));
+        return CertificateLoader.LoadPkcs12(cert.Export(X509ContentType.Pkcs12, "test-export"), "test-export");
+    }
+
+    public static IEnumerable<object[]> PssHashVariants() =>
+    [
+        [HashAlgorithmName.SHA256, Oids.Sha256, 32],
+        [HashAlgorithmName.SHA384, Oids.Sha384, 48],
+        [HashAlgorithmName.SHA512, Oids.Sha512, 64]
+    ];
+
+    [Theory(DisplayName = "RSA-PSS round-trip signs and validates for each hash variant")]
+    [MemberData(nameof(PssHashVariants))]
+    public async Task SignAndValidate_RsaPss_Variants_RoundTrip(HashAlgorithmName hash, string expectedHashOid, int expectedSaltLength)
+    {
+        _ = expectedHashOid; // documented in test name + CmsBuilder_PssCert_WritesPssParams
+        _ = expectedSaltLength; // documented in test name + CmsBuilder_PssCert_WritesPssParams
+
+        using var cert = CreatePssCert(hash);
+        byte[] signedPdf = await SimpleSigner.Document(CreateMinimalPdf())
+            .WithCertificate(cert)
+            .SignAsync();
+
+        signedPdf.ShouldNotBeEmpty();
+
+        var validator = new PdfSignatureValidator(new ValidationOptions { CheckRevocation = false });
+        var results = await validator.ValidateAsync(new MemoryStream(signedPdf));
+
+        results.Count().ShouldBe(1);
+        // Self-signed cert fails chain validation — only check crypto integrity
+        results[0].IsIntegrityValid.ShouldBeTrue();
+        results[0].IsSignatureValid.ShouldBeTrue();
+    }
+
+    [Theory(DisplayName = "CmsBuilder writes RSASSA-PSS-params with correct hash OID, mgf1, and saltLength")]
+    [MemberData(nameof(PssHashVariants))]
+    public void CmsBuilder_PssCert_WritesPssParams(HashAlgorithmName hash, string expectedHashOid, int expectedSaltLength)
+    {
+        using var cert = CreatePssCert(hash);
+        byte[] cms = CmsSignatureBuilder.Build(
+            "hello"u8, cert, hash);
+
+        // The CMS bytes contain the AlgorithmIdentifier for the signer. Locate the
+        // 1.2.840.113549.1.1.10 (id-RSASSA-PSS) OID and verify what follows.
+        byte[] oidBytes = [0x06, 0x09, 0x2A, 0x86, 0x48, 0x86, 0xF7, 0x0D, 0x01, 0x01, 0x0A];
+        int oidIdx = IndexOf(cms, oidBytes);
+        oidIdx.ShouldBeGreaterThan(-1, "id-RSASSA-PSS OID must be present in the CMS");
+
+        // After the OID, the AlgorithmIdentifier SEQUENCE contains RSASSA-PSS-params.
+        // Walk forward to the params SEQUENCE; it begins with 0x30.
+        int afterOid = oidIdx + oidBytes.Length;
+        int paramsStart = -1;
+        for (int i = afterOid; i < cms.Length - 2; i++)
+        {
+            if (cms[i] == 0x30)
+            {
+                paramsStart = i;
+                break;
+            }
+        }
+        paramsStart.ShouldBeGreaterThan(-1, "RSASSA-PSS-params SEQUENCE must follow the OID");
+
+        // Decode the params SEQUENCE and check the three fields.
+        var paramsReader = new AsnReader(cms.AsSpan(paramsStart).ToArray(), AsnEncodingRules.BER);
+        var paramsSeq = paramsReader.ReadSequence();
+
+        // [0] EXPLICIT hashAlgorithm = SEQUENCE { OID, NULL? }
+        var hashAlgReader = paramsSeq.ReadSequence(new Asn1Tag(TagClass.ContextSpecific, 0, true));
+        var hashAlgSeq = hashAlgReader.ReadSequence();
+        string actualHashOid = hashAlgSeq.ReadObjectIdentifier();
+        actualHashOid.ShouldBe(expectedHashOid);
+
+        // [1] EXPLICIT maskGenAlgorithm = SEQUENCE { OID id-mgf1, SEQUENCE { OID hash, NULL? } }
+        var mgfReader = paramsSeq.ReadSequence(new Asn1Tag(TagClass.ContextSpecific, 1, true));
+        var mgfSeq = mgfReader.ReadSequence();
+        mgfSeq.ReadObjectIdentifier().ShouldBe(Oids.Mgf1);
+        var mgfHashSeq = mgfSeq.ReadSequence();
+        mgfHashSeq.ReadObjectIdentifier().ShouldBe(expectedHashOid);
+
+        // [2] EXPLICIT saltLength INTEGER
+        var saltReader = paramsSeq.ReadSequence(new Asn1Tag(TagClass.ContextSpecific, 2, true));
+        saltReader.ReadInteger().ShouldBe(expectedSaltLength);
+    }
+
+    [Theory(DisplayName = "CryptoUtility.ParsePssHashAlgorithm returns correct hash from PSS params")]
+    [MemberData(nameof(PssHashVariants))]
+    public void ParsePssHashAlgorithm_ValidPssParams_ReturnsExpectedHash(HashAlgorithmName expectedHash, string expectedHashOid, int expectedSaltLength)
+    {
+        // Build the params bytes the same way CmsSignatureBuilder does
+        var writer = new AsnWriter(AsnEncodingRules.DER);
+        using (writer.PushSequence())
+        {
+            using (writer.PushSequence(new Asn1Tag(TagClass.ContextSpecific, 0, true)))
+            using (writer.PushSequence())
+            {
+                writer.WriteObjectIdentifier(expectedHashOid);
+                writer.WriteNull();
+            }
+            using (writer.PushSequence(new Asn1Tag(TagClass.ContextSpecific, 1, true)))
+            using (writer.PushSequence())
+            {
+                writer.WriteObjectIdentifier(Oids.Mgf1);
+                using (writer.PushSequence())
+                {
+                    writer.WriteObjectIdentifier(expectedHashOid);
+                    writer.WriteNull();
+                }
+            }
+            using (writer.PushSequence(new Asn1Tag(TagClass.ContextSpecific, 2, true)))
+            {
+                writer.WriteInteger(expectedSaltLength);
+            }
+        }
+        byte[] paramsBytes = writer.Encode();
+
+        CryptoUtility.ParsePssHashAlgorithm(paramsBytes).ShouldBe(expectedHash);
+    }
+
+    [Fact(DisplayName = "ParsePssHashAlgorithm with empty params returns SHA-256 (RFC default)")]
+    public void ParsePssHashAlgorithm_EmptyParams_ReturnsSha256()
+    {
+        var result = CryptoUtility.ParsePssHashAlgorithm(default(ReadOnlySpan<byte>));
+        result.ShouldBe(HashAlgorithmName.SHA256);
+    }
+
+    [Fact(DisplayName = "ParsePssHashAlgorithm with empty SEQUENCE (no hashAlgorithm field) returns SHA-256")]
+    public void ParsePssHashAlgorithm_EmptySequence_ReturnsSha256()
+    {
+        // RSASSA-PSS-params with no [0] element — all fields are RFC default (SHA-256)
+        var writer = new AsnWriter(AsnEncodingRules.DER);
+        using (writer.PushSequence())
+        {
+            // empty
+        }
+        byte[] paramsBytes = writer.Encode();
+        CryptoUtility.ParsePssHashAlgorithm(paramsBytes).ShouldBe(HashAlgorithmName.SHA256);
+    }
+
+    [Fact(DisplayName = "CmsParser round-trips PSS signatures across all hash variants")]
+    public void CmsParser_PssVariants_AllExtractPssOid()
+    {
+        foreach (var hash in new HashAlgorithmName[] { HashAlgorithmName.SHA256, HashAlgorithmName.SHA384, HashAlgorithmName.SHA512 })
+        {
+            using var cert = CreatePssCert(hash);
+            byte[] cms = CmsSignatureBuilder.Build("hello"u8, cert, hash);
+
+            var parsed = CmsParser.Parse(cms);
+            parsed.SignatureAlgorithmOid.ShouldBe(Oids.RsaPss);
+        }
+    }
+
+    private static int IndexOf(byte[] haystack, byte[] needle)
+    {
+        for (int i = 0; i <= haystack.Length - needle.Length; i++)
+        {
+            bool match = true;
+            for (int j = 0; j < needle.Length; j++)
+            {
+                if (haystack[i + j] != needle[j])
+                {
+                    match = false;
+                    break;
+                }
+            }
+            if (match)
+            {
+                return i;
+            }
+        }
+        return -1;
+    }
 }

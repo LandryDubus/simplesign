@@ -1,3 +1,4 @@
+using System.Formats.Asn1;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using SimpleSign.Core.Constants;
@@ -29,4 +30,50 @@ internal static class CryptoUtility
         _ when algorithm == HashAlgorithmName.SHA512 => SHA512.HashData(data),
         _ => throw new NotSupportedException($"Hash algorithm '{algorithm.Name}' is not supported.")
     };
+
+    /// <summary>
+    /// Parses the hash algorithm from a DER-encoded <c>RSASSA-PSS-params</c> structure
+    /// (RFC 4055 §3.1). Returns SHA-256 if the params are absent or the hash OID is
+    /// unrecognised (RFC 4055 default).
+    /// </summary>
+    internal static HashAlgorithmName ParsePssHashAlgorithm(ReadOnlySpan<byte> algIdentifierParams)
+    {
+        if (algIdentifierParams.IsEmpty)
+        {
+            return HashAlgorithmName.SHA256; // DEFAULT per RFC 4055 §3.1
+        }
+
+        try
+        {
+            byte[] paramsCopy = algIdentifierParams.ToArray();
+            var reader = new AsnReader(paramsCopy, AsnEncodingRules.BER);
+            // reader.ReadSequence() returns AsnReader; drill into the [0]-tagged element
+            // and then into the inner AlgorithmIdentifier SEQUENCE to read the OID.
+            var seq = reader.ReadSequence();
+
+            // hashAlgorithm [0] EXPLICIT AlgorithmIdentifier — present means non-default
+            if (seq.HasData &&
+                seq.PeekTag() == new Asn1Tag(TagClass.ContextSpecific, 0, true))
+            {
+                // [0] EXPLICIT wraps a SEQUENCE; AsnReader.ReadSequence(tag) returns AsnReader
+                var hashAlgReader = seq.ReadSequence(new Asn1Tag(TagClass.ContextSpecific, 0, true));
+                // Inner AlgorithmIdentifier ::= SEQUENCE { OID, ... }
+                var hashAlgSeq = hashAlgReader.ReadSequence();
+                string hashOid = hashAlgSeq.ReadObjectIdentifier();
+                return hashOid switch
+                {
+                    Oids.Sha256 => HashAlgorithmName.SHA256,
+                    Oids.Sha384 => HashAlgorithmName.SHA384,
+                    Oids.Sha512 => HashAlgorithmName.SHA512,
+                    _ => HashAlgorithmName.SHA256 // unrecognised → RFC default
+                };
+            }
+        }
+        catch (AsnContentException)
+        {
+            // Malformed params — fall through to default
+        }
+
+        return HashAlgorithmName.SHA256; // DEFAULT per RFC 4055 §3.1
+    }
 }

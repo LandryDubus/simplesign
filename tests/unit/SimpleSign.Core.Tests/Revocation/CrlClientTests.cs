@@ -2,6 +2,7 @@ using System.Formats.Asn1;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using Shouldly;
+using SimpleSign.Core.Constants;
 using SimpleSign.Core.Revocation;
 using SimpleSign.TestHelpers;
 using Xunit;
@@ -349,5 +350,231 @@ public sealed class CrlClientTests
     {
         byte[]? issuerDn = CrlClient.ExtractCrlIssuerDn([0x00, 0x01, 0x02]);
         issuerDn.ShouldBeNull();
+    }
+
+    // ── PS256/PS384/PS512 CRL support ────────────────────────────────────────
+
+    /// <summary>
+    /// Builds a CRL signed with RSA-PSS (RFC 4055 §3.1). The signatureAlgorithm carries
+    /// the id-RSASSA-PSS OID and RSASSA-PSS-params that declare the hash algorithm.
+    /// </summary>
+    private static byte[] BuildPssSignedCrl(
+        X509Certificate2 caCertWithKey,
+        HashAlgorithmName hash,
+        string hashOid,
+        int saltLength,
+        byte[]? revokedSerial = null)
+    {
+        var tbsWriter = new AsnWriter(AsnEncodingRules.DER);
+        using (tbsWriter.PushSequence()) // TBSCertList
+        {
+            // signature AlgorithmIdentifier (id-RSASSA-PSS with RSASSA-PSS-params)
+            using (tbsWriter.PushSequence())
+            {
+                tbsWriter.WriteObjectIdentifier(Oids.RsaPss);
+                // RSASSA-PSS-params SEQUENCE
+                using (tbsWriter.PushSequence())
+                {
+                    // [0] EXPLICIT hashAlgorithm
+                    using (tbsWriter.PushSequence(new Asn1Tag(TagClass.ContextSpecific, 0, true)))
+                    using (tbsWriter.PushSequence())
+                    {
+                        tbsWriter.WriteObjectIdentifier(hashOid);
+                        tbsWriter.WriteNull();
+                    }
+                    // [1] EXPLICIT maskGenAlgorithm = id-mgf1 with same hash
+                    using (tbsWriter.PushSequence(new Asn1Tag(TagClass.ContextSpecific, 1, true)))
+                    using (tbsWriter.PushSequence())
+                    {
+                        tbsWriter.WriteObjectIdentifier(Oids.Mgf1);
+                        using (tbsWriter.PushSequence())
+                        {
+                            tbsWriter.WriteObjectIdentifier(hashOid);
+                            tbsWriter.WriteNull();
+                        }
+                    }
+                    // [2] EXPLICIT saltLength
+                    using (tbsWriter.PushSequence(new Asn1Tag(TagClass.ContextSpecific, 2, true)))
+                    {
+                        tbsWriter.WriteInteger(saltLength);
+                    }
+                }
+            }
+
+            tbsWriter.WriteEncodedValue(caCertWithKey.SubjectName.RawData);
+            tbsWriter.WriteUtcTime(DateTimeOffset.UtcNow.AddDays(-1));
+            tbsWriter.WriteUtcTime(DateTimeOffset.UtcNow.AddYears(1));
+
+            if (revokedSerial is not null)
+            {
+                using (tbsWriter.PushSequence())
+                {
+                    using (tbsWriter.PushSequence())
+                    {
+                        tbsWriter.WriteInteger(revokedSerial);
+                        tbsWriter.WriteUtcTime(DateTimeOffset.UtcNow.AddDays(-1));
+                    }
+                }
+            }
+        }
+
+        byte[] tbsBytes = tbsWriter.Encode();
+
+        using var rsa = caCertWithKey.GetRSAPrivateKey()!;
+        byte[] signature = rsa.SignData(tbsBytes, hash, RSASignaturePadding.Pss);
+
+        var crlWriter = new AsnWriter(AsnEncodingRules.DER);
+        using (crlWriter.PushSequence()) // CertificateList
+        {
+            crlWriter.WriteEncodedValue(tbsBytes);
+
+            // signatureAlgorithm — id-RSASSA-PSS with same RSASSA-PSS-params
+            using (crlWriter.PushSequence())
+            {
+                crlWriter.WriteObjectIdentifier(Oids.RsaPss);
+                using (crlWriter.PushSequence())
+                {
+                    using (crlWriter.PushSequence(new Asn1Tag(TagClass.ContextSpecific, 0, true)))
+                    using (crlWriter.PushSequence())
+                    {
+                        crlWriter.WriteObjectIdentifier(hashOid);
+                        crlWriter.WriteNull();
+                    }
+                    using (crlWriter.PushSequence(new Asn1Tag(TagClass.ContextSpecific, 1, true)))
+                    using (crlWriter.PushSequence())
+                    {
+                        crlWriter.WriteObjectIdentifier(Oids.Mgf1);
+                        using (crlWriter.PushSequence())
+                        {
+                            crlWriter.WriteObjectIdentifier(hashOid);
+                            crlWriter.WriteNull();
+                        }
+                    }
+                    using (crlWriter.PushSequence(new Asn1Tag(TagClass.ContextSpecific, 2, true)))
+                    {
+                        crlWriter.WriteInteger(saltLength);
+                    }
+                }
+            }
+
+            crlWriter.WriteBitString(signature);
+        }
+
+        return crlWriter.Encode();
+    }
+
+    private static X509Certificate2 CreatePssCaCert(HashAlgorithmName hash, string subject = "CN=PSS CA, O=Tests")
+    {
+        using RSA key = RSA.Create(2048);
+        var req = new CertificateRequest(subject, key, hash, RSASignaturePadding.Pss);
+        req.CertificateExtensions.Add(new X509BasicConstraintsExtension(certificateAuthority: true, hasPathLengthConstraint: false, 0, critical: true));
+        req.CertificateExtensions.Add(new X509KeyUsageExtension(X509KeyUsageFlags.CrlSign | X509KeyUsageFlags.KeyCertSign, critical: true));
+        var cert = req.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddYears(10));
+
+        const string password = "test-export";
+        var pfx = cert.Export(X509ContentType.Pfx, password);
+#pragma warning disable SYSLIB0057
+        var flags = X509KeyStorageFlags.Exportable;
+        if (!OperatingSystem.IsMacOS())
+            flags |= X509KeyStorageFlags.EphemeralKeySet;
+        return new X509Certificate2(pfx, password, flags);
+#pragma warning restore SYSLIB0057
+    }
+
+    [Fact(DisplayName = "PS384 CRL with proper RSASSA-PSS-params is verified successfully")]
+    public void VerifyCrlSignature_Ps384Crl_ReturnsTrue()
+    {
+        using var ca = CreatePssCaCert(HashAlgorithmName.SHA384);
+        byte[] crl = BuildPssSignedCrl(ca, HashAlgorithmName.SHA384, Oids.Sha384, 48);
+
+        // Parse the CRL, extract tbsCertList + signatureAlgorithm + signature, then verify
+        var reader = new AsnReader(crl, AsnEncodingRules.BER);
+        var seq = reader.ReadSequence();
+        byte[] tbsData = seq.PeekEncodedValue().ToArray();
+        seq.ReadSequence();
+        var sigAlgSeq = seq.ReadSequence();
+        string sigAlgOid = sigAlgSeq.ReadObjectIdentifier();
+        byte[]? sigAlgParams = null;
+        if (sigAlgSeq.HasData)
+        {
+            sigAlgParams = sigAlgSeq.ReadEncodedValue().ToArray();
+        }
+        byte[] signature = seq.ReadBitString(out _);
+
+        sigAlgOid.ShouldBe(Oids.RsaPss);
+        sigAlgParams.ShouldNotBeNull();
+        sigAlgParams!.Length.ShouldBeGreaterThan(0);
+
+        CrlClient.VerifyCrlSignature(ca, tbsData, signature, sigAlgOid, sigAlgParams)
+            .ShouldBeTrue("PSS CRL with proper params must verify when issuer uses the same hash");
+    }
+
+    [Fact(DisplayName = "PS256 CRL with proper RSASSA-PSS-params is verified successfully")]
+    public void VerifyCrlSignature_Ps256Crl_ReturnsTrue()
+    {
+        using var ca = CreatePssCaCert(HashAlgorithmName.SHA256);
+        byte[] crl = BuildPssSignedCrl(ca, HashAlgorithmName.SHA256, Oids.Sha256, 32);
+
+        var reader = new AsnReader(crl, AsnEncodingRules.BER);
+        var seq = reader.ReadSequence();
+        byte[] tbsData = seq.PeekEncodedValue().ToArray();
+        seq.ReadSequence();
+        var sigAlgSeq = seq.ReadSequence();
+        string sigAlgOid = sigAlgSeq.ReadObjectIdentifier();
+        byte[]? sigAlgParams = null;
+        if (sigAlgSeq.HasData)
+        {
+            sigAlgParams = sigAlgSeq.ReadEncodedValue().ToArray();
+        }
+        byte[] signature = seq.ReadBitString(out _);
+
+        CrlClient.VerifyCrlSignature(ca, tbsData, signature, sigAlgOid, sigAlgParams).ShouldBeTrue();
+    }
+
+    [Fact(DisplayName = "PS512 CRL with proper RSASSA-PSS-params is verified successfully")]
+    public void VerifyCrlSignature_Ps512Crl_ReturnsTrue()
+    {
+        using var ca = CreatePssCaCert(HashAlgorithmName.SHA512);
+        byte[] crl = BuildPssSignedCrl(ca, HashAlgorithmName.SHA512, Oids.Sha512, 64);
+
+        var reader = new AsnReader(crl, AsnEncodingRules.BER);
+        var seq = reader.ReadSequence();
+        byte[] tbsData = seq.PeekEncodedValue().ToArray();
+        seq.ReadSequence();
+        var sigAlgSeq = seq.ReadSequence();
+        string sigAlgOid = sigAlgSeq.ReadObjectIdentifier();
+        byte[]? sigAlgParams = null;
+        if (sigAlgSeq.HasData)
+        {
+            sigAlgParams = sigAlgSeq.ReadEncodedValue().ToArray();
+        }
+        byte[] signature = seq.ReadBitString(out _);
+
+        CrlClient.VerifyCrlSignature(ca, tbsData, signature, sigAlgOid, sigAlgParams).ShouldBeTrue();
+    }
+
+    [Fact(DisplayName = "PS384 CRL verification returns false when params use the wrong hash")]
+    public void VerifyCrlSignature_Ps384CrlWithSha256Params_ReturnsFalse()
+    {
+        // A CA signed with PS384, but the params claim SHA-256 (corrupt / wrong).
+        // The verification must fail (it would otherwise silently accept the wrong hash).
+        using var ca = CreatePssCaCert(HashAlgorithmName.SHA384);
+        // Build a CRL whose inner params claim SHA-256 instead of SHA-384.
+        // Sign with SHA-384 + PSS, but encode the params as SHA-256.
+        byte[] crl = BuildPssSignedCrl(ca, HashAlgorithmName.SHA384, Oids.Sha256, 32);
+
+        var reader = new AsnReader(crl, AsnEncodingRules.BER);
+        var seq = reader.ReadSequence();
+        byte[] tbsData = seq.PeekEncodedValue().ToArray();
+        seq.ReadSequence();
+        var sigAlgSeq = seq.ReadSequence();
+        string sigAlgOid = sigAlgSeq.ReadObjectIdentifier();
+        byte[]? sigAlgParams = sigAlgSeq.HasData ? sigAlgSeq.ReadEncodedValue().ToArray() : null;
+        byte[] signature = seq.ReadBitString(out _);
+
+        // With the wrong hash in params, the verifier (correctly) derives SHA-256
+        // and the SHA-384 signature does not match.
+        CrlClient.VerifyCrlSignature(ca, tbsData, signature, sigAlgOid, sigAlgParams)
+            .ShouldBeFalse("PSS verification must honour the hash declared in the params");
     }
 }

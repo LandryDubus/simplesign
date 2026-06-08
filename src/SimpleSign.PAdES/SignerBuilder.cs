@@ -266,6 +266,68 @@ public sealed class SignerBuilder
         return With(certificate: certificate, externalSigner: externalSigner, signatureAlgorithmOid: sigAlgOid);
     }
 
+    /// <summary>
+    /// Configures an external signing delegate with an explicit signature algorithm OID
+    /// and supplies the pre-fetched intermediate certificate chain. Use this when the
+    /// signing service also returns the chain (e.g., an HSM API or cloud KMS endpoint)
+    /// to avoid redundant AIA HTTP requests during LTV embedding.
+    /// </summary>
+    /// <param name="certificate">The signer's public certificate (private key NOT required).</param>
+    /// <param name="externalSigner">
+    /// Delegate that signs data externally. Input: DER-encoded signed attributes.
+    /// Output: raw signature (RSA PKCS#1 or ECDSA DER SEQUENCE { r, s }).
+    /// </param>
+    /// <param name="signatureAlgorithmOid">
+    /// The signature algorithm OID (e.g., "1.2.840.113549.1.1.11" for RSA-SHA256).
+    /// Use <see cref="Oids"/> for common values.
+    /// </param>
+    /// <param name="chain">
+    /// Intermediate CA certificates, ordered from the issuer of <paramref name="certificate"/>
+    /// up to (but not including) the root. May be empty.
+    /// </param>
+    public SignerBuilder WithExternalSigner(
+        X509Certificate2 certificate,
+        Func<byte[], Task<byte[]>> externalSigner,
+        string signatureAlgorithmOid,
+        IReadOnlyList<X509Certificate2> chain)
+    {
+        ArgumentNullException.ThrowIfNull(certificate);
+        ArgumentNullException.ThrowIfNull(externalSigner);
+        ArgumentException.ThrowIfNullOrWhiteSpace(signatureAlgorithmOid);
+        ArgumentNullException.ThrowIfNull(chain);
+        return With(
+            certificate: certificate,
+            externalSigner: externalSigner,
+            signatureAlgorithmOid: signatureAlgorithmOid,
+            chain: chain);
+    }
+
+    /// <summary>
+    /// Configures an external signing delegate with automatic algorithm detection and
+    /// supplies the pre-fetched intermediate certificate chain.
+    /// </summary>
+    /// <param name="certificate">The signer's public certificate (private key NOT required).</param>
+    /// <param name="externalSigner">External signing delegate (DER input → raw signature).</param>
+    /// <param name="chain">
+    /// Intermediate CA certificates, ordered from the issuer up to (but not including) the root.
+    /// May be empty.
+    /// </param>
+    public SignerBuilder WithExternalSigner(
+        X509Certificate2 certificate,
+        Func<byte[], Task<byte[]>> externalSigner,
+        IReadOnlyList<X509Certificate2> chain)
+    {
+        ArgumentNullException.ThrowIfNull(certificate);
+        ArgumentNullException.ThrowIfNull(externalSigner);
+        ArgumentNullException.ThrowIfNull(chain);
+        string sigAlgOid = DetectSignatureAlgorithmOid(certificate, _hashAlgorithm);
+        return With(
+            certificate: certificate,
+            externalSigner: externalSigner,
+            signatureAlgorithmOid: sigAlgOid,
+            chain: chain);
+    }
+
     /// <summary>Sets an operation ID for correlation in log messages.</summary>
     public SignerBuilder WithOperationId(string operationId)
     {

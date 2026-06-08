@@ -1,6 +1,8 @@
 using System.Formats.Asn1;
+using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using Shouldly;
+using SimpleSign.Core.Constants;
 using SimpleSign.Core.Revocation;
 using SimpleSign.TestHelpers;
 using Xunit;
@@ -198,6 +200,112 @@ public sealed class OcspClientTests
             SelfSignedCert, data, badSignature, "1.2.840.113549.1.1.11");
 
         result.ShouldBeFalse();
+    }
+
+    // ── PS256/PS384/PS512 OCSP signature verification ───────────────────────
+
+    private static byte[] BuildPssParams(HashAlgorithmName hash, string hashOid, int saltLength)
+    {
+        var writer = new AsnWriter(AsnEncodingRules.DER);
+        using (writer.PushSequence())
+        {
+            using (writer.PushSequence(new Asn1Tag(TagClass.ContextSpecific, 0, true)))
+            using (writer.PushSequence())
+            {
+                writer.WriteObjectIdentifier(hashOid);
+                writer.WriteNull();
+            }
+            using (writer.PushSequence(new Asn1Tag(TagClass.ContextSpecific, 1, true)))
+            using (writer.PushSequence())
+            {
+                writer.WriteObjectIdentifier(Oids.Mgf1);
+                using (writer.PushSequence())
+                {
+                    writer.WriteObjectIdentifier(hashOid);
+                    writer.WriteNull();
+                }
+            }
+            using (writer.PushSequence(new Asn1Tag(TagClass.ContextSpecific, 2, true)))
+            {
+                writer.WriteInteger(saltLength);
+            }
+        }
+        return writer.Encode();
+    }
+
+    private static X509Certificate2 CreatePssCert(HashAlgorithmName hash, string subject = "CN=PSS Responder, O=Tests")
+    {
+        using RSA key = RSA.Create(2048);
+        var req = new CertificateRequest(subject, key, hash, RSASignaturePadding.Pss);
+        req.CertificateExtensions.Add(new X509KeyUsageExtension(X509KeyUsageFlags.DigitalSignature, false));
+        var cert = req.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddYears(1));
+
+        const string password = "test-export";
+        var pfx = cert.Export(X509ContentType.Pfx, password);
+#pragma warning disable SYSLIB0057
+        var flags = X509KeyStorageFlags.Exportable;
+        if (!OperatingSystem.IsMacOS())
+            flags |= X509KeyStorageFlags.EphemeralKeySet;
+        return new X509Certificate2(pfx, password, flags);
+#pragma warning restore SYSLIB0057
+    }
+
+    [Fact(DisplayName = "PS384 OCSP signature with proper RSASSA-PSS-params is verified successfully")]
+    public void VerifyOcspSignature_Ps384_ReturnsTrue()
+    {
+        using var responder = CreatePssCert(HashAlgorithmName.SHA384);
+        byte[] tbsData = [0x30, 0x06, 0x02, 0x01, 0x01, 0x02, 0x01, 0x01];
+        byte[] pssParams = BuildPssParams(HashAlgorithmName.SHA384, Oids.Sha384, 48);
+
+        using var rsa = responder.GetRSAPrivateKey()!;
+        byte[] signature = rsa.SignData(tbsData, HashAlgorithmName.SHA384, RSASignaturePadding.Pss);
+
+        OcspClient.VerifyOcspSignature(responder, tbsData, signature, Oids.RsaPss, pssParams)
+            .ShouldBeTrue("PS384 OCSP signature with proper params must verify when responder uses the same hash");
+    }
+
+    [Fact(DisplayName = "PS256 OCSP signature with proper RSASSA-PSS-params is verified successfully")]
+    public void VerifyOcspSignature_Ps256_ReturnsTrue()
+    {
+        using var responder = CreatePssCert(HashAlgorithmName.SHA256);
+        byte[] tbsData = [0x30, 0x06, 0x02, 0x01, 0x01, 0x02, 0x01, 0x01];
+        byte[] pssParams = BuildPssParams(HashAlgorithmName.SHA256, Oids.Sha256, 32);
+
+        using var rsa = responder.GetRSAPrivateKey()!;
+        byte[] signature = rsa.SignData(tbsData, HashAlgorithmName.SHA256, RSASignaturePadding.Pss);
+
+        OcspClient.VerifyOcspSignature(responder, tbsData, signature, Oids.RsaPss, pssParams)
+            .ShouldBeTrue();
+    }
+
+    [Fact(DisplayName = "PS512 OCSP signature with proper RSASSA-PSS-params is verified successfully")]
+    public void VerifyOcspSignature_Ps512_ReturnsTrue()
+    {
+        using var responder = CreatePssCert(HashAlgorithmName.SHA512);
+        byte[] tbsData = [0x30, 0x06, 0x02, 0x01, 0x01, 0x02, 0x01, 0x01];
+        byte[] pssParams = BuildPssParams(HashAlgorithmName.SHA512, Oids.Sha512, 64);
+
+        using var rsa = responder.GetRSAPrivateKey()!;
+        byte[] signature = rsa.SignData(tbsData, HashAlgorithmName.SHA512, RSASignaturePadding.Pss);
+
+        OcspClient.VerifyOcspSignature(responder, tbsData, signature, Oids.RsaPss, pssParams)
+            .ShouldBeTrue();
+    }
+
+    [Fact(DisplayName = "PS384 OCSP verification returns false when params claim the wrong hash")]
+    public void VerifyOcspSignature_Ps384WithSha256Params_ReturnsFalse()
+    {
+        using var responder = CreatePssCert(HashAlgorithmName.SHA384);
+        byte[] tbsData = [0x30, 0x06, 0x02, 0x01, 0x01, 0x02, 0x01, 0x01];
+        // Sign with SHA-384, but the params claim SHA-256 — verification must fail
+        // (it would otherwise silently accept the wrong hash).
+        byte[] pssParams = BuildPssParams(HashAlgorithmName.SHA256, Oids.Sha256, 32);
+
+        using var rsa = responder.GetRSAPrivateKey()!;
+        byte[] signature = rsa.SignData(tbsData, HashAlgorithmName.SHA384, RSASignaturePadding.Pss);
+
+        OcspClient.VerifyOcspSignature(responder, tbsData, signature, Oids.RsaPss, pssParams)
+            .ShouldBeFalse("PSS verification must honour the hash declared in the params");
     }
 
     #endregion

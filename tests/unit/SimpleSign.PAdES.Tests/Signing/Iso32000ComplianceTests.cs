@@ -410,11 +410,14 @@ public sealed class Iso32000ComplianceTests
         text.ShouldContain("/Subtype /Widget");
     }
 
-    [Fact(DisplayName = "§8.6.5: Invisible widget has /F 0 and /Rect [0 0 0 0]")]
-    public async Task Widget_InvisibleHasF0AndZeroRect()
+    [Fact(DisplayName = "§8.6.5: Invisible widget has /F 132 (Print + Locked) and /Rect [0 0 0 0]")]
+    public async Task Widget_InvisibleHasF132AndZeroRect()
     {
         var (_, text) = await PrepareSignedPdf();
-        text.ShouldContain("/F 0");
+        // PDF/A-2/3 (ISO 19005-3 §6.3.2 Test 2) requires the Print flag to be set
+        // even on invisible signature widgets. Locked (128) prevents user deletion.
+        text.ShouldContain("/F 132");
+        text.ShouldNotContain("/F 0");
         text.ShouldContain("/Rect [0 0 0 0]");
     }
 

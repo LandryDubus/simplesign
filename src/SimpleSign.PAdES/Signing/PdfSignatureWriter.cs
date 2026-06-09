@@ -432,6 +432,25 @@ public sealed class PdfSignatureWriter
         await inputPdf.CopyToAsync(outputStream, cancellationToken).ConfigureAwait(false);
         long originalPdfLength = outputStream.Position;
 
+        // ISO 32000 §7.3.10: the object number of an indirect object shall be preceded
+        // by an EOL marker. Some PDF producers emit a bare %%EOF (no trailing newline),
+        // which would leave the first incremental-update object without an EOL predecessor
+        // and fail VeraPDF's `spacingCompliesPDFA` check (ISO 19005-3 §6.1.9 Test 1).
+        if (outputStream is MemoryStream ms)
+        {
+            IncrementalUpdateUtility.EnsureTrailingEol(ms);
+        }
+        else if (outputStream.Position > 0 && outputStream.CanSeek)
+        {
+            // Fallback for non-MemoryStream output streams
+            outputStream.Seek(-1, SeekOrigin.End);
+            int lastByte = outputStream.ReadByte();
+            if (lastByte != '\n' && lastByte != '\r')
+            {
+                outputStream.WriteByte((byte)'\n');
+            }
+        }
+
         inputPdf.Seek(0L, SeekOrigin.Begin);
         byte[] inputBuffer = new byte[originalPdfLength];
         int totalRead;

@@ -58,7 +58,7 @@ public sealed class DocTimeStampWithAppearanceTests
         return writer.Encode();
     }
 
-    private static HttpClient BuildMockTsaClient()
+    internal static HttpClient BuildMockTsaClient()
     {
         var tsr = BuildFakeTimestampResponse();
         return new HttpClient(new MockHttpHandler(_ =>

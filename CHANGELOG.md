@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.3] - 2026-06-09
+
+### Fixed
+
+- **PDF/A-3b `spacingCompliesPDFA` on signed PDFs** — residual ISO 19005-3 §6.1.9 Test 1 failures on objects 99, 75, and 114 (the three objects appended by the LTV + DocTimeStamp signing chain) when the source PDF is bare-`%%EOF` (no EOL after `%%EOF`). The new `IncrementalUpdateUtility.EnsureTrailingEol` helper is called by all three writers (`PdfSignatureWriter`, `LtvEmbedder`, `DocTimeStampWriter`) after they copy the source PDF into the result stream, guaranteeing the first new object written is preceded by an EOL marker.
+- **LTV catalog write missing trailing EOL** — `LtvEmbedder.BuildUpdatedCatalogDss` now also normalises CRLF→LF and falls back to a depth-aware `PdfStructureParser.FindOutermostDictClose` when the `>>\nendobj` sentinel is not found, and appends a `\n` to the rewritten catalog if it does not end with an EOL marker. This is the root cause of the 3 object-level failures (the xref stream written immediately after the catalog rewrite would otherwise be the first object not preceded by an EOL).
+- **LTV early-return path with bare-`%%EOF` source** — when no CRL/OCSP data can be collected, the embedder now still passes the source through `EnsureTrailingEol` so a follow-up incremental update is always LF-preceded. The 4 corresponding tests were updated to assert the new trailing-EOL behavior.
+
 ## [0.3.2] - 2026-06-08
 
 ### Added
@@ -177,6 +185,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **HostSigner** — React/shadcn UI overhaul
 - **README** — comprehensive rewrite: lib-focused structure, real benchmark numbers, dependency clarity, merged enterprise features
 
+[0.3.3]: https://github.com/eupassarin/SimpleSign/releases/tag/v0.3.3
+[0.3.2]: https://github.com/eupassarin/SimpleSign/releases/tag/v0.3.2
 [0.3.1]: https://github.com/eupassarin/SimpleSign/releases/tag/v0.3.1
 [0.3.0]: https://github.com/eupassarin/SimpleSign/releases/tag/v0.3.0
 [0.2.3]: https://github.com/eupassarin/SimpleSign/releases/tag/v0.2.3

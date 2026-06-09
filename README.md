@@ -27,13 +27,12 @@ All cryptography is handled by `System.Security.Cryptography` — **no third-par
 
 ---
 
-## What's New in v0.3.2
+## What's New in v0.3.3
 
-**PS256 / PS384 / PS512 conformance + PDF/A preservation + external-signer chain:**
-- 🔐 **RFC 4055 §3.1 conformance** — PSS signatures now emit the `RSASSA-PSS-params` structure (hash + MGF1 + salt length) instead of an empty parameter; Adobe Acrobat, EU DSS, iText, and eIDAS validators accept the output
-- 🌐 **PSS-params-aware revocation** — OCSP, CRL, and TSA signature verification honour the hash declared in the PSS params; PS384/PS512 responses no longer silently fail or use the wrong hash
-- 📄 **PDF/A-2/3 conformance** — signing now sets the `/F 132` (Print + Locked) flag on every widget, uses `LF` after `obj` in incremental updates, and normalises CRLF source PDFs so dict inserts land at the correct depth (no nested-dict corruption)
-- 🔗 **External signer with pre-fetched chain** — two new `WithExternalSigner(..., chain)` overloads let HSM / cloud-KMS callers supply intermediates directly, skipping AIA HTTP fetches during LTV
+**PDF/A-3b `spacingCompliesPDFA` fix (residual objects 99, 75, 114):**
+- 📄 **Shared `IncrementalUpdateUtility.EnsureTrailingEol`** — all three writers (`PdfSignatureWriter`, `LtvEmbedder`, `DocTimeStampWriter`) now guarantee the first new object appended to a bare-`%%EOF` source PDF is preceded by an EOL marker. ISO 19005-3 §6.1.9 Test 1 passes for all incremental objects.
+- 📄 **LTV catalog write EOL fix** — `BuildUpdatedCatalogDss` normalises CRLF→LF, falls back to a depth-aware `FindOutermostDictClose`, and appends a trailing `\n` to the rewritten catalog. Root cause of the 3 residual object failures.
+- 📄 **LTV early-return EOL guard** — even when no CRL/OCSP data is collected, the source PDF is now passed through `EnsureTrailingEol` so any follow-up incremental update remains LF-preceded.
 
 See the [full changelog](CHANGELOG.md) for details.
 

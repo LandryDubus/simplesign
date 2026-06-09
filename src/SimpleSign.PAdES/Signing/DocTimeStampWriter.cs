@@ -128,6 +128,7 @@ public static class DocTimeStampWriter
         // Write all objects to output
         var output = new MemoryStream();
         output.Write(signedPdf);
+        IncrementalUpdateUtility.EnsureTrailingEol(output);
 
         byte[] sigDictBytes = Encoding.Latin1.GetBytes(sigDictText);
         byte[] fieldDictBytes = Encoding.Latin1.GetBytes(fieldDict.ToString());

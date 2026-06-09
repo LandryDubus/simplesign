@@ -203,6 +203,18 @@ public sealed class LtvEmbedder
         if (crlData is [] && ocspData is [])
         {
             _logger.LtvNoRevocationDataCollected();
+            // v0.3.3: even when no LTV data is embedded, the source PDF must end
+            // with an EOL marker so any downstream incremental update is LF-preceded.
+            // Avoid a full double-copy: check the last byte and only allocate when
+            // the trailing EOL is actually missing.
+            if (signedPdf.Length > 0 && signedPdf[^1] != (byte)'\n' && signedPdf[^1] != (byte)'\r')
+            {
+                byte[] result = new byte[signedPdf.Length + 1];
+                signedPdf.CopyTo(result, 0);
+                result[^1] = (byte)'\n';
+                return result;
+            }
+
             return signedPdf;
         }
 
@@ -350,6 +362,7 @@ public sealed class LtvEmbedder
 
         var result = new MemoryStream();
         result.Write(signedPdf);
+        IncrementalUpdateUtility.EnsureTrailingEol(result);
 
         var xrefMap = new SortedDictionary<int, long>();
         int nextObjNum = dssObjNum + 1;
@@ -723,18 +736,34 @@ public sealed class LtvEmbedder
             }
         }
 
-        int insertIdx = original.LastIndexOf(">>\nendobj", StringComparison.Ordinal);
+        // Find the position to insert /DSS — just before the closing >> of the top-level dict.
+        // Normalise CRLF → LF so Windows / iText / Adobe source PDFs match the sentinel;
+        // fall back to a depth-aware search for the top-level dict close when the
+        // sentinel is not found (e.g. unusual line endings or nested dicts).
+        string normalised = original.Replace("\r\n", "\n", StringComparison.Ordinal);
+        int insertIdx = normalised.LastIndexOf(">>\nendobj", StringComparison.Ordinal);
         if (insertIdx < 0)
         {
-            insertIdx = original.LastIndexOf(">>", StringComparison.Ordinal);
+            insertIdx = PdfStructureParser.FindOutermostDictClose(normalised);
         }
 
         if (insertIdx < 0)
         {
-            return System.Text.Encoding.Latin1.GetBytes(original);
+            return System.Text.Encoding.Latin1.GetBytes(normalised);
         }
 
-        string updated = original[..insertIdx] + $"   /DSS {dssObjNum} 0 R\n" + original[insertIdx..];
+        // Splice against normalised (not original) so the index is correct even when
+        // the source catalog contained CRLF line endings.
+        string updated = normalised[..insertIdx] + $"   /DSS {dssObjNum} 0 R\n" + normalised[insertIdx..];
+
+        // ISO 32000 §7.3.10: endobj shall be followed by an EOL marker. The next
+        // object (XRef stream, written immediately after by the caller) would
+        // otherwise start with no EOL predecessor and fail spacingCompliesPDFA.
+        if (!updated.EndsWith('\n'))
+        {
+            updated += "\n";
+        }
+
         return System.Text.Encoding.Latin1.GetBytes(updated);
     }
 

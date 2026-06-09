@@ -33,7 +33,11 @@ public sealed class DeferredSignerEdgeCaseTests
     public async Task PrepareAsync_RsaWithSha512_DetectsRsaSha512()
     {
         using var cert = TestCertificateFactory.CreateSelfSignedCert();
-        var options = new DeferredSigningOptions { HashAlgorithm = HashAlgorithmName.SHA512 };
+        var options = new DeferredSigningOptions
+        {
+            HashAlgorithm = HashAlgorithmName.SHA512,
+            HashAlgorithmExplicitlySet = true
+        };
         var result = await DeferredSigner.PrepareAsync(BuildMinimalPdf(), cert, options);
 
         result.SignatureAlgorithmOid.ShouldBe(Oids.RsaSha512);
@@ -52,7 +56,11 @@ public sealed class DeferredSignerEdgeCaseTests
     public async Task PrepareAsync_EcdsaWithSha512_DetectsEcdsaSha512()
     {
         using var cert = CreateEcdsaCert();
-        var options = new DeferredSigningOptions { HashAlgorithm = HashAlgorithmName.SHA512 };
+        var options = new DeferredSigningOptions
+        {
+            HashAlgorithm = HashAlgorithmName.SHA512,
+            HashAlgorithmExplicitlySet = true
+        };
         var result = await DeferredSigner.PrepareAsync(BuildMinimalPdf(), cert, options);
 
         result.SignatureAlgorithmOid.ShouldBe(Oids.EcdsaSha512);
@@ -76,8 +84,14 @@ public sealed class DeferredSignerEdgeCaseTests
     public async Task PrepareAsync_UnsupportedKeyHashCombo_Throws()
     {
         using var cert = TestCertificateFactory.CreateSelfSignedCert(); // RSA
-        // SHA-1 is not in the auto-detection switch for RSA — should fall through to default arm
-        var options = new DeferredSigningOptions { HashAlgorithm = HashAlgorithmName.SHA1 };
+        // SHA-1 is not in the auto-detection switch for RSA — should fall through to default arm.
+        // The user must opt in to SHA-1 via HashAlgorithmExplicitlySet; otherwise the library
+        // infers SHA-256 from the cert's key size.
+        var options = new DeferredSigningOptions
+        {
+            HashAlgorithm = HashAlgorithmName.SHA1,
+            HashAlgorithmExplicitlySet = true
+        };
 
         Func<Task> act = () => DeferredSigner.PrepareAsync(BuildMinimalPdf(), cert, options);
         (await Should.ThrowAsync<NotSupportedException>(act)).Message.ShouldContain("Cannot detect signature OID");

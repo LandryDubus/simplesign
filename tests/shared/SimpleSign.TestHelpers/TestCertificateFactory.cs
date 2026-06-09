@@ -62,6 +62,57 @@ public static class TestCertificateFactory
         return ExportAndReload(x509Certificate);
     }
 
+    /// <summary>
+    /// Creates a self-signed certificate using RSASSA-PSS padding. The resulting
+    /// certificate's <c>SignatureAlgorithm.Value</c> is <c>id-RSASSA-PSS</c>
+    /// (<c>1.2.840.113549.1.1.10</c>) and its <c>RawData</c> carries the
+    /// <c>RSASSA-PSS-params</c> structure declaring the specified hash.
+    /// </summary>
+    /// <param name="hashAlgorithm">Hash to embed in the PSS params. Default: SHA-256.</param>
+    /// <param name="keySize">RSA key size in bits. Default: 2048.</param>
+    /// <param name="subject">X.500 subject name.</param>
+    public static X509Certificate2 CreatePssSelfSignedCert(
+        HashAlgorithmName? hashAlgorithm = null,
+        int keySize = 2048,
+        string subject = "CN=PSS Signer, O=Tests")
+    {
+        HashAlgorithmName hash = hashAlgorithm ?? HashAlgorithmName.SHA256;
+        using RSA key = RSA.Create(keySize);
+        RSASignaturePadding padding = RSASignaturePadding.Pss;
+        CertificateRequest certificateRequest = new CertificateRequest(subject, key, hash, padding);
+        certificateRequest.CertificateExtensions.Add(new X509KeyUsageExtension(X509KeyUsageFlags.DigitalSignature, critical: false));
+        X509Certificate2 x509Certificate = certificateRequest.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1.0), DateTimeOffset.UtcNow.AddYears(1));
+        return ExportAndReload(x509Certificate);
+    }
+
+    /// <summary>
+    /// Attempts to create a self-signed EdDSA (Ed25519) certificate.
+    /// Returns <see langword="null"/> if the platform or runtime does not support EdDSA.
+    /// </summary>
+    /// <param name="subject">X.500 subject name.</param>
+    public static X509Certificate2? TryCreateEdDsaCert(string subject = "CN=EdDSA Signer, O=Tests")
+    {
+        X509Certificate2? result = null;
+#if NET9_0_OR_GREATER
+        try
+        {
+            using ECDsa key = ECDsa.Create(ECCurve.CreateFromFriendlyName("Ed25519"));
+            var req = new CertificateRequest(subject, key, HashAlgorithmName.SHA256);
+            req.CertificateExtensions.Add(
+                new X509KeyUsageExtension(X509KeyUsageFlags.DigitalSignature, critical: false));
+            var cert = req.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddYears(1));
+            result = ExportAndReload(cert);
+        }
+        catch (PlatformNotSupportedException)
+        {
+        }
+        catch (CryptographicException)
+        {
+        }
+#endif
+        return result;
+    }
+
     private static X509Certificate2 ExportAndReload(X509Certificate2 cert)
     {
         const string password = "test-export";

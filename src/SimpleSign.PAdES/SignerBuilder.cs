@@ -25,6 +25,7 @@ public sealed class SignerBuilder
     private readonly IReadOnlyList<X509Certificate2>? _chain;
     private readonly string? _tsaUrl;
     private readonly HashAlgorithmName _hashAlgorithm;
+    private readonly bool _hashAlgorithmExplicitlySet;
     private readonly SignatureFieldOptions _fieldOptions;
     private readonly HttpClient? _httpClient;
     private readonly IHttpClientProvider _httpClientProvider;
@@ -54,6 +55,7 @@ public sealed class SignerBuilder
         IReadOnlyList<X509Certificate2>? chain,
         string? tsaUrl,
         HashAlgorithmName hashAlgorithm,
+        bool hashAlgorithmExplicitlySet,
         SignatureFieldOptions fieldOptions,
         HttpClient? httpClient,
         ILogger logger,
@@ -71,6 +73,7 @@ public sealed class SignerBuilder
         _chain = chain;
         _tsaUrl = tsaUrl;
         _hashAlgorithm = hashAlgorithm;
+        _hashAlgorithmExplicitlySet = hashAlgorithmExplicitlySet;
         _fieldOptions = fieldOptions;
         _httpClient = httpClient;
         _httpClientProvider = DefaultHttpClientProvider.Instance;
@@ -127,14 +130,30 @@ public sealed class SignerBuilder
         var clone = With();
         return new(
             _inputPdf, _certificate, _chain, _tsaUrl, _hashAlgorithm,
-            _fieldOptions, provider.GetClient(), _logger, _externalSigner,
+            _hashAlgorithmExplicitlySet, _fieldOptions, provider.GetClient(), _logger, _externalSigner,
             _signatureAlgorithmOid, _enableLtv, _archivalTsaUrl, _operationId,
             _enforcePdfA, _metadata, _padesAttributes);
     }
 
     /// <summary>Sets the hash algorithm. Default: SHA-256 (recommended by ICP-Brasil).</summary>
     public SignerBuilder WithHashAlgorithm(HashAlgorithmName algorithm) =>
-        With(hashAlgorithm: algorithm);
+        With(hashAlgorithm: algorithm, hashAlgorithmExplicitlySet: true);
+
+    /// <summary>
+    /// Forces a specific signature algorithm, overriding the algorithm inferred from the
+    /// certificate's public key type. The primary use case is producing RSASSA-PSS signatures
+    /// with a certificate whose public key OID is <c>rsaEncryption</c>
+    /// (<c>1.2.840.113549.1.1.1</c>) rather than <c>id-RSASSA-PSS</c> (<c>1.2.840.113549.1.1.10</c>).
+    /// Compatibility with the certificate's key type is validated at signing time.
+    /// </summary>
+    /// <param name="signatureAlgorithmOid">
+    /// OID of the signature algorithm (e.g., <c>Oids.RsaPss</c>).
+    /// </param>
+    public SignerBuilder WithSignatureAlgorithm(string signatureAlgorithmOid)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(signatureAlgorithmOid);
+        return With(signatureAlgorithmOid: signatureAlgorithmOid);
+    }
 
     /// <summary>Sets the signature field name.</summary>
     public SignerBuilder WithFieldName(string fieldName)
@@ -196,7 +215,7 @@ public sealed class SignerBuilder
 
         return new(
             _inputPdf, _certificate, _chain, _tsaUrl, _hashAlgorithm,
-            updatedOptions, _httpClient, _logger, _externalSigner,
+            _hashAlgorithmExplicitlySet, updatedOptions, _httpClient, _logger, _externalSigner,
             _signatureAlgorithmOid, _enableLtv, _archivalTsaUrl, _operationId, _enforcePdfA,
             metadata: metadata, padesAttributes: _padesAttributes);
     }
@@ -262,7 +281,9 @@ public sealed class SignerBuilder
     {
         ArgumentNullException.ThrowIfNull(certificate);
         ArgumentNullException.ThrowIfNull(externalSigner);
-        string sigAlgOid = DetectSignatureAlgorithmOid(certificate, _hashAlgorithm);
+        var effectiveHash = AlgorithmInference.ResolveEffectiveHashAlgorithm(
+            certificate, _hashAlgorithm, _hashAlgorithmExplicitlySet);
+        string sigAlgOid = DetectSignatureAlgorithmOid(certificate, effectiveHash);
         return With(certificate: certificate, externalSigner: externalSigner, signatureAlgorithmOid: sigAlgOid);
     }
 
@@ -320,7 +341,9 @@ public sealed class SignerBuilder
         ArgumentNullException.ThrowIfNull(certificate);
         ArgumentNullException.ThrowIfNull(externalSigner);
         ArgumentNullException.ThrowIfNull(chain);
-        string sigAlgOid = DetectSignatureAlgorithmOid(certificate, _hashAlgorithm);
+        var effectiveHash = AlgorithmInference.ResolveEffectiveHashAlgorithm(
+            certificate, _hashAlgorithm, _hashAlgorithmExplicitlySet);
+        string sigAlgOid = DetectSignatureAlgorithmOid(certificate, effectiveHash);
         return With(
             certificate: certificate,
             externalSigner: externalSigner,
@@ -334,7 +357,7 @@ public sealed class SignerBuilder
         ArgumentException.ThrowIfNullOrWhiteSpace(operationId);
         return new(
             _inputPdf, _certificate, _chain, _tsaUrl, _hashAlgorithm,
-            _fieldOptions, _httpClient, _logger, _externalSigner,
+            _hashAlgorithmExplicitlySet, _fieldOptions, _httpClient, _logger, _externalSigner,
             _signatureAlgorithmOid, _enableLtv, _archivalTsaUrl, operationId, _enforcePdfA,
             _metadata, _padesAttributes);
     }
@@ -348,7 +371,7 @@ public sealed class SignerBuilder
     {
         return new(
             _inputPdf, _certificate, _chain, _tsaUrl, _hashAlgorithm,
-            _fieldOptions, _httpClient, _logger, _externalSigner,
+            _hashAlgorithmExplicitlySet, _fieldOptions, _httpClient, _logger, _externalSigner,
             _signatureAlgorithmOid, _enableLtv, _archivalTsaUrl, _operationId, enforcePdfA: true,
             metadata: _metadata, padesAttributes: _padesAttributes);
     }
@@ -389,6 +412,14 @@ public sealed class SignerBuilder
                 "Certificate must have a private key for local signing. " +
                 "For A3 tokens or HSMs, use WithExternalSigner() instead of WithCertificate().");
         }
+
+        // Resolve the effective hash and signature OID:
+        //  - If the user explicitly called WithHashAlgorithm(), the user's choice wins.
+        //  - Otherwise, infer from the cert (PSS params for PSS certs, key size for RSA PKCS#1).
+        //  - If the user called WithSignatureAlgorithm(oid), use it (validated at CMS build time).
+        //  - Otherwise, auto-detect the OID from the cert + effective hash.
+        HashAlgorithmName effectiveHash = AlgorithmInference.ResolveEffectiveHashAlgorithm(
+            _certificate, _hashAlgorithm, _hashAlgorithmExplicitlySet);
 
         var sw = System.Diagnostics.Stopwatch.StartNew();
 
@@ -460,12 +491,14 @@ public sealed class SignerBuilder
         byte[] cms;
         if (useExternal)
         {
+            string effectiveSigOid = _signatureAlgorithmOid
+                ?? DetectSignatureAlgorithmOid(_certificate, effectiveHash);
             cms = await CmsSignatureBuilder.BuildAsync(
                 signedBytes,
                 _certificate,
                 _externalSigner!,
-                _signatureAlgorithmOid!,
-                _hashAlgorithm,
+                effectiveSigOid,
+                effectiveHash,
                 extraCertificates: _chain,
                 extraAttributes: extraAttributes,
                 padesAttributes: _padesAttributes,
@@ -473,13 +506,15 @@ public sealed class SignerBuilder
         }
         else
         {
+            string? effectiveSigOid = _signatureAlgorithmOid;
             cms = CmsSignatureBuilder.Build(
                 signedBytes,
                 _certificate,
-                _hashAlgorithm,
+                effectiveHash,
                 extraCertificates: _chain,
                 extraAttributes: extraAttributes,
                 padesAttributes: _padesAttributes,
+                signatureAlgorithmOid: effectiveSigOid,
                 logger: _logger);
         }
 
@@ -491,7 +526,7 @@ public sealed class SignerBuilder
             var httpClient = _httpClient ?? _httpClientProvider.GetClient();
             var tsaClient = new TimestampClient(httpClient, _tsaUrl, _logger);
             timestampTokenBytes = await tsaClient.GetTimestampAsync(
-                TimestampClient.ExtractSignatureValue(cms), _hashAlgorithm, cancellationToken).ConfigureAwait(false);
+                TimestampClient.ExtractSignatureValue(cms), effectiveHash, cancellationToken).ConfigureAwait(false);
             cms = TimestampClient.EmbedTimestampInCms(cms, timestampTokenBytes);
             _logger.TimestampEmbedded(opId, timestampTokenBytes.Length);
         }
@@ -534,7 +569,7 @@ public sealed class SignerBuilder
             {
                 _logger.ArchivalTimestampAppending(opId, _archivalTsaUrl);
                 ltvPdf = await DocTimeStampWriter.AppendDocTimeStampAsync(
-                    ltvPdf, _archivalTsaUrl, httpClient, _hashAlgorithm, cancellationToken).ConfigureAwait(false);
+                    ltvPdf, _archivalTsaUrl, httpClient, effectiveHash, cancellationToken).ConfigureAwait(false);
                 _logger.ArchivalTimestampComplete(opId);
             }
             else
@@ -624,7 +659,7 @@ public sealed class SignerBuilder
         };
         return new(
             _inputPdf, _certificate, _chain, _tsaUrl, _hashAlgorithm,
-            legacyOptions, _httpClient, _logger, _externalSigner,
+            _hashAlgorithmExplicitlySet, legacyOptions, _httpClient, _logger, _externalSigner,
             _signatureAlgorithmOid, _enableLtv, _archivalTsaUrl, _operationId, _enforcePdfA,
             _metadata, padesAttributes: false);
     }
@@ -645,7 +680,7 @@ public sealed class SignerBuilder
 
         return new(
             _inputPdf, _certificate, _chain, _tsaUrl, _hashAlgorithm,
-            _fieldOptions, _httpClient, _logger, _externalSigner,
+            _hashAlgorithmExplicitlySet, _fieldOptions, _httpClient, _logger, _externalSigner,
             _signatureAlgorithmOid, enableLtv: true, archivalTsaUrl: _archivalTsaUrl, operationId: _operationId,
             metadata: _metadata, padesAttributes: _padesAttributes);
     }
@@ -667,7 +702,7 @@ public sealed class SignerBuilder
 
         return new(
             _inputPdf, _certificate, _chain, _tsaUrl, _hashAlgorithm,
-            _fieldOptions, _httpClient, _logger, _externalSigner,
+            _hashAlgorithmExplicitlySet, _fieldOptions, _httpClient, _logger, _externalSigner,
             _signatureAlgorithmOid, enableLtv: true, archivalTsaUrl: tsaUrl ?? _tsaUrl, operationId: _operationId,
             metadata: _metadata, padesAttributes: _padesAttributes);
     }
@@ -677,6 +712,7 @@ public sealed class SignerBuilder
         IReadOnlyList<X509Certificate2>? chain = null,
         string? tsaUrl = null,
         HashAlgorithmName? hashAlgorithm = null,
+        bool? hashAlgorithmExplicitlySet = null,
         SignatureFieldOptions? fieldOptions = null,
         HttpClient? httpClient = null,
         Func<byte[], Task<byte[]>>? externalSigner = null,
@@ -687,6 +723,7 @@ public sealed class SignerBuilder
             chain ?? _chain,
             tsaUrl ?? _tsaUrl,
             hashAlgorithm ?? _hashAlgorithm,
+            hashAlgorithmExplicitlySet ?? _hashAlgorithmExplicitlySet,
             fieldOptions ?? _fieldOptions,
             httpClient ?? _httpClient,
             _logger,
@@ -703,8 +740,8 @@ public sealed class SignerBuilder
     {
         string keyAlg = cert.PublicKey.Oid.Value ?? string.Empty;
 
-        // RSA-PSS uses a single OID regardless of hash
-        if (cert.SignatureAlgorithm.Value == Oids.RsaPss)
+        // RSA-PSS: check SPKI OID (RFC 4055 §4) then signature algorithm (self-signed)
+        if (cert.PublicKey.Oid.Value == Oids.RsaPss || cert.SignatureAlgorithm.Value == Oids.RsaPss)
         {
             return Oids.RsaPss;
         }

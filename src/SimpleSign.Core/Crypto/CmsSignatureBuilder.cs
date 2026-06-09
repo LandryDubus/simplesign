@@ -28,9 +28,13 @@ public sealed class CmsSignatureBuilder
     /// <param name="extraAttributes">Optional CAdES signed attributes (e.g., commitment-type, signature-policy).</param>
     /// <param name="padesAttributes">
     /// When <see langword="true"/> (default), adds the <c>id-aa-signingCertificateV2</c> (ESS CertV2) attribute
-    /// required by PAdES B-B. Set to <see langword="false"/> to produce a plain PKCS#7/CMS signature
-    /// without PAdES-specific attributes (compatible with legacy validators and <c>adbe.pkcs7.detached</c>
-    /// documents that predate PAdES).
+    /// required by PAdES B-B.
+    /// </param>
+    /// <param name="signatureAlgorithmOid">
+    /// Optional override for the signature algorithm OID. When not <see langword="null"/>,
+    /// this OID is used instead of the one auto-detected from the certificate. Must be
+    /// compatible with the certificate's public key type (validated at call time).
+    /// Primary use case: forcing RSASSA-PSS on an <c>rsaEncryption</c> certificate.
     /// </param>
     /// <param name="logger">Optional logger for debug diagnostics.</param>
     public static byte[] Build(
@@ -41,6 +45,7 @@ public sealed class CmsSignatureBuilder
         IReadOnlyList<X509Certificate2>? extraCertificates = null,
         IReadOnlyList<CmsAttribute>? extraAttributes = null,
         bool padesAttributes = true,
+        string? signatureAlgorithmOid = null,
         ILogger? logger = null)
     {
         ArgumentNullException.ThrowIfNull(certificate);
@@ -50,15 +55,21 @@ public sealed class CmsSignatureBuilder
             throw new ArgumentException("Certificate must have a private key.", nameof(certificate));
         }
 
+        if (signatureAlgorithmOid is not null)
+        {
+            ValidateSignatureAlgorithmCompatibility(certificate, signatureAlgorithmOid);
+        }
+
         var time = signingTime ?? DateTimeOffset.UtcNow;
         string digestOid = GetDigestOid(hashAlgorithm);
-        string signatureOid = GetSignatureAlgorithmOid(certificate, hashAlgorithm);
+        string signatureOid = signatureAlgorithmOid
+            ?? GetSignatureAlgorithmOid(certificate, hashAlgorithm);
 
         byte[] contentHash = ComputeHash(dataToSign, hashAlgorithm);
         (logger ?? NullLogger.Instance).CmsContentHashComputed(contentHash.Length, hashAlgorithm.Name!);
 
         byte[] signedAttrs = BuildSignedAttributes(contentHash, digestOid, time, certificate, extraAttributes, padesAttributes);
-        byte[] signature = SignData(signedAttrs, certificate, hashAlgorithm);
+        byte[] signature = SignData(signedAttrs, certificate, hashAlgorithm, signatureOid);
 
         List<X509Certificate2> allCerts = [certificate, .. (extraCertificates ?? [])];
 
@@ -108,6 +119,8 @@ public sealed class CmsSignatureBuilder
         ArgumentNullException.ThrowIfNull(externalSigner);
         ArgumentException.ThrowIfNullOrWhiteSpace(signatureAlgorithmOid);
 
+        ValidateSignatureAlgorithmCompatibility(certificate, signatureAlgorithmOid);
+
         var time = signingTime ?? DateTimeOffset.UtcNow;
         string digestOid = GetDigestOid(hashAlgorithm);
 
@@ -150,7 +163,7 @@ public sealed class CmsSignatureBuilder
 
         string paddingName = signerCert.PublicKey.Oid.Value == Oids.EcPublicKey
             ? "ECDSA"
-            : DetectRsaPadding(signerCert).ToString();
+            : signatureOid == Oids.RsaPss ? "Pss" : "Pkcs1";
         log.CmsSignatureGenerated(signature.Length, paddingName);
 
         var writer = new AsnWriter(AsnEncodingRules.DER);
@@ -444,13 +457,17 @@ public sealed class CmsSignatureBuilder
 
     #region Cryptography
 
-    private static byte[] SignData(byte[] signedAttrs, X509Certificate2 cert, HashAlgorithmName hashAlg)
+    private static byte[] SignData(byte[] signedAttrs, X509Certificate2 cert, HashAlgorithmName hashAlg, string signatureOid)
     {
         // Signs the signedAttrs (not the document — this is the CMS/PAdES standard)
         using var key = cert.GetRSAPrivateKey();
         if (key is not null)
         {
-            var padding = DetectRsaPadding(cert);
+            // OID-based override takes precedence over cert-derived padding.
+            // This enables forcing PSS on an rsaEncryption certificate.
+            var padding = signatureOid == Oids.RsaPss
+                ? RSASignaturePadding.Pss
+                : DetectRsaPadding(cert);
             return key.SignData(signedAttrs, hashAlg, padding);
         }
 
@@ -504,8 +521,8 @@ public sealed class CmsSignatureBuilder
     {
         string keyAlg = cert.PublicKey.Oid.Value ?? string.Empty;
 
-        // RSA-PSS uses a single OID regardless of hash (parameters carry the hash)
-        if (cert.SignatureAlgorithm.Value == Oids.RsaPss)
+        // RSA-PSS: check SPKI OID (RFC 4055 §4) then signature algorithm (self-signed)
+        if (cert.PublicKey.Oid.Value == Oids.RsaPss || cert.SignatureAlgorithm.Value == Oids.RsaPss)
         {
             return Oids.RsaPss;
         }
@@ -523,6 +540,41 @@ public sealed class CmsSignatureBuilder
             _ => throw new NotSupportedException(
                 $"No signature OID for key '{cert.PublicKey.Oid.FriendlyName}' + hash '{hashAlg.Name}'.")
         };
+    }
+
+    /// <summary>
+    /// Validates that the requested signature algorithm OID is compatible with the
+    /// certificate's public key type. Throws <see cref="ArgumentException"/> if not.
+    /// </summary>
+    /// <param name="cert">The signer's certificate.</param>
+    /// <param name="signatureAlgorithmOid">OID of the signature algorithm to validate.</param>
+    /// <exception cref="ArgumentException">The OID is incompatible with the certificate's key type.</exception>
+    internal static void ValidateSignatureAlgorithmCompatibility(
+        X509Certificate2 cert, string signatureAlgorithmOid)
+    {
+        string keyOid = cert.PublicKey.Oid.Value ?? string.Empty;
+        bool compatible = (keyOid, signatureAlgorithmOid) switch
+        {
+            (Oids.RsaEncryption, Oids.RsaSha256)
+                or (Oids.RsaEncryption, Oids.RsaSha384)
+                or (Oids.RsaEncryption, Oids.RsaSha512)
+                or (Oids.RsaEncryption, Oids.RsaPss) => true,
+            (Oids.RsaPss, Oids.RsaPss) => true,
+            (Oids.EcPublicKey, Oids.EcdsaSha256)
+                or (Oids.EcPublicKey, Oids.EcdsaSha384)
+                or (Oids.EcPublicKey, Oids.EcdsaSha512) => true,
+            (Oids.Ed25519, Oids.Ed25519) => true,
+            (Oids.Ed448, Oids.Ed448) => true,
+            _ => false
+        };
+
+        if (!compatible)
+        {
+            throw new ArgumentException(
+                $"Signature algorithm OID '{signatureAlgorithmOid}' is not compatible with " +
+                $"certificate key type '{cert.PublicKey.Oid.FriendlyName}' ({keyOid}). " +
+                "Use an OID from the same algorithm family as the certificate's public key.");
+        }
     }
 
     internal static bool SignatureAlgorithmUsesNullParameter(string signatureOid) => signatureOid switch

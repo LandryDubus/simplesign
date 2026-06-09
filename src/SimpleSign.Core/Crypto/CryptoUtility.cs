@@ -11,11 +11,12 @@ namespace SimpleSign.Core.Crypto;
 internal static class CryptoUtility
 {
     /// <summary>
-    /// Detects the appropriate RSA signature padding based on the certificate's signature algorithm.
+    /// Detects the appropriate RSA signature padding from the certificate, checking
+    /// the SubjectPublicKeyInfo OID (RFC 4055 §4) first, then the signature algorithm.
     /// </summary>
     internal static RSASignaturePadding DetectRsaPadding(X509Certificate2 cert)
     {
-        return cert.SignatureAlgorithm.Value == Oids.RsaPss
+        return cert.PublicKey.Oid.Value == Oids.RsaPss || cert.SignatureAlgorithm.Value == Oids.RsaPss
             ? RSASignaturePadding.Pss
             : RSASignaturePadding.Pkcs1;
     }

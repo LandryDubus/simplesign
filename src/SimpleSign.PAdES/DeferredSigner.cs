@@ -52,7 +52,12 @@ public static class DeferredSigner
 
         options ??= new DeferredSigningOptions();
 
-        (logger ?? NullLogger.Instance).DeferredPrepareStarted(certificate.Subject, options.HashAlgorithm.Name!);
+        // Resolve the effective hash: explicit user choice wins; otherwise infer from the cert
+        // (PSS params for PSS certs, key size for RSA PKCS#1; default SHA-256 for ECDSA/EdDSA).
+        HashAlgorithmName effectiveHash = AlgorithmInference.ResolveEffectiveHashAlgorithm(
+            certificate, options.HashAlgorithm, options.HashAlgorithmExplicitlySet);
+
+        (logger ?? NullLogger.Instance).DeferredPrepareStarted(certificate.Subject, effectiveHash.Name!);
 
         var fieldOptions = options.FieldOptions ?? new SignatureFieldOptions();
 
@@ -64,9 +69,15 @@ public static class DeferredSigner
                 certificate.Subject);
         }
 
+        if (options.SignatureAlgorithmOid is not null)
+        {
+            CmsSignatureBuilder.ValidateSignatureAlgorithmCompatibility(
+                certificate, options.SignatureAlgorithmOid);
+        }
+
         string sigAlgOid = options.SignatureAlgorithmOid
-                           ?? DetectSignatureAlgorithmOid(certificate, options.HashAlgorithm);
-        string digestOid = CmsSignatureBuilder.GetDigestOid(options.HashAlgorithm);
+                           ?? DetectSignatureAlgorithmOid(certificate, effectiveHash);
+        string digestOid = CmsSignatureBuilder.GetDigestOid(effectiveHash);
 
         // Check DocMDP lock
         using var inputCheck = new MemoryStream(pdfBytes);
@@ -90,7 +101,7 @@ public static class DeferredSigner
 
         // 3. Compute document hash and build signed attributes
         var signingTime = DateTimeOffset.UtcNow;
-        byte[] contentHash = CmsSignatureBuilder.ComputeHash(signedBytes, options.HashAlgorithm);
+        byte[] contentHash = CmsSignatureBuilder.ComputeHash(signedBytes, effectiveHash);
         byte[] signedAttrs = CmsSignatureBuilder.BuildSignedAttributes(
             contentHash, digestOid, signingTime, certificate);
 
@@ -117,7 +128,7 @@ public static class DeferredSigner
         {
             HashToSign = signedAttrs,
             SessionData = session.Serialize(),
-            DigestAlgorithm = options.HashAlgorithm.Name!,
+            DigestAlgorithm = effectiveHash.Name!,
             SignatureAlgorithmOid = sigAlgOid
         };
 
@@ -183,9 +194,7 @@ public static class DeferredSigner
             if (options.TsaUrl is not null)
             {
                 var httpClient = options.HttpClient ?? DefaultHttpClientProvider.Instance.GetClient();
-                var hashAlg = session.DigestOid == Oids.Sha512
-                    ? HashAlgorithmName.SHA512
-                    : HashAlgorithmName.SHA256;
+                var hashAlg = HashAlgorithmFromDigestOid(session.DigestOid);
                 var tsaClient = new TimestampClient(httpClient, options.TsaUrl);
                 byte[] tsToken = await tsaClient.GetTimestampAsync(
                     TimestampClient.ExtractSignatureValue(cms), hashAlg, cancellationToken).ConfigureAwait(false);
@@ -231,7 +240,7 @@ public static class DeferredSigner
     {
         string keyAlg = cert.PublicKey.Oid.Value ?? string.Empty;
 
-        if (cert.SignatureAlgorithm.Value == Oids.RsaPss)
+        if (cert.PublicKey.Oid.Value == Oids.RsaPss || cert.SignatureAlgorithm.Value == Oids.RsaPss)
         {
             return Oids.RsaPss;
         }
@@ -296,6 +305,15 @@ public sealed class DeferredSigningOptions
 {
     /// <summary>Hash algorithm for the signature. Default: SHA-256.</summary>
     public HashAlgorithmName HashAlgorithm { get; init; } = HashAlgorithmName.SHA256;
+
+    /// <summary>
+    /// Set to <see langword="true"/> when the caller has explicitly chosen
+    /// <see cref="HashAlgorithm"/>. When <see langword="false"/> (default), the library
+    /// infers the effective hash from the certificate: PSS-issued certificates use the
+    /// hash declared in their <c>RSASSA-PSS-params</c> structure, RSA PKCS#1 certificates
+    /// use SHA-384 for keys ≥ 3072 bits and SHA-256 otherwise, and other key types use SHA-256.
+    /// </summary>
+    public bool HashAlgorithmExplicitlySet { get; init; }
 
     /// <summary>Signature field options (appearance, position, name, etc.).</summary>
     public SignatureFieldOptions? FieldOptions { get; init; }

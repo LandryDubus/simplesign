@@ -7,11 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.3.3] - 2026-06-09
 
+### Added
+
+- **`SignerBuilder.WithSignatureAlgorithm(oid)`** — new public API to force a specific signature algorithm OID on the local signing path. Primary use case: producing RSASSA-PSS signatures with certificates whose public key OID is `rsaEncryption` (`1.2.840.113549.1.1.1`). Compatibility with the certificate's key type is validated at signing time.
+- **`CmsSignatureBuilder.ValidateSignatureAlgorithmCompatibility`** — shared validator that throws `ArgumentException` when the requested signature OID is incompatible with the certificate's public key family (e.g., ECDSA OID on an RSA cert).
+- **`DeferredSigningOptions.HashAlgorithmExplicitlySet`** — new `bool` property that distinguishes "user chose SHA-256" from "library defaulted to SHA-256", enabling algorithm inference on the deferred signing path.
+- **`AlgorithmInference.ExtractPssParamsFromSpki`** — reads PSS parameters from SubjectPublicKeyInfo when the public key OID is `id-RSASSA-PSS` (RFC 4055 §4), enabling PSS detection on certificates that encode the constraint at the SPKI level rather than the signature algorithm level.
+- **`TestCertificateFactory.CreatePssSelfSignedCert`** — new test helper that creates PSS-issued self-signed certificates with embedded `RSASSA-PSS-params`.
+- **`TestCertificateFactory.TryCreateEdDsaCert`** — new test helper that creates Ed25519 self-signed certificates on .NET 9+; returns `null` on unsupported platforms. Enables end-to-end EdDSA signing and compatibility validation tests.
+
 ### Fixed
 
+- **PSS cert's `RSASSA-PSS-params` ignored at the SPKI level** — certificates that encode the PSS constraint at the SubjectPublicKeyInfo level (`PublicKey.Oid.Value == Oids.RsaPss`, RFC 4055 §4) were not detected as PSS certs, causing `DetectRsaPadding` to return PKCS#1 and `DetectSignatureAlgorithmOid` to produce `rsaEncryption` instead of `id-RSASSA-PSS`. The new `AlgorithmInference.ExtractPssParamsFromSpki` reads the SPKI parameters field, and all four PSS detection points (`AlgorithmInference`, `SignerBuilder.DetectSignatureAlgorithmOid`, `DeferredSigner.DetectSignatureAlgorithmOid`, `CmsSignatureBuilder.GetSignatureAlgorithmOid`) now check both `PublicKey.Oid.Value` and `SignatureAlgorithm.Value`.
+- **PSS cert's `RSASSA-PSS-params` ignored when inferring hash** — certificates issued with `id-RSASSA-PSS` and declaring SHA-384 or SHA-512 in their PSS params were always signed with SHA-256 unless the caller explicitly called `.WithHashAlgorithm()`. The new `AlgorithmInference.ResolveEffectiveHashAlgorithm` helper reads the hash from the cert's DER-encoded PSS params (via `CryptoUtility.ParsePssHashAlgorithm`) and uses it when the user has not overridden the default. Applied to `SignerBuilder`, `DeferredSigner`, and `DeferredSignerBuilder`.
+- **Default hash for RSA PKCS#1 always SHA-256 regardless of key size** — RSA keys >= 3072 bits now default to SHA-384 per NIST SP 800-57 Part 1 Rev. 5, Table 2. Smaller keys remain at SHA-256. Applied to all three signing paths.
+- **`DeferredSigner.CompleteAsync` timestamp hash used wrong algorithm** — when the deferred signer chose PKCS#1 SHA-512, the timestamp request was still sent with SHA-256. `CompleteAsync` now derives the timestamp hash from the CMS digest OID via `HashAlgorithmFromDigestOid`, which correctly handles SHA-384 and SHA-512.
+- **`WithExternalSigner` bypassed algorithm inference** — both overloads of `SignerBuilder.WithExternalSigner` (with and without chain) now resolve the effective hash via `AlgorithmInference` before calling `DetectSignatureAlgorithmOid`, ensuring PSS params and key-size defaults are honoured on the external-signer path.
+- **`SelectHashForRsaKeySize` too-broad catch** — narrowed to `CryptographicException` so `NotSupportedException` from other sources propagates correctly.
+- **`CmsSignatureBuilder.BuildSignedData` mis-logged PSS detection** — the debug log now checks `signatureOid == Oids.RsaPss` instead of comparing the original OID to `Oids.RsaPss`.
+- **`ExtractCmsFromPdf` hex stripping off by one** — the `/Contents` hex string trimmer was stripping individual `'0'` characters instead of `"00"` byte pairs, corrupting hex values containing embedded `0` digits.
+- **No compatibility validation on signature algorithm OID** — previously, setting an incompatible OID (e.g., ECDSA OID on an RSA cert) produced a structurally invalid CMS with no error at signing time. Now validated at `CmsSignatureBuilder.Build`, `BuildAsync`, and `DeferredSigner.PrepareAsync`.
+- **`_signatureAlgorithmOid` ignored on local signing path** — `SignerBuilder.SignCoreAsync` only passed the OID to the external-signer branch. Now threaded through both branches via the new `signatureAlgorithmOid` parameter on `CmsSignatureBuilder.Build`.
 - **PDF/A-3b `spacingCompliesPDFA` on signed PDFs** — residual ISO 19005-3 §6.1.9 Test 1 failures on objects 99, 75, and 114 (the three objects appended by the LTV + DocTimeStamp signing chain) when the source PDF is bare-`%%EOF` (no EOL after `%%EOF`). The new `IncrementalUpdateUtility.EnsureTrailingEol` helper is called by all three writers (`PdfSignatureWriter`, `LtvEmbedder`, `DocTimeStampWriter`) after they copy the source PDF into the result stream, guaranteeing the first new object written is preceded by an EOL marker.
 - **LTV catalog write missing trailing EOL** — `LtvEmbedder.BuildUpdatedCatalogDss` now also normalises CRLF→LF and falls back to a depth-aware `PdfStructureParser.FindOutermostDictClose` when the `>>\nendobj` sentinel is not found, and appends a `\n` to the rewritten catalog if it does not end with an EOL marker. This is the root cause of the 3 object-level failures (the xref stream written immediately after the catalog rewrite would otherwise be the first object not preceded by an EOL).
 - **LTV early-return path with bare-`%%EOF` source** — when no CRL/OCSP data can be collected, the embedder now still passes the source through `EnsureTrailingEol` so a follow-up incremental update is always LF-preceded. The 4 corresponding tests were updated to assert the new trailing-EOL behavior.
+
+### Improved
+
+- **Test coverage for algorithm inference** — 26 new tests across 4 new test files:
+  - `AlgorithmInferenceTests.cs` (10 tests) — PSS params extraction, key-size hash, default hash, SPKI-level PSS detection on `SimpleSigner`.
+  - `DeferredAlgorithmInferenceTests.cs` (6 tests) — PSS params, key-size hash, default hash, end-to-end PSS deferred signing.
+  - `DeferredSignerBuilderAlgorithmInferenceTests.cs` (3 tests) — PSS params, key-size hash, explicit hash passthrough.
+  - `CmsSignatureBuilderCompatibilityTests.cs` (7 tests) — RSA, ECDSA, EdDSA compatible/incompatible OID pairs; PSS OID build.
+- **EdDSA support** — `TestCertificateFactory.TryCreateEdDsaCert` on .NET 9+ with `#if`-wrapped platform guards. EdDSA compatibility tests auto-skip on unsupported platforms.
+- **New test helpers** — `TestCertificateFactory.CreatePssSelfSignedCert` for PSS-issued certs with arbitrary hash.
 
 ## [0.3.2] - 2026-06-08
 

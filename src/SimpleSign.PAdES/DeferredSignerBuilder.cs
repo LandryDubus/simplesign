@@ -28,6 +28,7 @@ public sealed class DeferredSignerBuilder
     private readonly byte[] _pdfBytes;
     private readonly X509Certificate2 _certificate;
     private readonly HashAlgorithmName _hashAlgorithm;
+    private readonly bool _hashAlgorithmExplicitlySet;
     private readonly SignatureFieldOptions _fieldOptions;
     private readonly string? _signatureAlgorithmOid;
     private readonly IReadOnlyList<X509Certificate2>? _extraCertificates;
@@ -47,6 +48,7 @@ public sealed class DeferredSignerBuilder
         _pdfBytes = pdfBytes;
         _certificate = certificate;
         _hashAlgorithm = HashAlgorithmName.SHA256;
+        _hashAlgorithmExplicitlySet = false;
         _fieldOptions = new SignatureFieldOptions();
         _signatureAlgorithmOid = null;
         _extraCertificates = null;
@@ -59,6 +61,7 @@ public sealed class DeferredSignerBuilder
         byte[] pdfBytes,
         X509Certificate2 certificate,
         HashAlgorithmName hashAlgorithm,
+        bool hashAlgorithmExplicitlySet,
         SignatureFieldOptions fieldOptions,
         string? signatureAlgorithmOid,
         IReadOnlyList<X509Certificate2>? extraCertificates,
@@ -69,6 +72,7 @@ public sealed class DeferredSignerBuilder
         _pdfBytes = pdfBytes;
         _certificate = certificate;
         _hashAlgorithm = hashAlgorithm;
+        _hashAlgorithmExplicitlySet = hashAlgorithmExplicitlySet;
         _fieldOptions = fieldOptions;
         _signatureAlgorithmOid = signatureAlgorithmOid;
         _extraCertificates = extraCertificates;
@@ -81,7 +85,7 @@ public sealed class DeferredSignerBuilder
 
     /// <summary>Sets the hash algorithm for the signature. Default: SHA-256.</summary>
     public DeferredSignerBuilder WithHashAlgorithm(HashAlgorithmName algorithm)
-        => With(hashAlgorithm: algorithm);
+        => With(hashAlgorithm: algorithm, hashAlgorithmExplicitlySet: true);
 
     /// <summary>Sets the signer's display name in the signature field.</summary>
     public DeferredSignerBuilder WithSignerName(string name)
@@ -211,6 +215,7 @@ public sealed class DeferredSignerBuilder
         var options = new DeferredSigningOptions
         {
             HashAlgorithm = _hashAlgorithm,
+            HashAlgorithmExplicitlySet = _hashAlgorithmExplicitlySet,
             FieldOptions = _fieldOptions,
             SignatureAlgorithmOid = _signatureAlgorithmOid,
             ExtraCertificates = _extraCertificates
@@ -253,6 +258,7 @@ public sealed class DeferredSignerBuilder
 
     private DeferredSignerBuilder With(
         HashAlgorithmName? hashAlgorithm = null,
+        bool? hashAlgorithmExplicitlySet = null,
         SignatureFieldOptions? fieldOptions = null,
         string? signatureAlgorithmOid = null,
         IReadOnlyList<X509Certificate2>? extraCertificates = null,
@@ -264,6 +270,7 @@ public sealed class DeferredSignerBuilder
             _pdfBytes,
             _certificate,
             hashAlgorithm ?? _hashAlgorithm,
+            hashAlgorithmExplicitlySet ?? _hashAlgorithmExplicitlySet,
             fieldOptions ?? _fieldOptions,
             signatureAlgorithmOid ?? _signatureAlgorithmOid,
             extraCertificates ?? _extraCertificates,

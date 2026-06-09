@@ -13,7 +13,7 @@
   <img src="https://img.shields.io/badge/.NET-8%20%7C%2010-512BD4?style=flat-square&logo=dotnet" alt=".NET 8 | 10" />
   <img src="https://img.shields.io/badge/License-MIT-green?style=flat-square" alt="MIT License" />
   <img src="https://img.shields.io/badge/AOT-Compatible-blueviolet?style=flat-square" alt="Native AOT" />
-  <img src="https://img.shields.io/badge/Tests-1%2C230-brightgreen?style=flat-square" alt="1,230 tests" />
+  <img src="https://img.shields.io/badge/Tests-1%2C519-brightgreen?style=flat-square" alt="1,519 tests" />
   <img src="https://img.shields.io/badge/No%20Crypto%20Deps-✓-blue?style=flat-square" alt="No third-party crypto dependencies" />
 </p>
 
@@ -29,10 +29,31 @@ All cryptography is handled by `System.Security.Cryptography` — **no third-par
 
 ## What's New in v0.3.3
 
+**Algorithm inference + signature algorithm override API:**
+- **PSS cert hash inference** — certificates issued with `id-RSASSA-PSS` now have their `RSASSA-PSS-params` (RFC 4055 §3.1) honoured when selecting the digest algorithm. SHA-384 and SHA-512 PSS certs no longer default to SHA-256.
+- **RSA key-size-based hash** — RSA PKCS#1 keys >= 3072 bits now default to SHA-384 per NIST SP 800-57 Part 1 Rev. 5. Smaller keys remain at SHA-256.
+- **`.WithSignatureAlgorithm(oid)`** — new API to force RSASSA-PSS on plain `rsaEncryption` certificates for local signing, without the external-signer workaround.
+- **Compatibility validation** — incompatible signature algorithm OIDs (e.g., ECDSA OID on RSA cert) now throw `ArgumentException` at signing time instead of producing invalid CMS.
+
+**SPKI-level PSS detection (RFC 4055 §4):**
+- PSS constraints encoded at the SubjectPublicKeyInfo level are now correctly detected by all 4 PSS detection points (`AlgorithmInference`, `SignerBuilder`, `DeferredSigner`, `CmsSignatureBuilder`).
+
+**Code review bug fixes:**
+- **Deferred timestamp hash** — `CompleteAsync` now uses the correct hash algorithm (fixes SHA-384/512 TSA hashing)
+- **External signer inference** — `WithExternalSigner` resolves effective hash before auto-detecting the signature algorithm OID
+- **PSS logging** — `BuildSignedData` correctly logs `signatureOid == Oids.RsaPss` instead of comparing the original OID
+- **Hex extraction** — `ExtractCmsFromPdf` corrects `/Contents` hex stripping (was stripping individual `'0'` chars instead of `"00"` pairs)
+- **Catch narrowing** — `SelectHashForRsaKeySize` narrowed from broad `Exception` to `CryptographicException`
+
 **PDF/A-3b `spacingCompliesPDFA` fix (residual objects 99, 75, 114):**
 - 📄 **Shared `IncrementalUpdateUtility.EnsureTrailingEol`** — all three writers (`PdfSignatureWriter`, `LtvEmbedder`, `DocTimeStampWriter`) now guarantee the first new object appended to a bare-`%%EOF` source PDF is preceded by an EOL marker. ISO 19005-3 §6.1.9 Test 1 passes for all incremental objects.
 - 📄 **LTV catalog write EOL fix** — `BuildUpdatedCatalogDss` normalises CRLF→LF, falls back to a depth-aware `FindOutermostDictClose`, and appends a trailing `\n` to the rewritten catalog. Root cause of the 3 residual object failures.
 - 📄 **LTV early-return EOL guard** — even when no CRL/OCSP data is collected, the source PDF is now passed through `EnsureTrailingEol` so any follow-up incremental update remains LF-preceded.
+
+**Test coverage:**
+- 26 new tests across 4 test files: algorithm inference on all 3 signing paths, compatibility validation (RSA, ECDSA, EdDSA), and deferred PSS end-to-end.
+- **EdDSA test support** — `TryCreateEdDsaCert` helper on .NET 9+ (auto-skip on unsupported platforms).
+- **1,519 unit tests** — all passing, 0 warnings, 0 errors.
 
 See the [full changelog](CHANGELOG.md) for details.
 

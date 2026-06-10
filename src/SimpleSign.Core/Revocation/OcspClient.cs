@@ -176,158 +176,18 @@ internal sealed class OcspClient
     /// </summary>
     internal static bool ParseOcspResponse(byte[] ocspResponseBytes, X509Certificate2 cert, ILogger? logger = null)
     {
-        var reader = new AsnReader(ocspResponseBytes, AsnEncodingRules.BER);
-        var ocspResponse = reader.ReadSequence();
-
-        // responseStatus
-        var statusEncoded = ocspResponse.ReadEncodedValue().Span;
-        int status = statusEncoded.Length >= 3 ? statusEncoded[2] : -1;
-        if (status != 0)
-        {
-            throw new InvalidOperationException($"OCSP response status is not 'successful': {status}");
-        }
-
-        if (!ocspResponse.HasData)
-        {
-            throw new InvalidDataException("OCSP response is empty.");
-        }
-
-        // Compute expected CertID fields for matching (RFC 6960 §3.2)
-#pragma warning disable CA5350 // OCSP RFC 2560 mandates SHA-1 for CertID
-        byte[] expectedIssuerNameHash = SHA1.HashData(cert.IssuerName.RawData);
-        byte[] expectedSerialNumber = cert.SerialNumberBytes.ToArray();
-#pragma warning restore CA5350
-
-        // RFC 6960: responseBytes [0] EXPLICIT ResponseBytes
-        // ResponseBytes ::= SEQUENCE { responseType OID, response OCTET STRING }
-        // The [0] EXPLICIT wrapper holds the *encoded* inner SEQUENCE — we must unwrap
-        // both layers (the [0] tag and then the SEQUENCE) before reading responseType.
-        var responseBytesWrapper = ocspResponse.ReadSequence(new Asn1Tag(TagClass.ContextSpecific, 0, true));
-        var respBytes = responseBytesWrapper.ReadSequence();
-
-        _ = respBytes.ReadObjectIdentifier(); // responseType (id-pkix-ocsp-basic)
-        var basicOcspBytes = respBytes.ReadOctetString();
-
-        // BasicOCSPResponse ::= SEQUENCE { tbsResponseData, signatureAlgorithm, signature, [0] certs OPTIONAL }
-        var basicReader = new AsnReader(basicOcspBytes, AsnEncodingRules.BER);
-        var basicOcsp = basicReader.ReadSequence();
-
-        // Keep raw tbsResponseData for signature verification
-        byte[] tbsResponseDataRaw = basicOcsp.PeekEncodedValue().ToArray();
-        var tbsResponseData = basicOcsp.ReadSequence();
-
-        // signatureAlgorithm — extract the OID and any RSASSA-PSS-params bytes
-        var sigAlgSeq = basicOcsp.ReadSequence();
-        string sigAlgOid = sigAlgSeq.ReadObjectIdentifier();
-        byte[]? sigAlgParams = null;
-        if (sigAlgSeq.HasData)
-        {
-            sigAlgParams = sigAlgSeq.ReadEncodedValue().ToArray();
-        }
-
-        // signature BIT STRING
-        byte[] ocspSignature = basicOcsp.ReadBitString(out _);
-
-        // certs [0] OPTIONAL — extract responder cert
-        // Structure: [0] EXPLICIT { SEQUENCE OF Certificate }
-        // We must unwrap the [0] tag to get the SEQUENCE OF, then iterate individual certs.
-        X509Certificate2? responderCert = null;
-#pragma warning disable CA2000 // responderCert is disposed in the finally block below
-        if (basicOcsp.HasData && basicOcsp.PeekTag() == new Asn1Tag(TagClass.ContextSpecific, 0, true))
-        {
-            var certsWrapper = basicOcsp.ReadSequence(new Asn1Tag(TagClass.ContextSpecific, 0, true));
-            if (certsWrapper.HasData)
-            {
-                var certSeq = certsWrapper.ReadSequence(); // SEQUENCE OF Certificate
-                while (certSeq.HasData)
-                {
-                    try
-                    {
-                        responderCert = CertificateLoader.LoadCertificate(certSeq.ReadEncodedValue().ToArray());
-                        break; // use first cert
-                    }
-                    catch (CryptographicException ex)
-                    {
-                        logger?.OcspResponderCertLoadingFailed(ex.Message);
-                        if (certSeq.HasData)
-                        {
-                            certSeq.ReadEncodedValue(); // skip malformed cert
-                        }
-                    }
-                }
-            }
-        }
-#pragma warning restore CA2000
-
+        var responderCerts = new List<X509Certificate2>();
         try
         {
-            // Verify OCSP response signature
-            if (responderCert is not null)
-            {
-                bool sigValid = VerifyOcspSignature(responderCert, tbsResponseDataRaw, ocspSignature, sigAlgOid, sigAlgParams, logger);
-                if (!sigValid)
-                {
-                    throw new InvalidOperationException("OCSP response signature verification failed.");
-                }
-            }
-
-            // Parse tbsResponseData for cert status
-            if (tbsResponseData.HasData && tbsResponseData.PeekTag() == new Asn1Tag(TagClass.ContextSpecific, 0, true))
-            {
-                tbsResponseData.ReadEncodedValue(); // version
-            }
-
-            tbsResponseData.ReadEncodedValue(); // responderID
-            tbsResponseData.ReadEncodedValue(); // producedAt
-
-            var responses = tbsResponseData.ReadSequence();
-            int? firstCertStatus = null;
-            bool foundMatch = false;
-            while (responses.HasData)
-            {
-                var single = responses.ReadSequence();
-
-                // CertID ::= SEQUENCE { hashAlgorithm, issuerNameHash, issuerKeyHash, serialNumber }
-                // Verify that this response is for the certificate we requested (RFC 6960 §3.2)
-                var certIdSeq = single.ReadSequence();
-                certIdSeq.ReadSequence(); // hashAlgorithm — skip (we know it's SHA-1 from our request)
-                byte[] respIssuerNameHash = certIdSeq.ReadOctetString();
-                certIdSeq.ReadOctetString(); // issuerKeyHash — skip (not always available for matching)
-                var respSerialNumber = certIdSeq.ReadIntegerBytes().ToArray();
-
-                var certStatusTag = single.PeekTag();
-                int? statusValue = certStatusTag.TagClass == TagClass.ContextSpecific ? certStatusTag.TagValue : null;
-
-                // Track the first response as fallback (single-response OCSP is the common case)
-                firstCertStatus ??= statusValue;
-
-                bool certIdMatches = respIssuerNameHash.AsSpan().SequenceEqual(expectedIssuerNameHash) &&
-                                     respSerialNumber.AsSpan().SequenceEqual(expectedSerialNumber);
-                if (!certIdMatches)
-                {
-                    continue;
-                }
-
-                foundMatch = true;
-                if (statusValue.HasValue)
-                {
-                    return HandleCertStatus(statusValue.Value, logger);
-                }
-                break;
-            }
-
-            // Fallback: if no CertID matched but there's exactly one response, use it
-            // (most OCSP responders return a single SingleResponse per request)
-            if (!foundMatch && firstCertStatus.HasValue)
-            {
-                return HandleCertStatus(firstCertStatus.Value, logger);
-            }
-
-            throw new InvalidDataException("OCSP response does not contain a valid certificate status.");
+            var (isValid, _) = ParseOcspResponseWithCertsCore(ocspResponseBytes, cert, responderCerts, logger);
+            return isValid;
         }
         finally
         {
-            responderCert?.Dispose();
+            foreach (var c in responderCerts)
+            {
+                c.Dispose();
+            }
         }
     }
 
@@ -347,7 +207,6 @@ internal sealed class OcspClient
         }
         catch
         {
-            // Dispose all loaded certs before re-throwing to avoid resource leaks
             foreach (var c in responderCerts)
             {
                 c.Dispose();
@@ -360,10 +219,34 @@ internal sealed class OcspClient
     private static (bool IsValid, IReadOnlyList<X509Certificate2> ResponderCertificates) ParseOcspResponseWithCertsCore(
         byte[] ocspResponseBytes, X509Certificate2 cert, List<X509Certificate2> responderCerts, ILogger? logger)
     {
-
         var reader = new AsnReader(ocspResponseBytes, AsnEncodingRules.BER);
         var ocspResponse = reader.ReadSequence();
+        ValidateOcspResponseStatus(ocspResponse);
 
+#pragma warning disable CA5350
+        byte[] expectedIssuerNameHash = SHA1.HashData(cert.IssuerName.RawData);
+        byte[] expectedSerialNumber = cert.SerialNumberBytes.ToArray();
+#pragma warning restore CA5350
+
+        var (tbsDataRaw, tbsData, sigAlgOid, sigAlgParams, signature, basicOcsp) = ParseBasicOcspResponse(ocspResponse);
+
+        var (firstCert, allCerts) = ExtractResponderCerts(basicOcsp, logger);
+        responderCerts.AddRange(allCerts);
+
+        if (firstCert is not null)
+        {
+            bool sigValid = VerifyOcspSignature(firstCert, tbsDataRaw, signature, sigAlgOid, sigAlgParams, logger);
+            if (!sigValid)
+            {
+                throw new InvalidOperationException("OCSP response signature verification failed.");
+            }
+        }
+
+        return (FindMatchingCertStatus(tbsData, expectedIssuerNameHash, expectedSerialNumber, logger), responderCerts);
+    }
+
+    private static void ValidateOcspResponseStatus(AsnReader ocspResponse)
+    {
         var statusEncoded = ocspResponse.ReadEncodedValue().Span;
         int status = statusEncoded.Length >= 3 ? statusEncoded[2] : -1;
         if (status != 0)
@@ -375,12 +258,11 @@ internal sealed class OcspClient
         {
             throw new InvalidDataException("OCSP response is empty.");
         }
+    }
 
-#pragma warning disable CA5350
-        byte[] expectedIssuerNameHash = SHA1.HashData(cert.IssuerName.RawData);
-        byte[] expectedSerialNumber = cert.SerialNumberBytes.ToArray();
-#pragma warning restore CA5350
-
+    private static (byte[] TbsDataRaw, AsnReader TbsData, string SigAlgOid, byte[]? SigAlgParams, byte[] Signature, AsnReader BasicOcsp) ParseBasicOcspResponse(
+        AsnReader ocspResponse)
+    {
         var responseBytesWrapper = ocspResponse.ReadSequence(new Asn1Tag(TagClass.ContextSpecific, 0, true));
         var respBytes = responseBytesWrapper.ReadSequence();
         _ = respBytes.ReadObjectIdentifier();
@@ -389,8 +271,8 @@ internal sealed class OcspClient
         var basicReader = new AsnReader(basicOcspBytes, AsnEncodingRules.BER);
         var basicOcsp = basicReader.ReadSequence();
 
-        byte[] tbsResponseDataRaw = basicOcsp.PeekEncodedValue().ToArray();
-        var tbsResponseData = basicOcsp.ReadSequence();
+        byte[] tbsDataRaw = basicOcsp.PeekEncodedValue().ToArray();
+        var tbsData = basicOcsp.ReadSequence();
 
         var sigAlgSeq = basicOcsp.ReadSequence();
         string sigAlgOid = sigAlgSeq.ReadObjectIdentifier();
@@ -399,10 +281,18 @@ internal sealed class OcspClient
         {
             sigAlgParams = sigAlgSeq.ReadEncodedValue().ToArray();
         }
-        byte[] ocspSignature = basicOcsp.ReadBitString(out _);
 
-        // Extract ALL certificates from certs [0] OPTIONAL
+        byte[] signature = basicOcsp.ReadBitString(out _);
+
+        return (tbsDataRaw, tbsData, sigAlgOid, sigAlgParams, signature, basicOcsp);
+    }
+
+    private static (X509Certificate2? FirstCert, List<X509Certificate2> AllCerts) ExtractResponderCerts(
+        AsnReader basicOcsp, ILogger? logger)
+    {
         X509Certificate2? firstCert = null;
+        var allCerts = new List<X509Certificate2>();
+
         if (basicOcsp.HasData && basicOcsp.PeekTag() == new Asn1Tag(TagClass.ContextSpecific, 0, true))
         {
             var certsWrapper = basicOcsp.ReadSequence(new Asn1Tag(TagClass.ContextSpecific, 0, true));
@@ -414,35 +304,33 @@ internal sealed class OcspClient
                     try
                     {
                         var loadedCert = CertificateLoader.LoadCertificate(certSeq.ReadEncodedValue().ToArray());
-                        responderCerts.Add(loadedCert);
+                        allCerts.Add(loadedCert);
                         firstCert ??= loadedCert;
                     }
                     catch (CryptographicException ex)
                     {
                         logger?.OcspResponderCertLoadingFailed(ex.Message);
-                        // Element already consumed by ReadEncodedValue above — just skip
                     }
                 }
             }
         }
 
-        // Verify signature using first responder cert
-        if (firstCert is not null)
-        {
-            bool sigValid = VerifyOcspSignature(firstCert, tbsResponseDataRaw, ocspSignature, sigAlgOid, sigAlgParams, logger);
-            if (!sigValid)
-            {
-                throw new InvalidOperationException("OCSP response signature verification failed.");
-            }
-        }
+        return (firstCert, allCerts);
+    }
 
-        // Parse tbsResponseData for cert status
+    private static bool FindMatchingCertStatus(
+        AsnReader tbsResponseData,
+        byte[] expectedIssuerNameHash,
+        byte[] expectedSerialNumber,
+        ILogger? logger)
+    {
         if (tbsResponseData.HasData && tbsResponseData.PeekTag() == new Asn1Tag(TagClass.ContextSpecific, 0, true))
         {
-            tbsResponseData.ReadEncodedValue(); // version
+            tbsResponseData.ReadEncodedValue();
         }
-        tbsResponseData.ReadEncodedValue(); // responderID
-        tbsResponseData.ReadEncodedValue(); // producedAt
+
+        tbsResponseData.ReadEncodedValue();
+        tbsResponseData.ReadEncodedValue();
 
         var responses = tbsResponseData.ReadSequence();
         int? firstCertStatus = null;
@@ -451,9 +339,9 @@ internal sealed class OcspClient
         {
             var single = responses.ReadSequence();
             var certIdSeq = single.ReadSequence();
-            certIdSeq.ReadSequence(); // hashAlgorithm
+            certIdSeq.ReadSequence();
             byte[] respIssuerNameHash = certIdSeq.ReadOctetString();
-            certIdSeq.ReadOctetString(); // issuerKeyHash
+            certIdSeq.ReadOctetString();
             var respSerialNumber = certIdSeq.ReadIntegerBytes().ToArray();
 
             var certStatusTag = single.PeekTag();
@@ -470,14 +358,14 @@ internal sealed class OcspClient
             foundMatch = true;
             if (statusValue.HasValue)
             {
-                return (HandleCertStatus(statusValue.Value, logger), responderCerts);
+                return HandleCertStatus(statusValue.Value, logger);
             }
             break;
         }
 
         if (!foundMatch && firstCertStatus.HasValue)
         {
-            return (HandleCertStatus(firstCertStatus.Value, logger), responderCerts);
+            return HandleCertStatus(firstCertStatus.Value, logger);
         }
 
         throw new InvalidDataException("OCSP response does not contain a valid certificate status.");

@@ -625,7 +625,7 @@ public sealed class PdfStructureReader
         {
             DecodeXrefStream(data, pos, dictRegion, crossRefs, seenObjects, compressedEntries);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is InvalidDataException or ArgumentOutOfRangeException or OverflowException)
         {
             logger?.XrefStreamDecodingFailed(ex.Message);
         }
@@ -861,7 +861,7 @@ public sealed class PdfStructureReader
 
                 ParseObjStmOffsets(decompressed, objCount, entries, crossRefs);
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is InvalidDataException or ArgumentOutOfRangeException or IndexOutOfRangeException)
             {
                 logger?.ObjStmResolveFailed(objStmNum, ex.Message);
             }
@@ -1322,7 +1322,7 @@ public sealed class PdfStructureReader
         {
             throw;
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is InvalidOperationException or ArgumentException)
         {
             logger?.FlateDecodeDecompressionFailed(ex.Message);
             return [];
@@ -1721,7 +1721,7 @@ public sealed class PdfStructureReader
         {
             return new DateTimeOffset(year, month, day, hour, minute, second, tzOffset);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is ArgumentOutOfRangeException or ArgumentException)
         {
             logger?.PdfDateParsingFailed(ex.Message);
             return null;

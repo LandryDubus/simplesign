@@ -11,6 +11,7 @@ using Xunit;
 
 namespace SimpleSign.Core.Tests.Validation;
 
+[Trait("Category", "Unit")]
 public sealed class CertificateChainUtilityTests
 {
     private static byte[] BuildAiaExtensionBytes(string url)

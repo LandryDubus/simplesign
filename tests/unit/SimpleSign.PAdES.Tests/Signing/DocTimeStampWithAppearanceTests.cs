@@ -12,6 +12,7 @@ namespace SimpleSign.PAdES.Tests.Signing;
 /// Regression tests for signing with both visible appearance and archival timestamp.
 /// Adobe Reader reported "file is damaged" when both options were combined.
 /// </summary>
+[Trait("Category", "Unit")]
 public sealed class DocTimeStampWithAppearanceTests
 {
     private static byte[] BuildPdfWithPage()

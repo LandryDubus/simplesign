@@ -8,6 +8,7 @@ namespace SimpleSign.Pdf.Tests;
 /// <summary>
 /// Edge-case tests for PdfStructureReader: malformed PDFs, cancellation, and boundary conditions.
 /// </summary>
+[Trait("Category", "Unit")]
 public sealed class PdfReaderEdgeCaseTests
 {
     // ── Helpers ───────────────────────────────────────────────────────────────

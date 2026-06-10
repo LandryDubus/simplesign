@@ -5,6 +5,7 @@ using SimpleSign.TestHelpers;
 
 namespace SimpleSign.Brasil.Tests;
 
+[Trait("Category", "Unit")]
 public sealed class GovBrChainValidatorTests
 {
     // ── LoadBundledGovBrCerts ─────────────────────────────────────────────────

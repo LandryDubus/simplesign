@@ -10,6 +10,7 @@ namespace SimpleSign.PAdES.Tests.Signing;
 /// Unit tests that verify ISO 32000-1:2008 compliance for PDF digital signatures.
 /// Each test maps to a specific section of the standard.
 /// </summary>
+[Trait("Category", "Unit")]
 public sealed class Iso32000ComplianceTests
 {
     // ── Minimal PDF builders ───────────────────────────────────────────────────

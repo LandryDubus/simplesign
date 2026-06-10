@@ -11,6 +11,7 @@ namespace SimpleSign.Core.Tests.Revocation;
 /// Tests for edge cases in <see cref="CrlClient.IsSerialInCrl"/> and revocation checking
 /// — especially when CRL data is malformed or unparseable.
 /// </summary>
+[Trait("Category", "Unit")]
 public sealed class RevocationCheckerEdgeCaseTests : IDisposable
 {
     private readonly X509Certificate2 _cert;

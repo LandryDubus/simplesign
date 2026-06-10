@@ -12,6 +12,7 @@ namespace SimpleSign.PAdES.Tests.Signing;
 /// PDF/A conformance tests covering the gaps introduced by the signing process
 /// (ISO 19005-3:2012 §6.3.2 Test 2 and §6.1.9 Test 1).
 /// </summary>
+[Trait("Category", "Unit")]
 public sealed class PdfAConformanceTests
 {
     // ── Fixtures ──────────────────────────────────────────────────────────────

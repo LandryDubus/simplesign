@@ -8,6 +8,7 @@ using Xunit;
 
 namespace SimpleSign.Core.Tests.Inspection;
 
+[Trait("Category", "Unit")]
 public sealed class CertificateInfoTests
 {
     [Fact(DisplayName = "From extracts Subject and Issuer")]

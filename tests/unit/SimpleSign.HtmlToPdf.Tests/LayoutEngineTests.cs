@@ -5,6 +5,7 @@ using Xunit;
 
 namespace SimpleSign.HtmlToPdf.Tests;
 
+[Trait("Category", "Unit")]
 public class LayoutEngineTests
 {
     // ── Basic layout ────────────────────────────────────────────────────

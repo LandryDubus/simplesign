@@ -11,6 +11,7 @@ namespace SimpleSign.HtmlToPdf.Tests;
 /// Deep tests for all HtmlToPdf improvements: FlateDecode compression, page orientation,
 /// PDF metadata, HSL colors, bookmarks, headers/footers, robustness, and E2E scenarios.
 /// </summary>
+[Trait("Category", "Unit")]
 public class ImprovementTests
 {
     // ── FlateDecode Compression ────────────────────────────────────────

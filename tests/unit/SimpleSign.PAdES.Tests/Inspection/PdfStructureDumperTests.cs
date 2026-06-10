@@ -5,6 +5,7 @@ using Xunit;
 
 namespace SimpleSign.PAdES.Tests.Inspection;
 
+[Trait("Category", "Unit")]
 public sealed class PdfStructureDumperTests
 {
     /// <summary>

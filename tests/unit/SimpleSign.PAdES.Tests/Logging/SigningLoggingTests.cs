@@ -31,6 +31,7 @@ internal sealed class FakeLogger<T> : ILogger<T>
         Func<TState, Exception?, string> formatter) => Entries.Add((logLevel, formatter(state, exception)));
 }
 
+[Trait("Category", "Unit")]
 public sealed class SigningLoggingTests : IDisposable
 {
     private readonly X509Certificate2 _cert = TestCertificateFactory.CreateSelfSignedCert();

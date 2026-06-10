@@ -6,6 +6,7 @@ namespace SimpleSign.Pdf.Tests;
 /// <summary>
 /// Tests for PdfStructureParser helper methods.
 /// </summary>
+[Trait("Category", "Unit")]
 public sealed class PdfStructureParserTests
 {
     [Fact]

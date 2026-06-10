@@ -12,6 +12,7 @@ namespace SimpleSign.Core.Tests.Revocation;
 /// signed-revocation-list, revokedCertificates SEQUENCE iteration, and signature
 /// verification when an issuer cert is supplied.
 /// </summary>
+[Trait("Category", "Unit")]
 public sealed class CrlClientRealFixtureTests
 {
     [Fact(DisplayName = "IsSerialInCrl returns false for a fresh DigiCert cert (not in CRL)")]

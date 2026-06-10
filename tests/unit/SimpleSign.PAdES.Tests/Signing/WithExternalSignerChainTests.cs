@@ -16,6 +16,7 @@ namespace SimpleSign.PAdES.Tests.Signing;
 /// API so HSM / cloud-KMS callers can pre-supply the intermediate chain and skip
 /// AIA HTTP fetches during LTV embedding.
 /// </summary>
+[Trait("Category", "Unit")]
 public sealed class WithExternalSignerChainTests
 {
     // ── Fixtures ──────────────────────────────────────────────────────────────

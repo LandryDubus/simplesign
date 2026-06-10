@@ -9,6 +9,7 @@ namespace SimpleSign.PAdES.Tests.Signing;
 /// <summary>
 /// Tests for PdfStructureParser public methods (formerly PdfSignatureWriter internals).
 /// </summary>
+[Trait("Category", "Unit")]
 public sealed class PdfSignatureWriterInternalsTests
 {
     // ── FindHighestObjectNumber tests ──────────────────────────────────────────

@@ -6,6 +6,7 @@ using Xunit;
 
 namespace SimpleSign.PAdES.Tests.Validation;
 
+[Trait("Category", "Unit")]
 public sealed class DisposalEdgeCaseTests : IDisposable
 {
     private readonly X509Certificate2 _cert = TestCertificateFactory.CreateSelfSignedCert();

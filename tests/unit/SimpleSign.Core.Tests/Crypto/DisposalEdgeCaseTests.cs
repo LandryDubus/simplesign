@@ -6,6 +6,7 @@ using Xunit;
 
 namespace SimpleSign.Core.Tests.Crypto;
 
+[Trait("Category", "Unit")]
 public sealed class DisposalEdgeCaseTests
 {
     private static X509Certificate2 CreateExportableCert(string cn = "CN=DisposalTest")

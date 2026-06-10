@@ -10,6 +10,7 @@ namespace SimpleSign.Core.Tests.Crypto;
 /// Tests for the directory-based constructor and edge-case lookups in
 /// <see cref="FileCertificateStore"/>. Complements <see cref="CertificateStoreTests"/>.
 /// </summary>
+[Trait("Category", "Unit")]
 public sealed class FileCertificateStoreDirectoryTests : IDisposable
 {
     private readonly string _tempDir;

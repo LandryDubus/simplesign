@@ -11,6 +11,7 @@ namespace SimpleSign.Core.Tests.Revocation;
 /// Tests for the URL-extraction helpers in <see cref="OcspClient"/> and <see cref="CrlClient"/>.
 /// These exercise pure ASN.1 parsing of synthetic AIA / CDP extensions — no network calls.
 /// </summary>
+[Trait("Category", "Unit")]
 public sealed class RevocationUrlExtractionTests
 {
     private const string AiaOid = "1.3.6.1.5.5.7.1.1";

@@ -20,6 +20,7 @@ namespace SimpleSign.PAdES.Tests.Signing;
 /// Tests that verify LTV embedding and archival timestamp don't corrupt PDF structure.
 /// Regression tests for the bug where LTV/archival signing produces files Adobe can't open.
 /// </summary>
+[Trait("Category", "Unit")]
 public sealed class LtvArchivalCorruptionTests
 {
     private readonly ITestOutputHelper _out;
@@ -273,10 +274,4 @@ public sealed class LtvArchivalCorruptionTests
         public IReadOnlyList<X509Certificate2> GetTrustAnchors() => [cert];
     }
 
-    private sealed class MockHttpHandler(Func<HttpRequestMessage, Task<HttpResponseMessage>> handler)
-        : HttpMessageHandler
-    {
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage req, CancellationToken ct)
-            => handler(req);
-    }
 }

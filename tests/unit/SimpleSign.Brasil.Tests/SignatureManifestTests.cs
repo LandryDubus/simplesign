@@ -5,6 +5,7 @@ using BrasilManifest = SimpleSign.Brasil.Signing.SignatureManifest;
 
 namespace SimpleSign.Brasil.Tests;
 
+[Trait("Category", "Unit")]
 public class SignatureManifestTests
 {
     [Fact]

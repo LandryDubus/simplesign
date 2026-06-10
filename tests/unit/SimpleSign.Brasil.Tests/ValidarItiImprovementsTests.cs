@@ -14,6 +14,7 @@ namespace SimpleSign.Brasil.Tests;
 /// - <see cref="ValidarItiUrlBuilder"/>
 /// - Extended Policy OIDs (DOC-ICP-15.03 all versions)
 /// </summary>
+[Trait("Category", "Unit")]
 public sealed class ValidarItiImprovementsTests
 {
     private const string SubjectAltNameOid = "2.5.29.17";

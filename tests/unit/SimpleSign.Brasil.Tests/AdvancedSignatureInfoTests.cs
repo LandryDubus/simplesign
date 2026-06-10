@@ -4,6 +4,7 @@ using BrasilAuth = SimpleSign.Brasil.Signing.AuthenticationMethod;
 
 namespace SimpleSign.Brasil.Tests;
 
+[Trait("Category", "Unit")]
 public class AdvancedSignatureInfoTests
 {
     [Theory]

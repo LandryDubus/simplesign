@@ -15,6 +15,7 @@ namespace SimpleSign.PAdES.Tests.Validation;
 /// <summary>
 /// Edge-case tests for validation options, PdfSignatureValidator, network failures, and revocation.
 /// </summary>
+[Trait("Category", "Unit")]
 public sealed class ValidationEdgeCaseTests
 {
     private static byte[] BuildMinimalPdf()

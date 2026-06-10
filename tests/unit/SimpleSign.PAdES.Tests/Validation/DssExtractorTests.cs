@@ -10,6 +10,7 @@ namespace SimpleSign.PAdES.Tests.Validation;
 /// PDF Document Security Store dictionary. No real PDF needed; we feed crafted
 /// byte sequences that mimic the parts of a PDF the extractor cares about.
 /// </summary>
+[Trait("Category", "Unit")]
 public sealed class DssExtractorTests
 {
     // ── IndexOfBytes / IndexOfBytesFrom ─────────────────────────────────────

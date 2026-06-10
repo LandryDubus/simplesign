@@ -11,6 +11,7 @@ namespace SimpleSign.PAdES.Tests.EndToEnd;
 /// End-to-end PAdES roundtrip with the three-tier synthetic PKI. Exercises the
 /// full chain build path, which single self-signed certs short-circuit.
 /// </summary>
+[Trait("Category", "Unit")]
 public sealed class SyntheticPkiPadesEndToEndTests
 {
     [Fact(DisplayName = "PAdES-B-B with full Root→Intermediate→Leaf chain validates under custom trust")]

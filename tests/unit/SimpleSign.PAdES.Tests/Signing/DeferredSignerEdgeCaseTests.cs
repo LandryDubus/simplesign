@@ -13,9 +13,10 @@ namespace SimpleSign.PAdES.Tests.Signing;
 /// branches, options classes, and <see cref="DeferredSigningSession"/> serialization
 /// paths not exercised by the existing happy-path tests.
 /// </summary>
+[Trait("Category", "Unit")]
 public sealed class DeferredSignerEdgeCaseTests
 {
-    private static byte[] BuildMinimalPdf() => "%PDF-1.7\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n2 0 obj\n<< /Type /Pages /Kids [] /Count 0 >>\nendobj\nxref\n0 3\n0000000000 65535 f \n0000000009 00000 n \n0000000058 00000 n \ntrailer\n<< /Size 3 /Root 1 0 R >>\nstartxref\n110\n%%EOF"u8.ToArray();
+
 
     // ── Algorithm OID auto-detection ─────────────────────────────────────────
 
@@ -23,7 +24,7 @@ public sealed class DeferredSignerEdgeCaseTests
     public async Task PrepareAsync_RsaWithSha256_DetectsRsaSha256()
     {
         using var cert = TestCertificateFactory.CreateSelfSignedCert();
-        var result = await DeferredSigner.PrepareAsync(BuildMinimalPdf(), cert);
+        var result = await DeferredSigner.PrepareAsync(TestPdfFactory.CreateMinimalPdf(), cert);
 
         result.SignatureAlgorithmOid.ShouldBe(Oids.RsaSha256);
         result.DigestAlgorithm.ShouldBe("SHA256");
@@ -38,7 +39,7 @@ public sealed class DeferredSignerEdgeCaseTests
             HashAlgorithm = HashAlgorithmName.SHA512,
             HashAlgorithmExplicitlySet = true
         };
-        var result = await DeferredSigner.PrepareAsync(BuildMinimalPdf(), cert, options);
+        var result = await DeferredSigner.PrepareAsync(TestPdfFactory.CreateMinimalPdf(), cert, options);
 
         result.SignatureAlgorithmOid.ShouldBe(Oids.RsaSha512);
     }
@@ -47,7 +48,7 @@ public sealed class DeferredSignerEdgeCaseTests
     public async Task PrepareAsync_EcdsaWithSha256_DetectsEcdsaSha256()
     {
         using var cert = CreateEcdsaCert();
-        var result = await DeferredSigner.PrepareAsync(BuildMinimalPdf(), cert);
+        var result = await DeferredSigner.PrepareAsync(TestPdfFactory.CreateMinimalPdf(), cert);
 
         result.SignatureAlgorithmOid.ShouldBe(Oids.EcdsaSha256);
     }
@@ -61,7 +62,7 @@ public sealed class DeferredSignerEdgeCaseTests
             HashAlgorithm = HashAlgorithmName.SHA512,
             HashAlgorithmExplicitlySet = true
         };
-        var result = await DeferredSigner.PrepareAsync(BuildMinimalPdf(), cert, options);
+        var result = await DeferredSigner.PrepareAsync(TestPdfFactory.CreateMinimalPdf(), cert, options);
 
         result.SignatureAlgorithmOid.ShouldBe(Oids.EcdsaSha512);
     }
@@ -76,7 +77,7 @@ public sealed class DeferredSignerEdgeCaseTests
             SignatureAlgorithmOid = Oids.RsaPss
         };
 
-        var result = await DeferredSigner.PrepareAsync(BuildMinimalPdf(), cert, options);
+        var result = await DeferredSigner.PrepareAsync(TestPdfFactory.CreateMinimalPdf(), cert, options);
         result.SignatureAlgorithmOid.ShouldBe(Oids.RsaPss);
     }
 
@@ -93,7 +94,7 @@ public sealed class DeferredSignerEdgeCaseTests
             HashAlgorithmExplicitlySet = true
         };
 
-        Func<Task> act = () => DeferredSigner.PrepareAsync(BuildMinimalPdf(), cert, options);
+        Func<Task> act = () => DeferredSigner.PrepareAsync(TestPdfFactory.CreateMinimalPdf(), cert, options);
         (await Should.ThrowAsync<NotSupportedException>(act)).Message.ShouldContain("Cannot detect signature OID");
     }
 
@@ -106,7 +107,7 @@ public sealed class DeferredSignerEdgeCaseTests
         using var ca = TestCertificateFactory.CreateCaCert();
         var options = new DeferredSigningOptions { ExtraCertificates = [ca] };
 
-        var result = await DeferredSigner.PrepareAsync(BuildMinimalPdf(), cert, options);
+        var result = await DeferredSigner.PrepareAsync(TestPdfFactory.CreateMinimalPdf(), cert, options);
 
         var session = DeferredSigningSession.Deserialize(result.SessionData);
         session.ExtraCertificatesDer.ShouldNotBeNull();
@@ -117,7 +118,7 @@ public sealed class DeferredSignerEdgeCaseTests
     public async Task PrepareAsync_NoExtras_LeavesNull()
     {
         using var cert = TestCertificateFactory.CreateSelfSignedCert();
-        var result = await DeferredSigner.PrepareAsync(BuildMinimalPdf(), cert);
+        var result = await DeferredSigner.PrepareAsync(TestPdfFactory.CreateMinimalPdf(), cert);
 
         var session = DeferredSigningSession.Deserialize(result.SessionData);
         session.ExtraCertificatesDer.ShouldBeNull();
@@ -129,7 +130,7 @@ public sealed class DeferredSignerEdgeCaseTests
     public async Task CompleteAsync_NullSignature_Throws()
     {
         using var cert = TestCertificateFactory.CreateSelfSignedCert();
-        var prep = await DeferredSigner.PrepareAsync(BuildMinimalPdf(), cert);
+        var prep = await DeferredSigner.PrepareAsync(TestPdfFactory.CreateMinimalPdf(), cert);
 
         Func<Task> act = () => DeferredSigner.CompleteAsync(prep.SessionData, null!);
         await Should.ThrowAsync<ArgumentNullException>(act);
@@ -139,7 +140,7 @@ public sealed class DeferredSignerEdgeCaseTests
     public async Task CompleteAsync_EmptySignature_Throws()
     {
         using var cert = TestCertificateFactory.CreateSelfSignedCert();
-        var prep = await DeferredSigner.PrepareAsync(BuildMinimalPdf(), cert);
+        var prep = await DeferredSigner.PrepareAsync(TestPdfFactory.CreateMinimalPdf(), cert);
 
         Func<Task> act = () => DeferredSigner.CompleteAsync(prep.SessionData, []);
         (await Should.ThrowAsync<ArgumentException>(act)).Message.ShouldContain("cannot be empty");
@@ -158,7 +159,7 @@ public sealed class DeferredSignerEdgeCaseTests
     public async Task Session_SerializeDeserialize_RoundTrips()
     {
         using var cert = TestCertificateFactory.CreateSelfSignedCert();
-        var prep = await DeferredSigner.PrepareAsync(BuildMinimalPdf(), cert);
+        var prep = await DeferredSigner.PrepareAsync(TestPdfFactory.CreateMinimalPdf(), cert);
 
         var session = DeferredSigningSession.Deserialize(prep.SessionData);
         var reSerialized = session.Serialize();
@@ -175,7 +176,7 @@ public sealed class DeferredSignerEdgeCaseTests
     public async Task Session_DeserializeFromSpan_Works()
     {
         using var cert = TestCertificateFactory.CreateSelfSignedCert();
-        var prep = await DeferredSigner.PrepareAsync(BuildMinimalPdf(), cert);
+        var prep = await DeferredSigner.PrepareAsync(TestPdfFactory.CreateMinimalPdf(), cert);
 
         ReadOnlySpan<byte> span = prep.SessionData.AsSpan();
         var session = DeferredSigningSession.Deserialize(span);
@@ -240,7 +241,7 @@ public sealed class DeferredSignerEdgeCaseTests
     public async Task Session_HmacSerializeDeserialize_RoundTrips()
     {
         using var cert = TestCertificateFactory.CreateSelfSignedCert();
-        var prep = await DeferredSigner.PrepareAsync(BuildMinimalPdf(), cert);
+        var prep = await DeferredSigner.PrepareAsync(TestPdfFactory.CreateMinimalPdf(), cert);
         var session = DeferredSigningSession.Deserialize(prep.SessionData);
 
         byte[] hmacKey = RandomNumberGenerator.GetBytes(32);
@@ -256,7 +257,7 @@ public sealed class DeferredSignerEdgeCaseTests
     public async Task Session_HmacTamperedData_ThrowsCryptographicException()
     {
         using var cert = TestCertificateFactory.CreateSelfSignedCert();
-        var prep = await DeferredSigner.PrepareAsync(BuildMinimalPdf(), cert);
+        var prep = await DeferredSigner.PrepareAsync(TestPdfFactory.CreateMinimalPdf(), cert);
         var session = DeferredSigningSession.Deserialize(prep.SessionData);
 
         byte[] hmacKey = RandomNumberGenerator.GetBytes(32);
@@ -273,7 +274,7 @@ public sealed class DeferredSignerEdgeCaseTests
     public async Task Session_HmacWrongKey_ThrowsCryptographicException()
     {
         using var cert = TestCertificateFactory.CreateSelfSignedCert();
-        var prep = await DeferredSigner.PrepareAsync(BuildMinimalPdf(), cert);
+        var prep = await DeferredSigner.PrepareAsync(TestPdfFactory.CreateMinimalPdf(), cert);
         var session = DeferredSigningSession.Deserialize(prep.SessionData);
 
         byte[] correctKey = RandomNumberGenerator.GetBytes(32);
@@ -288,7 +289,7 @@ public sealed class DeferredSignerEdgeCaseTests
     public async Task Session_NoHmacWithKeyRequired_ThrowsCryptographicException()
     {
         using var cert = TestCertificateFactory.CreateSelfSignedCert();
-        var prep = await DeferredSigner.PrepareAsync(BuildMinimalPdf(), cert);
+        var prep = await DeferredSigner.PrepareAsync(TestPdfFactory.CreateMinimalPdf(), cert);
 
         // Session serialized without HMAC
         byte[] hmacKey = RandomNumberGenerator.GetBytes(32);

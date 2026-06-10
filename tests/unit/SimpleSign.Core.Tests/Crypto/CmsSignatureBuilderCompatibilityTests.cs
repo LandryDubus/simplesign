@@ -12,6 +12,7 @@ namespace SimpleSign.Core.Tests.Crypto;
 /// Tests for <see cref="CmsSignatureBuilder.ValidateSignatureAlgorithmCompatibility"/>
 /// and the new <c>signatureAlgorithmOid</c> parameter on <see cref="CmsSignatureBuilder.Build"/>.
 /// </summary>
+[Trait("Category", "Unit")]
 public sealed class CmsSignatureBuilderCompatibilityTests
 {
     [Theory(DisplayName = "ValidateSignatureAlgorithmCompatibility: compatible pairs do not throw")]

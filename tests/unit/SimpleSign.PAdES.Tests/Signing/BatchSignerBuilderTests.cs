@@ -14,6 +14,7 @@ namespace SimpleSign.PAdES.Tests.Signing;
 /// Verifies setters, defaults, and argument validation. Also exercises
 /// <see cref="BatchSignResult"/>'s <c>IsSuccess</c> branch logic.
 /// </summary>
+[Trait("Category", "Unit")]
 public sealed class BatchSignerBuilderTests
 {
     [Fact(DisplayName = "Create returns a builder with the given certificate")]

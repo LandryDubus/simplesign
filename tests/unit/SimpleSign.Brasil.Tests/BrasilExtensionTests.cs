@@ -2,6 +2,7 @@ using SimpleSign.Core.Extensions;
 
 namespace SimpleSign.Brasil.Tests;
 
+[Trait("Category", "Unit")]
 public class BrasilExtensionTests
 {
     [Fact]

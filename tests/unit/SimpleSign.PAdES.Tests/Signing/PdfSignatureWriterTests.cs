@@ -6,6 +6,7 @@ using Xunit;
 
 namespace SimpleSign.PAdES.Tests.Signing;
 
+[Trait("Category", "Unit")]
 public sealed class PdfSignatureWriterTests
 {
     // ── Minimal PDF builder ────────────────────────────────────────────────────

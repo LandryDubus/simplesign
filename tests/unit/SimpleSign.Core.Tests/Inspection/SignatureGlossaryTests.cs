@@ -4,6 +4,7 @@ using Xunit;
 
 namespace SimpleSign.Core.Tests.Inspection;
 
+[Trait("Category", "Unit")]
 public sealed class SignatureGlossaryTests
 {
     [Fact(DisplayName = "All returns non-empty collection")]

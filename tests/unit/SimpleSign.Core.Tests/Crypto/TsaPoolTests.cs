@@ -4,6 +4,7 @@ using Xunit;
 
 namespace SimpleSign.Core.Tests.Crypto;
 
+[Trait("Category", "Unit")]
 public sealed class TsaPoolTests
 {
     [Fact(DisplayName = "Constructor requires at least one URL")]

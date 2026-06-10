@@ -12,6 +12,7 @@ namespace SimpleSign.Core.Tests.Inspection;
 /// and Key Usage extension parsing in <see cref="CertificateInfo"/>.
 /// Builds certificates with synthetic extensions to exercise the parsers.
 /// </summary>
+[Trait("Category", "Unit")]
 public sealed class CertificateInfoExtensionTests
 {
     private const string CdpOid = "2.5.29.31";

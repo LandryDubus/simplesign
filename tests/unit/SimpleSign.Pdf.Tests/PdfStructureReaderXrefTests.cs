@@ -7,6 +7,7 @@ namespace SimpleSign.Pdf.Tests;
 /// <summary>
 /// Tests for PdfStructureReader with XRef streams, FlateDecode, and Object Streams.
 /// </summary>
+[Trait("Category", "Unit")]
 public sealed class PdfStructureReaderXrefTests
 {
     // ── XRef streams (PDF 1.5+) ───────────────────────────────────────────────

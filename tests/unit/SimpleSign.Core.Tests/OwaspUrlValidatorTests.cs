@@ -9,6 +9,7 @@ namespace SimpleSign.Core.Tests;
 /// OWASP security tests for SSRF prevention (A10:2021), URL validation,
 /// and cryptographic algorithm guards (A02:2021).
 /// </summary>
+[Trait("Category", "Unit")]
 public sealed class OwaspSecurityTests
 {
     [Theory]

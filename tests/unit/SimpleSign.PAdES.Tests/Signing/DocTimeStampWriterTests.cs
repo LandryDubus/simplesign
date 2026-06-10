@@ -4,6 +4,7 @@ using Xunit;
 
 namespace SimpleSign.PAdES.Tests.Signing;
 
+[Trait("Category", "Unit")]
 public sealed class DocTimeStampWriterTests
 {
     [Fact(DisplayName = "Null PDF throws ArgumentNullException")]

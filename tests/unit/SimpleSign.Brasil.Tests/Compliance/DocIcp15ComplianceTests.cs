@@ -15,6 +15,7 @@ namespace SimpleSign.Brasil.Tests.Compliance;
 /// Validates that SimpleSign correctly implements the ICP-Brasil digital signature
 /// requirements defined in DOC-ICP-15 (Visão Geral sobre Assinaturas Digitais na ICP-Brasil).
 /// </summary>
+[Trait("Category", "Unit")]
 public sealed class DocIcp15ComplianceTests
 {
     private const string CertPoliciesOid = "2.5.29.32";

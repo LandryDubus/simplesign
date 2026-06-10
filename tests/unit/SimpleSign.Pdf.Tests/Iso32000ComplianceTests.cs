@@ -8,6 +8,7 @@ namespace SimpleSign.Pdf.Tests;
 /// ISO 32000 compliance tests for PDF parser features added in Phases 1-3.
 /// Each test exercises a specific section of the ISO 32000-1:2008 specification.
 /// </summary>
+[Trait("Category", "Unit")]
 public sealed class Iso32000ComplianceTests
 {
     // ═══════════════════════════════════════════════════════════════════════════

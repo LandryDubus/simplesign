@@ -12,6 +12,7 @@ namespace SimpleSign.Core.Tests.Revocation;
 /// <c>www.digicert.com</c> and verifies the parser handles the real wire format
 /// — including DER-with-context-tags, GeneralizedTime, and signature blocks.
 /// </summary>
+[Trait("Category", "Unit")]
 public sealed class OcspClientRealFixtureTests
 {
     [Fact(DisplayName = "ParseOcspResponse returns true for real DigiCert 'good' response")]

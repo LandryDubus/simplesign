@@ -10,6 +10,7 @@ namespace SimpleSign.PAdES.Tests.Validation;
 /// Tests for VRI (Validation Related Information) structure validation
 /// per ISO 32000-2 §12.8.4.4.
 /// </summary>
+[Trait("Category", "Unit")]
 public sealed class VriValidatorTests
 {
     // ── VRI Key Validation ──────────────────────────────────────────────────

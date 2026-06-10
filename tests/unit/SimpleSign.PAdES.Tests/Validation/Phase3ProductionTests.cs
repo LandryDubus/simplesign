@@ -18,6 +18,7 @@ namespace SimpleSign.PAdES.Tests.Validation;
 /// <summary>
 /// Phase 3 tests: Validator refactoring, HttpClient injection, encrypted PDF, batch validation, PDF/A detection.
 /// </summary>
+[Trait("Category", "Unit")]
 public sealed class Phase3ProductionTests
 {
     // ── Fixtures ──────────────────────────────────────────────────────────────

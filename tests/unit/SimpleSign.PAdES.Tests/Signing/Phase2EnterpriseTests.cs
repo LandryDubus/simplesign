@@ -8,6 +8,7 @@ namespace SimpleSign.PAdES.Tests.Signing;
 /// Tests for Phase 2 enterprise features: DocMDP certification, existing field signing,
 /// and rich appearance (image, colors, border).
 /// </summary>
+[Trait("Category", "Unit")]
 public sealed class Phase2EnterpriseTests
 {
 

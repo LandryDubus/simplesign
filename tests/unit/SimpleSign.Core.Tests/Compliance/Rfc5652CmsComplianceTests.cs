@@ -13,6 +13,7 @@ namespace SimpleSign.Core.Tests.Compliance;
 /// conform to RFC 5652 (Cryptographic Message Syntax) at the ASN.1 wire level.
 /// Each test maps to a specific section of the RFC.
 /// </summary>
+[Trait("Category", "Unit")]
 public sealed class Rfc5652CmsComplianceTests : IDisposable
 {
     private const string IdData = "1.2.840.113549.1.7.1";

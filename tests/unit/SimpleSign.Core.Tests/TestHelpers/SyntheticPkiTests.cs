@@ -5,6 +5,7 @@ using Xunit;
 
 namespace SimpleSign.Core.Tests.TestHelpers;
 
+[Trait("Category", "Unit")]
 public sealed class SyntheticPkiTests
 {
     [Fact(DisplayName = "SyntheticPki produces a 3-tier chain that the .NET X509Chain trusts when root is added")]

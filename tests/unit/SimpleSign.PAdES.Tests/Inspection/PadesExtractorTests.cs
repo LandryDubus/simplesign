@@ -5,9 +5,11 @@ using Shouldly;
 using SimpleSign.Core.Crypto;
 using SimpleSign.PAdES.Inspection;
 using SimpleSign.Pdf.Exceptions;
+using SimpleSign.TestHelpers;
 using Xunit;
 namespace SimpleSign.PAdES.Tests.Inspection;
 
+[Trait("Category", "Unit")]
 public sealed class PadesExtractorTests : IDisposable
 {
     private readonly X509Certificate2 _cert;
@@ -171,7 +173,7 @@ public sealed class PadesExtractorTests : IDisposable
     [Fact(DisplayName = "Unsigned PDF returns empty list")]
     public async Task ExtractAsync_UnsignedPdf_ReturnsEmptyList()
     {
-        byte[] pdf = BuildMinimalPdf();
+        byte[] pdf = TestPdfFactory.CreateMinimalPdf();
 
         var signatures = await PadesExtractor.ExtractAsync(pdf);
 
@@ -311,19 +313,12 @@ public sealed class PadesExtractorTests : IDisposable
     private async Task<byte[]> SignMinimalPdfAsync()
     {
         return await SimpleSigner
-            .Document(BuildMinimalPdf())
+            .Document(TestPdfFactory.CreateMinimalPdf())
             .WithCertificate(_cert)
             .SignAsync();
     }
 
-    private static byte[] BuildMinimalPdf()
-    {
-        return Encoding.Latin1.GetBytes(
-            "%PDF-1.7\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n" +
-            "2 0 obj\n<< /Type /Pages /Kids [] /Count 0 >>\nendobj\nxref\n" +
-            "0 3\n0000000000 65535 f \n0000000009 00000 n \n0000000058 00000 n \n" +
-            "trailer\n<< /Size 3 /Root 1 0 R >>\nstartxref\n110\n%%EOF");
-    }
+
 
     private static X509Certificate2 CreateRsaCert(string subject = "CN=PAdES Extractor Test, O=Tests")
     {

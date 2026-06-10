@@ -12,6 +12,7 @@ namespace SimpleSign.Brasil.Tests;
 /// and <c>ExtractCpfCnpj</c>. We build synthetic certificates carrying the specific
 /// extensions the validator looks for, without ever talking to a real ICP-Brasil CA.
 /// </summary>
+[Trait("Category", "Unit")]
 public sealed class IcpBrasilDetectionTests
 {
     private const string CertPoliciesOid = "2.5.29.32";

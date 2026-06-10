@@ -1,14 +1,15 @@
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
-using System.Text;
 using Shouldly;
 using SimpleSign.Core.Crypto;
 using SimpleSign.Core.Inspection;
 using SimpleSign.PAdES.Inspection;
 using SimpleSign.PAdES.Signing;
+using SimpleSign.TestHelpers;
 using Xunit;
 namespace SimpleSign.PAdES.Tests.Inspection;
 
+[Trait("Category", "Unit")]
 public sealed class PdfSignatureInspectorTests
 {
     private sealed class NonSeekableStream(Stream inner) : Stream()
@@ -46,7 +47,7 @@ public sealed class PdfSignatureInspectorTests
     [Fact(DisplayName = "InspectAsync with unsigned PDF returns no signatures")]
     public async Task InspectAsync_UnsignedPdf_NoSignatures()
     {
-        byte[] buffer = BuildMinimalPdf();
+        byte[] buffer = TestPdfFactory.CreateMinimalPdf();
         using MemoryStream stream = new MemoryStream(buffer);
         PdfInspectionResult pdfInspectionResult = await PdfSignatureInspector.InspectAsync(stream);
         pdfInspectionResult.HasSignatures.ShouldBeFalse("");
@@ -59,7 +60,7 @@ public sealed class PdfSignatureInspectorTests
     public async Task InspectAsync_RsaSignedPdf_ExtractsSignerInfo()
     {
         using X509Certificate2 cert = CreateRsaCert("CN=Inspector Test, O=Tests, C=BR");
-        byte[] pdfBytes = BuildMinimalPdf();
+        byte[] pdfBytes = TestPdfFactory.CreateMinimalPdf();
         using MemoryStream stream = new MemoryStream(await SimpleSigner.Document(pdfBytes).WithCertificate(cert).SignAsync());
         PdfInspectionResult pdfInspectionResult = await PdfSignatureInspector.InspectAsync(stream);
         pdfInspectionResult.HasSignatures.ShouldBeTrue("");
@@ -78,7 +79,7 @@ public sealed class PdfSignatureInspectorTests
     public async Task InspectAsync_EcdsaSignedPdf_ExtractsAlgorithm()
     {
         using X509Certificate2 cert = CreateEcdsaCert("CN=ECDSA Inspector, O=Tests");
-        byte[] pdfBytes = BuildMinimalPdf();
+        byte[] pdfBytes = TestPdfFactory.CreateMinimalPdf();
         using MemoryStream stream = new MemoryStream(await SimpleSigner.Document(pdfBytes).WithCertificate(cert).SignAsync());
         SignatureFieldInfo signatureFieldInfo = (await PdfSignatureInspector.InspectAsync(stream)).Signatures[0];
         signatureFieldInfo.Signer.ShouldNotBeNull();
@@ -91,7 +92,7 @@ public sealed class PdfSignatureInspectorTests
     public async Task InspectAsync_SignedPdf_ExtractsSigningTime()
     {
         using X509Certificate2 cert = CreateRsaCert();
-        byte[] pdfBytes = BuildMinimalPdf();
+        byte[] pdfBytes = TestPdfFactory.CreateMinimalPdf();
         using MemoryStream stream = new MemoryStream(await SimpleSigner.Document(pdfBytes).WithCertificate(cert).SignAsync());
         SignatureFieldInfo signatureFieldInfo = (await PdfSignatureInspector.InspectAsync(stream)).Signatures[0];
         // PAdES signatures do not include the CMS signingTime attribute (ETSI EN 319 122-1 §5.2 prohibits it).
@@ -105,7 +106,7 @@ public sealed class PdfSignatureInspectorTests
     public async Task InspectAsync_SignedPdf_ExtractsEmbeddedCertificates()
     {
         using X509Certificate2 cert = CreateRsaCert();
-        byte[] pdfBytes = BuildMinimalPdf();
+        byte[] pdfBytes = TestPdfFactory.CreateMinimalPdf();
         using MemoryStream stream = new MemoryStream(await SimpleSigner.Document(pdfBytes).WithCertificate(cert).SignAsync());
         SignatureFieldInfo sig = (await PdfSignatureInspector.InspectAsync(stream)).Signatures[0];
         sig.EmbeddedCertificates.ShouldNotBeEmpty("");
@@ -116,7 +117,7 @@ public sealed class PdfSignatureInspectorTests
     public async Task InspectAsync_SignedPdf_HasSigningCertificateV2()
     {
         using X509Certificate2 cert = CreateRsaCert();
-        byte[] pdfBytes = BuildMinimalPdf();
+        byte[] pdfBytes = TestPdfFactory.CreateMinimalPdf();
         using MemoryStream stream = new MemoryStream(await SimpleSigner.Document(pdfBytes).WithCertificate(cert).SignAsync());
         (await PdfSignatureInspector.InspectAsync(stream)).Signatures[0].HasSigningCertificateV2.ShouldBeTrue("");
     }
@@ -126,7 +127,7 @@ public sealed class PdfSignatureInspectorTests
     {
         using X509Certificate2 cert1 = CreateRsaCert("CN=Signer One, O=Tests");
         using X509Certificate2 cert2 = CreateRsaCert("CN=Signer Two, O=Tests");
-        byte[] pdfBytes = BuildMinimalPdf();
+        byte[] pdfBytes = TestPdfFactory.CreateMinimalPdf();
         using MemoryStream stream = new MemoryStream(await SimpleSigner.Document(await SimpleSigner.Document(pdfBytes).WithCertificate(cert1).SignAsync()).WithCertificate(cert2).SignAsync());
         PdfInspectionResult pdfInspectionResult = await PdfSignatureInspector.InspectAsync(stream);
         pdfInspectionResult.Signatures.Count().ShouldBeGreaterThanOrEqualTo(2, "");
@@ -138,7 +139,7 @@ public sealed class PdfSignatureInspectorTests
     public async Task InspectAsync_SignedPdf_ExtractsSubFilter()
     {
         using X509Certificate2 cert = CreateRsaCert();
-        byte[] pdfBytes = BuildMinimalPdf();
+        byte[] pdfBytes = TestPdfFactory.CreateMinimalPdf();
         using MemoryStream stream = new MemoryStream(await SimpleSigner.Document(pdfBytes).WithCertificate(cert).SignAsync());
         SignatureFieldInfo signatureFieldInfo = (await PdfSignatureInspector.InspectAsync(stream)).Signatures[0];
         signatureFieldInfo.SubFilter.ShouldNotBeNullOrEmpty("");
@@ -149,7 +150,7 @@ public sealed class PdfSignatureInspectorTests
     public async Task InspectAsync_SignedPdf_ExtractsByteRange()
     {
         using X509Certificate2 cert = CreateRsaCert();
-        byte[] pdfBytes = BuildMinimalPdf();
+        byte[] pdfBytes = TestPdfFactory.CreateMinimalPdf();
         using MemoryStream stream = new MemoryStream(await SimpleSigner.Document(pdfBytes).WithCertificate(cert).SignAsync());
         SignatureFieldInfo signatureFieldInfo = (await PdfSignatureInspector.InspectAsync(stream)).Signatures[0];
         signatureFieldInfo.ByteRange.ShouldNotBeNull("");
@@ -161,7 +162,7 @@ public sealed class PdfSignatureInspectorTests
     public async Task InspectAsync_SignedPdf_ContainsCmsRawData()
     {
         using X509Certificate2 cert = CreateRsaCert();
-        byte[] pdfBytes = BuildMinimalPdf();
+        byte[] pdfBytes = TestPdfFactory.CreateMinimalPdf();
         using MemoryStream stream = new MemoryStream(await SimpleSigner.Document(pdfBytes).WithCertificate(cert).SignAsync());
         SignatureFieldInfo signatureFieldInfo = (await PdfSignatureInspector.InspectAsync(stream)).Signatures[0];
         signatureFieldInfo.CmsRawData.Length.ShouldBeGreaterThan(0, "");
@@ -170,7 +171,7 @@ public sealed class PdfSignatureInspectorTests
     [Fact(DisplayName = "InspectAsync throws on non-seekable stream")]
     public async Task InspectAsync_NonSeekableStream_Throws()
     {
-        NonSeekableStream nonSeekable = new NonSeekableStream(new MemoryStream(BuildMinimalPdf()));
+        NonSeekableStream nonSeekable = new NonSeekableStream(new MemoryStream(TestPdfFactory.CreateMinimalPdf()));
         try
         {
             Func<Task<PdfInspectionResult>> action = () => PdfSignatureInspector.InspectAsync(nonSeekable);
@@ -187,7 +188,7 @@ public sealed class PdfSignatureInspectorTests
     public async Task InspectAsync_CertifiedPdf_DetectsDocMdpLocked()
     {
         using X509Certificate2 cert = CreateRsaCert();
-        byte[] pdfBytes = BuildMinimalPdf();
+        byte[] pdfBytes = TestPdfFactory.CreateMinimalPdf();
         using MemoryStream stream = new MemoryStream(await SimpleSigner.Document(pdfBytes).WithCertificate(cert).AsCertification(CertificationLevel.NoChanges)
             .SignAsync());
         var result = await PdfSignatureInspector.InspectAsync(stream);
@@ -199,7 +200,7 @@ public sealed class PdfSignatureInspectorTests
     public async Task InspectAsync_CertifiedPdf_DetectsPermissionLevels()
     {
         using X509Certificate2 cert = CreateRsaCert();
-        byte[] pdfBytes = BuildMinimalPdf();
+        byte[] pdfBytes = TestPdfFactory.CreateMinimalPdf();
 
         // FormFilling (level 2) — locked
         using MemoryStream streamFf = new MemoryStream(await SimpleSigner.Document(pdfBytes).WithCertificate(cert).AsCertification(CertificationLevel.FormFilling)
@@ -220,7 +221,7 @@ public sealed class PdfSignatureInspectorTests
     public async Task InspectAsync_Sha256Digest_IsNotDeprecated()
     {
         using X509Certificate2 cert = CreateRsaCert();
-        byte[] pdfBytes = BuildMinimalPdf();
+        byte[] pdfBytes = TestPdfFactory.CreateMinimalPdf();
         using MemoryStream stream = new MemoryStream(await SimpleSigner.Document(pdfBytes).WithCertificate(cert).SignAsync());
         SignatureFieldInfo sig = (await PdfSignatureInspector.InspectAsync(stream)).Signatures[0];
         sig.DigestAlgorithm.Name.ShouldBe("SHA-256");
@@ -242,7 +243,7 @@ public sealed class PdfSignatureInspectorTests
         sig.IsSignatureAlgorithmDeprecated.ShouldBeTrue("RSA-SHA1 is deprecated per ISO 32000-2");
     }
 
-    private static byte[] BuildMinimalPdf() => Encoding.Latin1.GetBytes("%PDF-1.7\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n2 0 obj\n<< /Type /Pages /Kids [] /Count 0 >>\nendobj\nxref\n0 3\n0000000000 65535 f \n0000000009 00000 n \n0000000058 00000 n \ntrailer\n<< /Size 3 /Root 1 0 R >>\nstartxref\n110\n%%EOF");
+
 
     private static X509Certificate2 CreateRsaCert(string subject = "CN=Test Signer, O=Tests, C=BR")
     {

@@ -1,9 +1,11 @@
 using System.Net;
+using System.Net.Http.Headers;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using Shouldly;
 using SimpleSign.Core.Crypto;
 using SimpleSign.Core.Signing;
+using SimpleSign.TestHelpers;
 using Xunit;
 
 namespace SimpleSign.Core.Tests.Crypto;
@@ -12,6 +14,7 @@ namespace SimpleSign.Core.Tests.Crypto;
 /// Unit tests for TimestampClient.
 /// HttpClient is mocked — no real network calls.
 /// </summary>
+[Trait("Category", "Unit")]
 public sealed class TimestampClientTests
 {
     // ── Helpers ────────────────────────────────────────────────────────────────
@@ -53,9 +56,15 @@ public sealed class TimestampClientTests
 
     private static HttpClient BuildMockHttpClient(byte[] responseBytes, HttpStatusCode statusCode = HttpStatusCode.OK)
     {
-        var handler = new MockHttpMessageHandler(responseBytes, statusCode,
-            "application/timestamp-reply");
-        return new HttpClient(handler);
+        return new HttpClient(new MockHttpHandler(async _ =>
+        {
+            var response = new HttpResponseMessage(statusCode)
+            {
+                Content = new ByteArrayContent(responseBytes)
+            };
+            response.Content.Headers.ContentType = new MediaTypeHeaderValue("application/timestamp-reply");
+            return response;
+        }));
     }
 
     // ── Tests ─────────────────────────────────────────────────────────────────
@@ -147,9 +156,15 @@ public sealed class TimestampClientTests
     [Fact(DisplayName = "Wrong Content-Type throws TimestampException")]
     public async Task GetTimestampAsync_WrongContentType_ThrowsInvalidDataException()
     {
-        var handler = new MockHttpMessageHandler(
-            [0x01], HttpStatusCode.OK, "text/html");
-        var httpClient = new HttpClient(handler);
+        var httpClient = new HttpClient(new MockHttpHandler(async _ =>
+        {
+            var response = new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new ByteArrayContent([0x01])
+            };
+            response.Content.Headers.ContentType = new MediaTypeHeaderValue("text/html");
+            return response;
+        }));
         var client = new TimestampClient(httpClient, "http://tsa.example.com");
 
         await Assert.ThrowsAsync<TimestampException>(
@@ -192,20 +207,4 @@ public sealed class TimestampClientTests
     }
 }
 
-/// <summary>Fake HttpMessageHandler for tests without network.</summary>
-internal sealed class MockHttpMessageHandler(
-    byte[] responseBytes,
-    HttpStatusCode statusCode,
-    string contentType) : HttpMessageHandler
-{
-    protected override Task<HttpResponseMessage> SendAsync(
-        HttpRequestMessage request, CancellationToken cancellationToken)
-    {
-        var response = new HttpResponseMessage(statusCode)
-        {
-            Content = new ByteArrayContent(responseBytes)
-        };
-        response.Content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(contentType);
-        return Task.FromResult(response);
-    }
-}
+

@@ -7,6 +7,7 @@ namespace SimpleSign.PAdES.Tests.Signing;
 /// <summary>
 /// Edge-case tests for <see cref="SignatureAppearance"/> and <see cref="SignatureAppearanceRenderer"/>.
 /// </summary>
+[Trait("Category", "Unit")]
 public sealed class AppearanceEdgeCaseTests
 {
     private static readonly DateTime SampleTime = new(2025, 6, 15, 14, 30, 0, DateTimeKind.Utc);

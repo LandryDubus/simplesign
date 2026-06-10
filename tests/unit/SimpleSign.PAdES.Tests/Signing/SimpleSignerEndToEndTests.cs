@@ -1,11 +1,11 @@
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
-using System.Text;
 using Shouldly;
 using SimpleSign.Core.Crypto;
 using SimpleSign.Core.Validation;
 using SimpleSign.PAdES.Validation;
 using SimpleSign.Pdf;
+using SimpleSign.TestHelpers;
 using Xunit;
 namespace SimpleSign.PAdES.Tests.Core;
 
@@ -13,10 +13,9 @@ namespace SimpleSign.PAdES.Tests.Core;
 /// End-to-end tests: sign → validate → detect tampering.
 /// No network or external certificates required — uses RSA/ECDSA certs generated in memory.
 /// </summary>
+[Trait("Category", "Unit")]
 public sealed class SimpleSignerEndToEndTests
 {
-    private static byte[] BuildMinimalPdf() => Encoding.Latin1.GetBytes("%PDF-1.7\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n2 0 obj\n<< /Type /Pages /Kids [] /Count 0 >>\nendobj\nxref\n0 3\n0000000000 65535 f \n0000000009 00000 n \n0000000058 00000 n \ntrailer\n<< /Size 3 /Root 1 0 R >>\nstartxref\n110\n%%EOF");
-
     private static X509Certificate2 CreateRsaCert(string subject = "CN=Test Signer, O=Tests, C=BR")
     {
         using RSA key = RSA.Create(2048);
@@ -48,7 +47,7 @@ public sealed class SimpleSignerEndToEndTests
     public async Task SignAsync_RsaCert_ProducesValidIntegrityAndSignature()
     {
         using X509Certificate2 cert = CreateRsaCert();
-        byte[] pdfBytes = BuildMinimalPdf();
+        byte[] pdfBytes = TestPdfFactory.CreateMinimalPdf();
         using MemoryStream stream = new MemoryStream(await SimpleSigner.Document(pdfBytes).WithCertificate(cert).SignAsync());
         IReadOnlyList<SignatureValidationResult> readOnlyList = await ValidatorTrusting(cert).ValidateAsync(stream);
         readOnlyList.Count().ShouldBe(1, "");
@@ -60,7 +59,7 @@ public sealed class SimpleSignerEndToEndTests
     public async Task SignAsync_EcdsaCert_ProducesValidSignature()
     {
         using X509Certificate2 cert = CreateEcdsaCert();
-        byte[] pdfBytes = BuildMinimalPdf();
+        byte[] pdfBytes = TestPdfFactory.CreateMinimalPdf();
         using MemoryStream stream = new MemoryStream(await SimpleSigner.Document(pdfBytes).WithCertificate(cert).SignAsync());
         IReadOnlyList<SignatureValidationResult> readOnlyList = await ValidatorTrusting(cert).ValidateAsync(stream);
         readOnlyList.Count().ShouldBe(1, "");
@@ -72,7 +71,7 @@ public sealed class SimpleSignerEndToEndTests
     public async Task SignAsync_Sha512_ValidatesCorrectly()
     {
         using X509Certificate2 cert = CreateRsaCert();
-        byte[] pdfBytes = BuildMinimalPdf();
+        byte[] pdfBytes = TestPdfFactory.CreateMinimalPdf();
         using MemoryStream stream = new MemoryStream(await SimpleSigner.Document(pdfBytes).WithCertificate(cert).WithHashAlgorithm(HashAlgorithmName.SHA512)
             .SignAsync());
         IReadOnlyList<SignatureValidationResult> readOnlyList = await ValidatorTrusting(cert).ValidateAsync(stream);
@@ -85,7 +84,7 @@ public sealed class SimpleSignerEndToEndTests
     public async Task SignAsync_TamperByte_IntegrityFails()
     {
         using X509Certificate2 cert = CreateRsaCert();
-        byte[] array = (byte[])(await SimpleSigner.Document(BuildMinimalPdf()).WithCertificate(cert).SignAsync()).Clone();
+        byte[] array = (byte[])(await SimpleSigner.Document(TestPdfFactory.CreateMinimalPdf()).WithCertificate(cert).SignAsync()).Clone();
         array[50] ^= byte.MaxValue;
         using MemoryStream stream = new MemoryStream(array);
         IReadOnlyList<SignatureValidationResult> readOnlyList = await ValidatorTrusting(cert).ValidateAsync(stream);
@@ -97,7 +96,7 @@ public sealed class SimpleSignerEndToEndTests
     public async Task SignAsync_TamperAfterEnd_IntegrityFails()
     {
         using X509Certificate2 cert = CreateRsaCert();
-        byte[] array = (byte[])(await SimpleSigner.Document(BuildMinimalPdf()).WithCertificate(cert).SignAsync()).Clone();
+        byte[] array = (byte[])(await SimpleSigner.Document(TestPdfFactory.CreateMinimalPdf()).WithCertificate(cert).SignAsync()).Clone();
         array[^50] ^= 1;
         using MemoryStream stream = new MemoryStream(array);
         IReadOnlyList<SignatureValidationResult> readOnlyList = await ValidatorTrusting(cert).ValidateAsync(stream);
@@ -110,7 +109,7 @@ public sealed class SimpleSignerEndToEndTests
     {
         using X509Certificate2 cert1 = CreateRsaCert("CN=Signer One, C=BR");
         using X509Certificate2 cert2 = CreateRsaCert("CN=Signer Two, C=BR");
-        byte[] pdfBytes = BuildMinimalPdf();
+        byte[] pdfBytes = TestPdfFactory.CreateMinimalPdf();
         using MemoryStream stream = new MemoryStream(await SimpleSigner.Document(await SimpleSigner.Document(pdfBytes).WithCertificate(cert1).WithFieldName("Sig1")
             .SignAsync()).WithCertificate(cert2).WithFieldName("Sig2")
             .SignAsync());
@@ -131,7 +130,7 @@ public sealed class SimpleSignerEndToEndTests
     {
         using X509Certificate2 cert1 = CreateRsaCert("CN=Signer One, C=BR");
         using X509Certificate2 cert2 = CreateRsaCert("CN=Signer Two, C=BR");
-        using MemoryStream stream = new MemoryStream(await SimpleSigner.Document(await SimpleSigner.Document(BuildMinimalPdf()).WithCertificate(cert1).WithFieldName("SigA")
+        using MemoryStream stream = new MemoryStream(await SimpleSigner.Document(await SimpleSigner.Document(TestPdfFactory.CreateMinimalPdf()).WithCertificate(cert1).WithFieldName("SigA")
             .SignAsync()).WithCertificate(cert2).WithFieldName("SigB")
             .SignAsync());
         _ = new PdfStructureReader();
@@ -146,7 +145,7 @@ public sealed class SimpleSignerEndToEndTests
     {
         using X509Certificate2 cert1 = CreateRsaCert("CN=First, C=BR");
         using X509Certificate2 cert2 = CreateRsaCert("CN=Second, C=BR");
-        byte[] pdfBytes = [.. (await SimpleSigner.Document(BuildMinimalPdf()).WithCertificate(cert1).SignAsync()), .. new byte[10]];
+        byte[] pdfBytes = [.. (await SimpleSigner.Document(TestPdfFactory.CreateMinimalPdf()).WithCertificate(cert1).SignAsync()), .. new byte[10]];
         using MemoryStream stream = new MemoryStream(await SimpleSigner.Document(pdfBytes).WithCertificate(cert2).SignAsync());
         IReadOnlyList<SignatureValidationResult> actualValue = await ValidatorTrusting(cert1, cert2).ValidateAsync(stream);
         actualValue.Count().ShouldBe(2, "");

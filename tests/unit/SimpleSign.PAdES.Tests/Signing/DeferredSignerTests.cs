@@ -1,11 +1,11 @@
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
-using System.Text;
 using Shouldly;
 using SimpleSign.Core.Crypto;
 using SimpleSign.Core.Validation;
 using SimpleSign.PAdES.Signing;
 using SimpleSign.PAdES.Validation;
+using SimpleSign.TestHelpers;
 using Xunit;
 namespace SimpleSign.PAdES.Tests.Signing;
 
@@ -13,9 +13,10 @@ namespace SimpleSign.PAdES.Tests.Signing;
 /// Tests for the two-phase deferred signing API (<see cref="DeferredSigner" />).
 /// Simulates the web scenario: server prepares → external signer signs → server completes.
 /// </summary>
+[Trait("Category", "Unit")]
 public sealed class DeferredSignerTests
 {
-    private static byte[] BuildMinimalPdf() => Encoding.Latin1.GetBytes("%PDF-1.7\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n2 0 obj\n<< /Type /Pages /Kids [] /Count 0 >>\nendobj\nxref\n0 3\n0000000000 65535 f \n0000000009 00000 n \n0000000058 00000 n \ntrailer\n<< /Size 3 /Root 1 0 R >>\nstartxref\n110\n%%EOF");
+
 
     private static X509Certificate2 CreateRsaCertWithPrivateKey()
     {
@@ -51,7 +52,7 @@ public sealed class DeferredSignerTests
     {
         using X509Certificate2 fullCert = CreateRsaCertWithPrivateKey();
         using X509Certificate2 publicCert = GetPublicCertOnly(fullCert);
-        byte[] pdf = BuildMinimalPdf();
+        byte[] pdf = TestPdfFactory.CreateMinimalPdf();
         DeferredSigningPrepareResult deferredSigningPrepareResult = await DeferredSigner.PrepareAsync(pdf, publicCert);
         deferredSigningPrepareResult.HashToSign.ShouldNotBeEmpty("should contain DER-encoded signed attributes");
         deferredSigningPrepareResult.SessionData.ShouldNotBeEmpty("should contain serialized session");
@@ -73,7 +74,7 @@ public sealed class DeferredSignerTests
     {
         using X509Certificate2 fullCert = CreateEcdsaCertWithPrivateKey();
         using X509Certificate2 publicCert = GetPublicCertOnly(fullCert);
-        byte[] pdfBytes = BuildMinimalPdf();
+        byte[] pdfBytes = TestPdfFactory.CreateMinimalPdf();
         DeferredSigningPrepareResult deferredSigningPrepareResult = await DeferredSigner.PrepareAsync(pdfBytes, publicCert);
         using ECDsa? ecdsa = fullCert.GetECDsaPrivateKey();
         byte[] rawSignature = ecdsa!.SignData(deferredSigningPrepareResult.HashToSign, HashAlgorithmName.SHA256, DSASignatureFormat.Rfc3279DerSequence);
@@ -88,7 +89,7 @@ public sealed class DeferredSignerTests
     {
         using X509Certificate2 fullCert = CreateRsaCertWithPrivateKey();
         using X509Certificate2 publicCert = GetPublicCertOnly(fullCert);
-        byte[] pdfBytes = BuildMinimalPdf();
+        byte[] pdfBytes = TestPdfFactory.CreateMinimalPdf();
         DeferredSigningPrepareResult deferredSigningPrepareResult = await DeferredSigner.PrepareAsync(pdfBytes, publicCert);
         DeferredSigningSession deferredSigningSession = DeferredSigningSession.Deserialize(deferredSigningPrepareResult.SessionData);
         deferredSigningSession.SignedAttributes.ShouldBe(deferredSigningPrepareResult.HashToSign, "");
@@ -111,7 +112,7 @@ public sealed class DeferredSignerTests
     {
         using X509Certificate2 fullCert = CreateRsaCertWithPrivateKey();
         using X509Certificate2 publicCert = GetPublicCertOnly(fullCert);
-        byte[] pdfBytes = BuildMinimalPdf();
+        byte[] pdfBytes = TestPdfFactory.CreateMinimalPdf();
         DeferredSigningPrepareResult deferredSigningPrepareResult = await DeferredSigner.PrepareAsync(pdfBytes, publicCert);
         byte[] array = new byte[256];
         Random.Shared.NextBytes(array);
@@ -128,7 +129,7 @@ public sealed class DeferredSignerTests
     {
         using X509Certificate2 fullCert = CreateRsaCertWithPrivateKey();
         using X509Certificate2 publicCert = GetPublicCertOnly(fullCert);
-        byte[] pdfBytes = BuildMinimalPdf();
+        byte[] pdfBytes = TestPdfFactory.CreateMinimalPdf();
         DeferredSigningPrepareResult prepResult = await DeferredSigner.PrepareAsync(pdfBytes, publicCert);
         Func<Task<byte[]>> action = () => DeferredSigner.CompleteAsync(prepResult.SessionData, []);
         var ex = await Should.ThrowAsync<ArgumentException>(async () => await action());
@@ -145,7 +146,7 @@ public sealed class DeferredSignerTests
         X509Certificate2 expiredCert = CertificateLoader.LoadCertificate(x509Certificate.Export(X509ContentType.Cert));
         try
         {
-            byte[] pdf = BuildMinimalPdf();
+            byte[] pdf = TestPdfFactory.CreateMinimalPdf();
             Func<Task<DeferredSigningPrepareResult>> action = () => DeferredSigner.PrepareAsync(pdf, expiredCert);
             var ex = await Should.ThrowAsync<CertificateValidationException>(async () => await action());
             ex.Message.ShouldContain("expired");
@@ -181,7 +182,7 @@ public sealed class DeferredSignerTests
     [Fact(DisplayName = "Null certificate throws ArgumentNullException")]
     public async Task PrepareAsync_NullCert_ThrowsArgumentNullException()
     {
-        Func<Task<DeferredSigningPrepareResult>> action = () => DeferredSigner.PrepareAsync(BuildMinimalPdf(), null!);
+        Func<Task<DeferredSigningPrepareResult>> action = () => DeferredSigner.PrepareAsync(TestPdfFactory.CreateMinimalPdf(), null!);
         await Should.ThrowAsync<ArgumentNullException>(async () => await action());
     }
 
@@ -197,7 +198,7 @@ public sealed class DeferredSignerTests
     {
         using X509Certificate2 fullCert = CreateRsaCertWithPrivateKey();
         using X509Certificate2 publicCert = GetPublicCertOnly(fullCert);
-        byte[] pdfBytes = BuildMinimalPdf();
+        byte[] pdfBytes = TestPdfFactory.CreateMinimalPdf();
         DeferredSigningOptions options = new DeferredSigningOptions
         {
             FieldOptions = new SignatureFieldOptions
@@ -219,7 +220,7 @@ public sealed class DeferredSignerTests
     {
         using X509Certificate2 fullCert = CreateRsaCertWithPrivateKey();
         using X509Certificate2 publicCert = GetPublicCertOnly(fullCert);
-        byte[] pdfBytes = BuildMinimalPdf();
+        byte[] pdfBytes = TestPdfFactory.CreateMinimalPdf();
         DeferredSigningPrepareResult deferredSigningPrepareResult = await DeferredSigner.PrepareAsync(pdfBytes, publicCert);
         byte[] sessionData = deferredSigningPrepareResult.SessionData;
         byte[] hashToSign = deferredSigningPrepareResult.HashToSign;

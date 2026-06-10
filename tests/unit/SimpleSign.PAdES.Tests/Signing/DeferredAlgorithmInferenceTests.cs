@@ -15,15 +15,16 @@ namespace SimpleSign.PAdES.Tests.Signing;
 ///   - Explicit <see cref="DeferredSigningOptions.SignatureAlgorithmOid"/> is validated
 ///     against the cert's public key type.
 /// </summary>
+[Trait("Category", "Unit")]
 public sealed class DeferredAlgorithmInferenceTests
 {
-    private static byte[] BuildMinimalPdf() => "%PDF-1.7\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n2 0 obj\n<< /Type /Pages /Kids [] /Count 0 >>\nendobj\nxref\n0 3\n0000000000 65535 f \n0000000009 00000 n \n0000000058 00000 n \ntrailer\n<< /Size 3 /Root 1 0 R >>\nstartxref\n110\n%%EOF"u8.ToArray();
+
 
     [Fact(DisplayName = "PSS cert SHA-512 in PrepareAsync → DigestAlgorithm = SHA512")]
     public async Task PrepareAsync_PssCertSha512_ResolvesSha512()
     {
         using var cert = TestCertificateFactory.CreatePssSelfSignedCert(HashAlgorithmName.SHA512);
-        var result = await DeferredSigner.PrepareAsync(BuildMinimalPdf(), cert);
+        var result = await DeferredSigner.PrepareAsync(TestPdfFactory.CreateMinimalPdf(), cert);
 
         result.DigestAlgorithm.ShouldBe("SHA512");
     }
@@ -33,7 +34,7 @@ public sealed class DeferredAlgorithmInferenceTests
     {
         using var cert = TestCertificateFactory.CreateSelfSignedCert(
             "CN=Large RSA, O=Tests", keySize: 4096, hashAlgorithm: HashAlgorithmName.SHA256);
-        var result = await DeferredSigner.PrepareAsync(BuildMinimalPdf(), cert);
+        var result = await DeferredSigner.PrepareAsync(TestPdfFactory.CreateMinimalPdf(), cert);
 
         result.DigestAlgorithm.ShouldBe("SHA384");
     }
@@ -48,7 +49,7 @@ public sealed class DeferredAlgorithmInferenceTests
             HashAlgorithm = HashAlgorithmName.SHA256,
             HashAlgorithmExplicitlySet = true
         };
-        var result = await DeferredSigner.PrepareAsync(BuildMinimalPdf(), cert, options);
+        var result = await DeferredSigner.PrepareAsync(TestPdfFactory.CreateMinimalPdf(), cert, options);
 
         result.DigestAlgorithm.ShouldBe("SHA256");
     }
@@ -62,7 +63,7 @@ public sealed class DeferredAlgorithmInferenceTests
             HashAlgorithm = HashAlgorithmName.SHA256,
             HashAlgorithmExplicitlySet = true
         };
-        var result = await DeferredSigner.PrepareAsync(BuildMinimalPdf(), cert, options);
+        var result = await DeferredSigner.PrepareAsync(TestPdfFactory.CreateMinimalPdf(), cert, options);
 
         result.DigestAlgorithm.ShouldBe("SHA256");
     }
@@ -78,7 +79,7 @@ public sealed class DeferredAlgorithmInferenceTests
             SignatureAlgorithmOid = Oids.EcdsaSha256
         };
 
-        Func<Task> act = () => DeferredSigner.PrepareAsync(BuildMinimalPdf(), cert, options);
+        Func<Task> act = () => DeferredSigner.PrepareAsync(TestPdfFactory.CreateMinimalPdf(), cert, options);
         (await Should.ThrowAsync<ArgumentException>(act)).Message
             .ShouldContain("not compatible");
     }
@@ -87,7 +88,7 @@ public sealed class DeferredAlgorithmInferenceTests
     public async Task CompleteAsync_PssCertSha512_EndToEnd_UsesSha512()
     {
         using var cert = TestCertificateFactory.CreatePssSelfSignedCert(HashAlgorithmName.SHA512);
-        var prepareResult = await DeferredSigner.PrepareAsync(BuildMinimalPdf(), cert);
+        var prepareResult = await DeferredSigner.PrepareAsync(TestPdfFactory.CreateMinimalPdf(), cert);
 
         // Sign the signed attributes to produce a raw signature.
         // The test only verifies the CMS digest OID, not signature validation,

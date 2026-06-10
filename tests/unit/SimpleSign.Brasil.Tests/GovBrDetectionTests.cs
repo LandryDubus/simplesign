@@ -11,6 +11,7 @@ namespace SimpleSign.Brasil.Tests;
 /// <c>IsGovBrCertificate</c>, <c>DetectAssuranceLevel</c>, <c>ExtractCpfFromSan</c>,
 /// and bundled-cert loaders.
 /// </summary>
+[Trait("Category", "Unit")]
 public sealed class GovBrDetectionTests
 {
     private const string SubjectAltNameOid = "2.5.29.17";

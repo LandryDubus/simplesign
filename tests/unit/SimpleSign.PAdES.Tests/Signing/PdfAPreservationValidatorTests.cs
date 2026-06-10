@@ -5,6 +5,7 @@ using Xunit;
 
 namespace SimpleSign.PAdES.Tests.Signing;
 
+[Trait("Category", "Unit")]
 public sealed class PdfAPreservationValidatorTests
 {
     [Fact]

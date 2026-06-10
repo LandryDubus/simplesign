@@ -6,6 +6,7 @@ using Xunit;
 
 namespace SimpleSign.PAdES.Tests.Inspection;
 
+[Trait("Category", "Unit")]
 public sealed class ConformanceDetectorTests
 {
     [Fact(DisplayName = "Detect returns CmsOnly when no signingCertificateV2")]

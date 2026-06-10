@@ -6,6 +6,7 @@ using SimpleSign.TestHelpers;
 using Xunit;
 namespace SimpleSign.PAdES.Tests.Validation;
 
+[Trait("Category", "Unit")]
 public sealed class BulkValidatorTests
 {
     private static byte[] CreateMinimalPdf()

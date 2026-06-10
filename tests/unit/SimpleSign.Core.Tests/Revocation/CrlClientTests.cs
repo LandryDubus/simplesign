@@ -9,6 +9,7 @@ using Xunit;
 
 namespace SimpleSign.Core.Tests.Revocation;
 
+[Trait("Category", "Unit")]
 public sealed class CrlClientTests
 {
     // ── CRL builder helpers ──────────────────────────────────────────────────

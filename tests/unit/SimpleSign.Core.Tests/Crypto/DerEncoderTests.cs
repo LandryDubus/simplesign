@@ -5,6 +5,7 @@ using Xunit;
 
 namespace SimpleSign.Core.Tests.Crypto;
 
+[Trait("Category", "Unit")]
 public sealed class DerEncoderTests
 {
     [Fact(DisplayName = "Simple OID produces valid and decodable DER")]

@@ -21,6 +21,7 @@ namespace SimpleSign.PAdES.Tests.Validation;
 /// so that <see cref="SignatureValidationResult.IsCertificateChainValid"/> is also
 /// verifiable without depending on system root stores or the network.
 /// </summary>
+[Trait("Category", "Unit")]
 public sealed class RoundTripValidationTests
 {
     // ── Algorithm matrix ──────────────────────────────────────────────────────────────────

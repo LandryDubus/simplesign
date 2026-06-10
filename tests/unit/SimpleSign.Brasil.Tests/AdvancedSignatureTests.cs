@@ -15,6 +15,7 @@ namespace SimpleSign.Brasil.Tests;
 /// Tests for AEA (Assinatura Eletrônica Avançada) — Law 14.063/2020.
 /// Covers: model validation, CPF masking, CMS attributes, and round-trip signing.
 /// </summary>
+[Trait("Category", "Unit")]
 public sealed class AdvancedSignatureTests
 {
     private static byte[] CreateMinimalPdf() =>

@@ -11,6 +11,7 @@ namespace SimpleSign.Core.Tests.Inspection;
 /// verifies that the extractor pulls the structured fields (genTime, policy,
 /// serial, hash alg) correctly.
 /// </summary>
+[Trait("Category", "Unit")]
 public sealed class TimestampDataExtractorRealFixtureTests
 {
     [Fact(DisplayName = "Extract returns non-null TimestampInfo for real freetsa.org response")]

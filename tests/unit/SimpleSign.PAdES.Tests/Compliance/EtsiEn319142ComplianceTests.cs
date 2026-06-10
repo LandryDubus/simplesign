@@ -18,6 +18,7 @@ namespace SimpleSign.PAdES.Tests.Compliance;
 /// ETSI EN 319 142-1 compliance tests for PAdES digital signatures.
 /// Each test maps to a specific section of the standard.
 /// </summary>
+[Trait("Category", "Unit")]
 public sealed class EtsiEn319142ComplianceTests
 {
     // ── OID constants ──────────────────────────────────────────────────────────

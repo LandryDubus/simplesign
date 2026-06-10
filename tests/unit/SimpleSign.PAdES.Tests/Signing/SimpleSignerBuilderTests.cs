@@ -8,6 +8,7 @@ namespace SimpleSign.PAdES.Tests.Core;
 /// Unit tests for the SimpleSigner fluent API.
 /// Focuses on builder behavior — end-to-end signing is tested in integration tests.
 /// </summary>
+[Trait("Category", "Unit")]
 public sealed class SimpleSignerBuilderTests
 {
     // ── Entry points ─────────────────────────────────────────────────────────

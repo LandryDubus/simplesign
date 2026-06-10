@@ -7,6 +7,7 @@ namespace SimpleSign.Brasil.Tests;
 /// Direct tests for the CPF/CNPJ check-digit algorithms in <see cref="IcpBrasilChainValidator"/>.
 /// These exercise pure logic without certificates, covering the high-CRAP-score validation methods.
 /// </summary>
+[Trait("Category", "Unit")]
 public sealed class BrasilCpfCnpjTests
 {
     // ── IsValidCpf ───────────────────────────────────────────────────────────

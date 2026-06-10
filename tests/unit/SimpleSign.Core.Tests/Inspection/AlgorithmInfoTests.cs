@@ -9,6 +9,7 @@ namespace SimpleSign.Core.Tests.Inspection;
 /// Tests for OID/URI -> friendly name mapping in <see cref="AlgorithmInfo"/>.
 /// Pure logic, no certificates or network involved.
 /// </summary>
+[Trait("Category", "Unit")]
 public sealed class AlgorithmInfoTests
 {
     // ── FromOid: covers MapOidToName ─────────────────────────────────────────

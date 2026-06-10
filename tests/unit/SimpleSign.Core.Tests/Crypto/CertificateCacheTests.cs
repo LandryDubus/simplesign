@@ -6,6 +6,7 @@ using Xunit;
 
 namespace SimpleSign.Core.Tests.Crypto;
 
+[Trait("Category", "Unit")]
 public sealed class CertificateCacheTests
 {
     private static X509Certificate2 CreateCert(string cn = "CN=Test")

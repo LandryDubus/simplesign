@@ -11,22 +11,12 @@ using Xunit;
 
 namespace SimpleSign.PAdES.Tests.Signing;
 
+[Trait("Category", "Unit")]
 public sealed class LtvEmbedderTests
 {
-    private sealed class MockHandler(HttpStatusCode status, byte[]? content = null) : HttpMessageHandler()
-    {
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
-        {
-            HttpResponseMessage httpResponseMessage = new HttpResponseMessage(status);
-            if (content != null)
-            {
-                httpResponseMessage.Content = new ByteArrayContent(content);
-            }
-            return Task.FromResult(httpResponseMessage);
-        }
-    }
 
-    private static byte[] BuildMinimalPdf() => Encoding.Latin1.GetBytes("%PDF-1.7\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n2 0 obj\n<< /Type /Pages /Kids [] /Count 0 >>\nendobj\nxref\n0 3\n0000000000 65535 f \n0000000009 00000 n \n0000000058 00000 n \ntrailer\n<< /Size 3 /Root 1 0 R >>\nstartxref\n110\n%%EOF");
+
+
 
     /// <summary>
     /// Creates a self-signed cert whose CRL Distribution Points extension
@@ -145,7 +135,7 @@ public sealed class LtvEmbedderTests
     public async Task EmbedLtvDataAsync_NullChain_ThrowsArgumentNullException()
     {
         LtvEmbedder embedder = new LtvEmbedder();
-        await Assert.ThrowsAsync<ArgumentNullException>(() => embedder.EmbedLtvDataAsync(BuildMinimalPdf(), null!));
+        await Assert.ThrowsAsync<ArgumentNullException>(() => embedder.EmbedLtvDataAsync(TestPdfFactory.CreateMinimalPdf(), null!));
     }
 
     [Fact(DisplayName = "Empty PDF does not throw exception")]
@@ -176,7 +166,7 @@ public sealed class LtvEmbedderTests
     {
         LtvEmbedder ltvEmbedder = new LtvEmbedder();
         using X509Certificate2 cert = TestCertificateFactory.CreateSelfSignedCert();
-        byte[] pdf = BuildMinimalPdf();
+        byte[] pdf = TestPdfFactory.CreateMinimalPdf();
         // v0.3.3: even when no LTV data is embedded, EnsureTrailingEol adds a trailing
         // \n if the source PDF is bare-%%EOF (no EOL after %%EOF).
         byte[] result = await ltvEmbedder.EmbedLtvDataAsync(pdf, [cert]);
@@ -190,10 +180,10 @@ public sealed class LtvEmbedderTests
     {
         byte[] array = new byte[256];
         Random.Shared.NextBytes(array);
-        using HttpClient httpClient = new HttpClient(new MockHandler(HttpStatusCode.OK, array));
+        using HttpClient httpClient = MockHttpHandler.ForGetBytes(array, HttpStatusCode.OK);
         LtvEmbedder ltvEmbedder = new LtvEmbedder(httpClient);
         using X509Certificate2 cert = CreateCertWithCrlUrl();
-        byte[] pdf = BuildMinimalPdf();
+        byte[] pdf = TestPdfFactory.CreateMinimalPdf();
         (await ltvEmbedder.EmbedLtvDataAsync(pdf, [cert])).Length.ShouldBeGreaterThan(pdf.Length, "DSS dictionary with CRL data should be appended");
     }
 
@@ -201,10 +191,10 @@ public sealed class LtvEmbedderTests
     public async Task EmbedLtvDataAsync_WithCrlData_OutputContainsDssMarker()
     {
         byte[] content = [48, 130, 1, 0];
-        using HttpClient httpClient = new HttpClient(new MockHandler(HttpStatusCode.OK, content));
+        using HttpClient httpClient = MockHttpHandler.ForGetBytes(content, HttpStatusCode.OK);
         LtvEmbedder ltvEmbedder = new LtvEmbedder(httpClient);
         using X509Certificate2 cert = CreateCertWithCrlUrl();
-        byte[] signedPdf = BuildMinimalPdf();
+        byte[] signedPdf = TestPdfFactory.CreateMinimalPdf();
         byte[] bytes = await ltvEmbedder.EmbedLtvDataAsync(signedPdf, [cert]);
         string actualValue = Encoding.Latin1.GetString(bytes);
         actualValue.ShouldContain("/Type /DSS");
@@ -218,10 +208,10 @@ public sealed class LtvEmbedderTests
         // returned by the embedder must end with an EOL marker after "endobj" so the
         // XRef stream written immediately after is LF-preceded.
         byte[] content = [48, 130, 1, 0];
-        using HttpClient httpClient = new HttpClient(new MockHandler(HttpStatusCode.OK, content));
+        using HttpClient httpClient = MockHttpHandler.ForGetBytes(content, HttpStatusCode.OK);
         LtvEmbedder ltvEmbedder = new LtvEmbedder(httpClient);
         using X509Certificate2 cert = CreateCertWithCrlUrl();
-        byte[] signedPdf = BuildMinimalPdf();
+        byte[] signedPdf = TestPdfFactory.CreateMinimalPdf();
         byte[] bytes = await ltvEmbedder.EmbedLtvDataAsync(signedPdf, [cert]);
         string text = Encoding.Latin1.GetString(bytes);
 
@@ -250,20 +240,20 @@ public sealed class LtvEmbedderTests
     public async Task EmbedLtvDataAsync_WithCrlData_OutputStartsWithOriginalPdf()
     {
         byte[] content = [48, 130, 1, 0];
-        using HttpClient httpClient = new HttpClient(new MockHandler(HttpStatusCode.OK, content));
+        using HttpClient httpClient = MockHttpHandler.ForGetBytes(content, HttpStatusCode.OK);
         LtvEmbedder ltvEmbedder = new LtvEmbedder(httpClient);
         using X509Certificate2 cert = CreateCertWithCrlUrl();
-        byte[] pdf = BuildMinimalPdf();
+        byte[] pdf = TestPdfFactory.CreateMinimalPdf();
         (await ltvEmbedder.EmbedLtvDataAsync(pdf, [cert])).AsSpan(0, pdf.Length).ToArray().ShouldBe(pdf);
     }
 
     [Fact(DisplayName = "CRL download failure returns unchanged PDF")]
     public async Task EmbedLtvDataAsync_CrlDownloadFails_ReturnsSamePdf()
     {
-        using HttpClient httpClient = new HttpClient(new MockHandler(HttpStatusCode.InternalServerError));
+        using HttpClient httpClient = new HttpClient(new MockHttpHandler(_ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.InternalServerError))));
         LtvEmbedder ltvEmbedder = new LtvEmbedder(httpClient);
         using X509Certificate2 cert = CreateCertWithCrlUrl();
-        byte[] pdf = BuildMinimalPdf();
+        byte[] pdf = TestPdfFactory.CreateMinimalPdf();
         // v0.3.3: failed CRL/OCSP download → no DSS to embed → EnsureTrailingEol
         // adds a trailing \n if the source is bare-%%EOF.
         byte[] result = await ltvEmbedder.EmbedLtvDataAsync(pdf, [cert]);
@@ -276,7 +266,7 @@ public sealed class LtvEmbedderTests
     public async Task EmbedLtvDataAsync_EmptyChain_ReturnsSamePdf()
     {
         LtvEmbedder ltvEmbedder = new LtvEmbedder();
-        byte[] pdf = BuildMinimalPdf();
+        byte[] pdf = TestPdfFactory.CreateMinimalPdf();
         // v0.3.3: empty chain → no DSS to embed → EnsureTrailingEol adds a trailing
         // \n if the source is bare-%%EOF.
         byte[] result = await ltvEmbedder.EmbedLtvDataAsync(pdf, []);
@@ -317,7 +307,7 @@ public sealed class LtvEmbedderTests
 
         // Embed LTV with a CRL server that returns valid-looking data
         byte[] fakeCrl = BuildFakeCrl();
-        using var httpClient = new HttpClient(new MockHandler(HttpStatusCode.OK, fakeCrl));
+        using var httpClient = MockHttpHandler.ForGetBytes(fakeCrl, HttpStatusCode.OK);
         var embedder = new LtvEmbedder(httpClient);
         byte[] ltvPdf = await embedder.EmbedLtvDataAsync(signedPdf, [cert]);
 

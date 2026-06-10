@@ -10,6 +10,7 @@ using Xunit;
 
 namespace SimpleSign.PAdES.Tests.DependencyInjection;
 
+[Trait("Category", "Unit")]
 public sealed class SimpleSignServiceCollectionExtensionsTests
 {
     [Fact(DisplayName = "AddSimpleSign registers all core services")]

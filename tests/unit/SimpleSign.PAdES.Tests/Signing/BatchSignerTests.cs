@@ -8,6 +8,7 @@ using Xunit;
 
 namespace SimpleSign.PAdES.Tests.Signing;
 
+[Trait("Category", "Unit")]
 public sealed class BatchSignerTests
 {
     private static byte[] CreateMinimalPdf()

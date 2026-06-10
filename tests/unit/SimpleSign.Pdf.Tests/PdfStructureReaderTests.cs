@@ -9,6 +9,7 @@ namespace SimpleSign.Pdf.Tests;
 /// Unit tests for PdfStructureReader.
 /// We use synthetic PDFs built as byte arrays — no external dependencies.
 /// </summary>
+[Trait("Category", "Unit")]
 public sealed class PdfStructureReaderTests
 {
     // ── Synthetic PDF fixtures ─────────────────────────────────────────────────

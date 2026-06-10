@@ -21,6 +21,7 @@ namespace SimpleSign.Core.Tests.Validation;
 /// <para>token.messageImprint.hashedMessage = sha256(sha256("SimpleSign fixture record"))</para>
 /// <para>To pass <c>ValidateHashMatch</c> we set <c>Signature = sha256("SimpleSign fixture record")</c>.</para>
 /// </remarks>
+[Trait("Category", "Unit")]
 public sealed class TimestampValidatorRealFixtureTests
 {
     private static byte[] TimestampedSignaturePreImage =>

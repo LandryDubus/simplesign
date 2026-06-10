@@ -16,6 +16,7 @@ namespace SimpleSign.PAdES.Tests.Validation;
 /// Unit tests for PdfSignatureValidator and the internal CMS parser.
 /// Uses self-signed certificates and CMSs generated in memory.
 /// </summary>
+[Trait("Category", "Unit")]
 public sealed class PdfSignatureValidatorTests
 {
     private static X509Certificate2 CreateRsaCertWithKey(string subject = "CN=Validator Test")

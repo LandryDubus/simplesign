@@ -6,6 +6,7 @@ namespace SimpleSign.Pdf.Tests;
 /// <summary>
 /// Unit tests for PdfStructureReader.DetectPdfVersion.
 /// </summary>
+[Trait("Category", "Unit")]
 public sealed class PdfVersionDetectionTests
 {
     [Theory]

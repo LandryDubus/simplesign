@@ -9,6 +9,7 @@ namespace SimpleSign.Core.Tests.Inspection;
 /// Building a valid RFC 3161 token in unit tests is impractical; these tests
 /// cover the error/empty paths so the catch-all returns <c>null</c> as designed.
 /// </summary>
+[Trait("Category", "Unit")]
 public sealed class TimestampDataExtractorTests
 {
     [Fact(DisplayName = "Extract returns null for empty bytes")]

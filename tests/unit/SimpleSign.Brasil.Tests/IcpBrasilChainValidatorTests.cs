@@ -4,6 +4,7 @@ using System.Security.Cryptography.X509Certificates;
 using Shouldly;
 using SimpleSign.Brasil.IcpBrasil;
 using SimpleSign.Core.Crypto;
+using SimpleSign.TestHelpers;
 
 namespace SimpleSign.Brasil.Tests;
 
@@ -11,6 +12,7 @@ namespace SimpleSign.Brasil.Tests;
 /// Unit tests for IcpBrasilChainValidator and LtvEmbedder.
 /// No network calls — uses synthetic certificates.
 /// </summary>
+[Trait("Category", "Unit")]
 public sealed class IcpBrasilChainValidatorTests
 {
     private static X509Certificate2 CreateCertWithPolicy(string policyOid, string subject = "CN=Test ICP")
@@ -137,8 +139,7 @@ public sealed class IcpBrasilChainValidatorTests
     [Fact(DisplayName = "Cert without ICP policy returns warning")]
     public async Task ValidateAsync_CertWithoutIcpPolicy_ReturnsWarning()
     {
-        FakeHttpHandler handler = new FakeHttpHandler(HttpStatusCode.NotFound);
-        using HttpClient httpClient = new HttpClient(handler);
+        using HttpClient httpClient = new HttpClient(new MockHttpHandler(_ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound))));
         IcpBrasilChainValidator icpBrasilChainValidator = new IcpBrasilChainValidator(httpClient);
         using RSA rsa = RSA.Create(2048);
         CertificateRequest certificateRequest = new CertificateRequest("CN=NoPolicy", rsa, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
@@ -165,8 +166,7 @@ public sealed class IcpBrasilChainValidatorTests
     [Fact(DisplayName = "Small RSA key produces size warning")]
     public async Task ValidateAsync_SmallRsaKey_ReturnsKeySizeWarning()
     {
-        FakeHttpHandler handler = new FakeHttpHandler(HttpStatusCode.NotFound);
-        using HttpClient httpClient = new HttpClient(handler);
+        using HttpClient httpClient = new HttpClient(new MockHttpHandler(_ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound))));
         IcpBrasilChainValidator icpBrasilChainValidator = new IcpBrasilChainValidator(httpClient);
         using RSA rsa = RSA.Create(1024);
         CertificateRequest certificateRequest = new CertificateRequest("CN=SmallKey", rsa, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);

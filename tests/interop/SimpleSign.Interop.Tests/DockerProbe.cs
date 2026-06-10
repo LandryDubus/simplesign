@@ -14,21 +14,24 @@ internal static class DockerProbe
     {
         try
         {
-            using var p = Process.Start(new ProcessStartInfo(command, args)
+            using var p = new Process
             {
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-            });
-            if (p is null)
-            {
-                return false;
-            }
+                StartInfo = new ProcessStartInfo(command, args)
+                {
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    UseShellExecute = false,
+                },
+            };
+            p.Start();
 
-            // Drain stdout/stderr asynchronously to prevent buffer deadlock
-            p.StandardOutput.ReadToEnd();
-            p.StandardError.ReadToEnd();
-            return p.WaitForExit(timeoutMs) && p.ExitCode == 0;
+            // Drain stdout/stderr in parallel to prevent buffer deadlock
+            var stdoutTask = Task.Run(() => p.StandardOutput.ReadToEnd());
+            var stderrTask = Task.Run(() => p.StandardError.ReadToEnd());
+            bool exited = p.WaitForExit(timeoutMs);
+            Task.WaitAll(stdoutTask, stderrTask);
+
+            return exited && p.ExitCode == 0;
         }
         catch (Exception)
         {

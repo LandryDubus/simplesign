@@ -69,13 +69,18 @@ public sealed class LtvEmbedder
         var allCerts = new List<X509Certificate2>(certificateChain);
         var ocspClient = new OcspClient(_httpClient, _logger);
 
-        // Pre-merge TSA certificates if timestamp token provided
         if (timestampTokenBytes is { Length: > 0 })
         {
             var tsaCerts = TsaCertificateExtractor.ExtractCertificates(timestampTokenBytes);
+            var certThumbprints = new HashSet<string>(allCerts.Count, StringComparer.OrdinalIgnoreCase);
+            foreach (var c in allCerts)
+            {
+                certThumbprints.Add(c.Thumbprint);
+            }
+
             foreach (var tsaCert in tsaCerts)
             {
-                if (!allCerts.Any(c => c.Thumbprint.Equals(tsaCert.Thumbprint, StringComparison.OrdinalIgnoreCase)))
+                if (certThumbprints.Add(tsaCert.Thumbprint))
                 {
                     allCerts.Add(tsaCert);
                 }
@@ -376,13 +381,13 @@ public sealed class LtvEmbedder
         // Write certificate stream objects (deduplicated by thumbprint)
         var certThumbprintMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var certRefs = new List<string>();
+        var certRefSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var cert in certs)
         {
             string thumbprint = cert.Thumbprint;
             if (certThumbprintMap.TryGetValue(thumbprint, out var existingRef))
             {
-                // Already written — reuse existing object reference
-                if (!certRefs.Contains(existingRef))
+                if (certRefSet.Add(existingRef))
                 {
                     certRefs.Add(existingRef);
                 }
@@ -391,6 +396,7 @@ public sealed class LtvEmbedder
 
             int objNum = nextObjNum++;
             string objRef = $"{objNum} 0 R";
+            certRefSet.Add(objRef);
             certRefs.Add(objRef);
             certThumbprintMap[thumbprint] = objRef;
 
@@ -473,12 +479,16 @@ public sealed class LtvEmbedder
         var allOcspRefs = MergeRefs(existingDss.OcspObjRefs, ocspRefs);
         var allCertRefs = MergeRefs(existingDss.CertObjRefs, certRefs);
 
-        // Merge VRI entries: preserve prior entries + add new ones
-        var allVriEntries = new List<(string Hash, int ObjNum)>();
+        var allVriEntries = new List<(string Hash, int ObjNum)>(existingDss.VriEntries.Count + vriEntries.Count);
+        var newVriHashes = new HashSet<string>(vriEntries.Count, StringComparer.OrdinalIgnoreCase);
+        foreach (var (hash, _) in vriEntries)
+        {
+            newVriHashes.Add(hash);
+        }
+
         foreach (var (hash, objNum) in existingDss.VriEntries)
         {
-            // Keep prior VRI entries unless overwritten by a new entry with same hash
-            if (!vriEntries.Any(v => v.Hash.Equals(hash, StringComparison.OrdinalIgnoreCase)))
+            if (!newVriHashes.Contains(hash))
             {
                 allVriEntries.Add((hash, objNum));
             }
@@ -544,8 +554,8 @@ public sealed class LtvEmbedder
         }
         else
         {
-            string xrefTrailer = BuildDssXrefAndTrailer(xrefMap, trailerSize, catalogObjNum, prevXRef, trailerId, trailerInfo, xrefOffset);
-            result.Write(System.Text.Encoding.Latin1.GetBytes(xrefTrailer));
+            byte[] xrefTrailer = PdfSignatureWriter.BuildXrefTableAndTrailer(xrefMap, trailerSize, catalogObjNum, prevXRef, xrefOffset, trailerId, trailerInfo);
+            result.Write(xrefTrailer);
         }
 
         return result.ToArray();
@@ -627,57 +637,6 @@ public sealed class LtvEmbedder
         }
 
         return merged;
-    }
-
-    private static string BuildDssXrefAndTrailer(
-        SortedDictionary<int, long> xrefMap,
-        int trailerSize,
-        int catalogObjNum,
-        long prevXRef,
-        string? trailerId,
-        string? trailerInfo,
-        long xrefOffset)
-    {
-        var xref = new System.Text.StringBuilder();
-        xref.Append("xref\n");
-
-        var sortedKeys = xrefMap.Keys.ToList();
-        int idx = 0;
-        while (idx < sortedKeys.Count)
-        {
-            int groupStart = sortedKeys[idx];
-            int j = idx;
-            while (j + 1 < sortedKeys.Count && sortedKeys[j + 1] == sortedKeys[j] + 1)
-            {
-                j++;
-            }
-
-            int count = j - idx + 1;
-            xref.Append($"{groupStart} {count}\n");
-            for (int k = idx; k <= j; k++)
-            {
-                xref.Append($"{xrefMap[sortedKeys[k]]:D10} 00000 n\r\n");
-            }
-
-            idx = j + 1;
-        }
-
-        xref.Append("trailer\n");
-        xref.Append($"<< /Size {Math.Max(trailerSize, xrefMap.Keys.Max() + 1)}\n");
-        xref.Append($"   /Root {catalogObjNum} 0 R\n");
-        xref.Append($"   /Prev {prevXRef}\n");
-        if (trailerId != null)
-        {
-            xref.Append($"   {trailerId}\n");
-        }
-        if (trailerInfo != null)
-        {
-            xref.Append($"   {trailerInfo}\n");
-        }
-        xref.Append(">>\n");
-        xref.Append($"startxref\n{xrefOffset}\n%%EOF\n");
-
-        return xref.ToString();
     }
 
     private static int FindRootObjectNumber(byte[] pdf)

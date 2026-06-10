@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text;
+using SimpleSign.Pdf.Constants;
 
 namespace SimpleSign.Pdf;
 
@@ -113,14 +114,14 @@ internal static class PdfStructureParser
         }
 
         string catalogText = Encoding.Latin1.GetString(data.Slice(objStart, objEnd - objStart));
-        int acroFormKeyPos = catalogText.IndexOf("/AcroForm", StringComparison.Ordinal);
+        int acroFormKeyPos = catalogText.IndexOf(PdfKeys.AcroForm, StringComparison.Ordinal);
         if (acroFormKeyPos < 0)
         {
             return 0;
         }
 
         int cursor;
-        for (cursor = acroFormKeyPos + "/AcroForm".Length; cursor < catalogText.Length && (catalogText[cursor] == ' ' || catalogText[cursor] == '\n' || catalogText[cursor] == '\r'); cursor++)
+        for (cursor = acroFormKeyPos + PdfKeys.AcroForm.Length; cursor < catalogText.Length && (catalogText[cursor] == ' ' || catalogText[cursor] == '\n' || catalogText[cursor] == '\r'); cursor++)
         {
         }
 
@@ -156,14 +157,13 @@ internal static class PdfStructureParser
         }
 
         string catalogText = Encoding.Latin1.GetString(data.Slice(objStart, objEnd - objStart));
-        int acroFormKeyPos = catalogText.IndexOf("/AcroForm", StringComparison.Ordinal);
+        int acroFormKeyPos = catalogText.IndexOf(PdfKeys.AcroForm, StringComparison.Ordinal);
         if (acroFormKeyPos < 0)
         {
             return [];
         }
 
-        // Skip whitespace after /AcroForm
-        int cursor = acroFormKeyPos + "/AcroForm".Length;
+        int cursor = acroFormKeyPos + PdfKeys.AcroForm.Length;
         while (cursor < catalogText.Length && (catalogText[cursor] == ' ' || catalogText[cursor] == '\n' || catalogText[cursor] == '\r'))
         {
             cursor++;
@@ -320,7 +320,7 @@ internal static class PdfStructureParser
         }
 
         // Extract first /Kids entry
-        int kidsPos = pagesText.IndexOf("/Kids", StringComparison.Ordinal);
+        int kidsPos = pagesText.IndexOf(PdfKeys.Kids, StringComparison.Ordinal);
         if (kidsPos < 0)
         {
             return -1;
@@ -532,7 +532,7 @@ internal static class PdfStructureParser
             int windowEnd = Math.Min(data.Length, matchPos + 256);
             string window = Encoding.Latin1.GetString(data.Slice(windowStart, windowEnd - windowStart));
 
-            int rectIdx = window.IndexOf("/Rect", StringComparison.Ordinal);
+            int rectIdx = window.IndexOf(PdfKeys.Rect, StringComparison.Ordinal);
             if (rectIdx >= 0)
             {
                 int bracketOpen = window.IndexOf('[', rectIdx);
@@ -649,7 +649,7 @@ internal static class PdfStructureParser
     public static List<string> ParseFieldsArray(string objText)
     {
         List<string> references = new List<string>();
-        int fieldsKeyPos = objText.IndexOf("/Fields", StringComparison.Ordinal);
+        int fieldsKeyPos = objText.IndexOf(PdfKeys.Fields, StringComparison.Ordinal);
         if (fieldsKeyPos < 0)
         {
             return references;
@@ -690,13 +690,13 @@ internal static class PdfStructureParser
     /// </summary>
     public static List<string> ResolveIndirectFields(ReadOnlySpan<byte> data, string acroFormText)
     {
-        int fieldsKeyPos = acroFormText.IndexOf("/Fields", StringComparison.Ordinal);
+        int fieldsKeyPos = acroFormText.IndexOf(PdfKeys.Fields, StringComparison.Ordinal);
         if (fieldsKeyPos < 0)
         {
             return [];
         }
 
-        int cursor = fieldsKeyPos + "/Fields".Length;
+        int cursor = fieldsKeyPos + PdfKeys.Fields.Length;
         // Skip whitespace
         while (cursor < acroFormText.Length && (acroFormText[cursor] == ' ' || acroFormText[cursor] == '\n' || acroFormText[cursor] == '\r' || acroFormText[cursor] == '\t'))
         {
@@ -872,9 +872,8 @@ internal static class PdfStructureParser
 
         string objText = Encoding.Latin1.GetString(data.Slice(objStart, objEnd - objStart));
 
-        // Must have /FT /Sig
-        if (!objText.Contains("/FT /Sig", StringComparison.Ordinal) &&
-            !objText.Contains("/FT/Sig", StringComparison.Ordinal))
+        if (!objText.Contains(PdfKeys.FtSig, StringComparison.Ordinal) &&
+            !objText.Contains(PdfKeys.FtSigNoSpace, StringComparison.Ordinal))
         {
             warnings.Add($"Object {objNum}: missing /FT /Sig (not a signature field).");
         }
@@ -902,8 +901,8 @@ internal static class PdfStructureParser
                 else
                 {
                     string vObj = Encoding.Latin1.GetString(data.Slice(vStart, vEnd - vStart));
-                    if (!vObj.Contains("/Type /Sig", StringComparison.Ordinal) &&
-                        !vObj.Contains("/Type/Sig", StringComparison.Ordinal))
+                    if (!vObj.Contains(PdfKeys.TypeSig, StringComparison.Ordinal) &&
+                        !vObj.Contains(PdfKeys.TypeSigNoSpace, StringComparison.Ordinal))
                     {
                         warnings.Add($"Object {objNum}: /V references object {refObjNum} which is not a /Type /Sig dictionary.");
                     }
@@ -1303,7 +1302,7 @@ internal static class PdfStructureParser
         int pos = 0;
         while (pos < text.Length)
         {
-            int ftPos = text.IndexOf("/FT /Sig", pos, StringComparison.Ordinal);
+            int ftPos = text.IndexOf(PdfKeys.FtSig, pos, StringComparison.Ordinal);
             if (ftPos < 0)
             {
                 break;

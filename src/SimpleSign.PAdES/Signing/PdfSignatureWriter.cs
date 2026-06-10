@@ -4,6 +4,7 @@ using System.Text;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using SimpleSign.Pdf;
+using SimpleSign.Pdf.Constants;
 
 namespace SimpleSign.PAdES.Signing;
 
@@ -163,7 +164,8 @@ public sealed class PdfSignatureWriter
 
         // Step 5: Build all new PDF objects.
         string sigDictText = BuildSignatureDictionary(sigObjNum, options, contentsHexLength, sigNow);
-        string fieldDictText = BuildFieldAnnotation(fieldObjNum, sigObjNum, fieldName, options, hasAppearance, appObjNum, appX, appY, appWidth, appHeight, pageObjNum);
+        var fieldAnnParams = new FieldAnnotationParams(fieldName, fieldObjNum, sigObjNum, appObjNum, appX, appY, appWidth, appHeight, pageObjNum);
+        string fieldDictText = BuildFieldAnnotation(options, fieldAnnParams);
         byte[] sigDictBytes = Encoding.Latin1.GetBytes(sigDictText);
         byte[] fieldDictBytes = Encoding.Latin1.GetBytes(fieldDictText);
         byte[] acroFormBytes = BuildAcroFormDictionary(acroFormObjNum, inputMem.Span, existingAcroFormObjNum, fieldObjNum, catalogObjNum);
@@ -182,7 +184,7 @@ public sealed class PdfSignatureWriter
         long acroFormObjOffset = fieldObjOffset + fieldDictBytes.Length;
 
         await outputStream.WriteAsync(sigDictBytes, cancellationToken).ConfigureAwait(false);
-        (logger ?? NullLogger.Instance).PdfSigDictWritten(sigObjOffset, sigObjOffset + sigDictText.IndexOf("/ByteRange", StringComparison.Ordinal));
+        (logger ?? NullLogger.Instance).PdfSigDictWritten(sigObjOffset, sigObjOffset + sigDictText.IndexOf(PdfKeys.ByteRange, StringComparison.Ordinal));
         await outputStream.WriteAsync(fieldDictBytes, cancellationToken).ConfigureAwait(false);
         await outputStream.WriteAsync(acroFormBytes, cancellationToken).ConfigureAwait(false);
 
@@ -531,28 +533,29 @@ public sealed class PdfSignatureWriter
         return sigDict.ToString();
     }
 
-    private static string BuildFieldAnnotation(int fieldObjNum, int sigObjNum, string fieldName, SignatureFieldOptions options, bool hasAppearance, int appObjNum, float appX, float appY, float appWidth, float appHeight, int pageObjNum = 0)
+    private sealed record FieldAnnotationParams(string FieldName, int FieldObjNum, int SigObjNum, int AppObjNum, float X, float Y, float Width, float Height, int PageObjNum = 0);
+
+    private static string BuildFieldAnnotation(SignatureFieldOptions options, FieldAnnotationParams p)
     {
-        StringBuilder fieldDict = new StringBuilder();
-        fieldDict.Append($"{fieldObjNum} 0 obj\n");
+        string fieldName = p.FieldName;
+        bool hasAppearance = options.Appearance is not null;
+        var fieldDict = new StringBuilder();
+        fieldDict.Append($"{p.FieldObjNum} 0 obj\n");
         fieldDict.Append("<< /Type /Annot\n");
         fieldDict.Append("   /Subtype /Widget\n");
         fieldDict.Append("   /FT /Sig\n");
         fieldDict.Append($"   /T ({SignatureAppearanceRenderer.EscapePdfString(fieldName)})\n");
-        fieldDict.Append($"   /V {sigObjNum} 0 R\n");
-        if (pageObjNum > 0)
+        fieldDict.Append($"   /V {p.SigObjNum} 0 R\n");
+        if (p.PageObjNum > 0)
         {
-            fieldDict.Append($"   /P {pageObjNum} 0 R\n");
+            fieldDict.Append($"   /P {p.PageObjNum} 0 R\n");
         }
-        // /F 132 = Print (4) + Locked (128) — required for both visible and invisible
-        // signature widgets in PDF/A-2/3 (ISO 19005-3 §6.3.2 Test 2). Invisibility is
-        // conveyed by /Rect [0 0 0 0] + the absence of /AP, not by clearing the Print flag.
         fieldDict.Append("   /F 132\n");
         fieldDict.Append("   /Border [0 0 0]\n");
         if (hasAppearance)
         {
-            fieldDict.Append($"   /Rect [{F(appX)} {F(appY)} {F(appX + appWidth)} {F(appY + appHeight)}]\n");
-            fieldDict.Append($"   /AP << /N {appObjNum} 0 R >>\n");
+            fieldDict.Append($"   /Rect [{F(p.X)} {F(p.Y)} {F(p.X + p.Width)} {F(p.Y + p.Height)}]\n");
+            fieldDict.Append($"   /AP << /N {p.AppObjNum} 0 R >>\n");
         }
         else
         {
@@ -571,12 +574,10 @@ public sealed class PdfSignatureWriter
         if (objStart >= 0)
         {
             string catalogText = Encoding.Latin1.GetString(data.Slice(objStart, objEnd - objStart));
-            string updatedCatalog = PdfStructureParser.RemoveKeyFromDict(catalogText, "/AcroForm");
+            string updatedCatalog = PdfStructureParser.RemoveKeyFromDict(catalogText, PdfKeys.AcroForm);
             if (certLevel is not null)
             {
-                // ITI guide: do NOT add /Perms with /DocMDP to the catalog (Adobe compatibility issues).
-                // The /Reference array in the signature object is sufficient for DocMDP.
-                updatedCatalog = PdfStructureParser.RemoveKeyFromDict(updatedCatalog, "/Perms");
+                updatedCatalog = PdfStructureParser.RemoveKeyFromDict(updatedCatalog, PdfKeys.Perms);
             }
             string inserts = $"   /AcroForm {acroFormObjNum} 0 R\n";
             updatedCatalog = PdfStructureParser.InsertIntoDict(updatedCatalog, inserts);
@@ -596,11 +597,10 @@ public sealed class PdfSignatureWriter
             string catalogDict = compressedCatalogContent.Trim();
             // Wrap it as a proper object
             string fullObj = $"{catalogObjNum} 0 obj\n{catalogDict}\nendobj\n";
-            string updatedCatalog = PdfStructureParser.RemoveKeyFromDict(fullObj, "/AcroForm");
+            string updatedCatalog = PdfStructureParser.RemoveKeyFromDict(fullObj, PdfKeys.AcroForm);
             if (certLevel is not null)
             {
-                // ITI guide: do NOT add /Perms with /DocMDP to the catalog (Adobe compatibility issues).
-                updatedCatalog = PdfStructureParser.RemoveKeyFromDict(updatedCatalog, "/Perms");
+                updatedCatalog = PdfStructureParser.RemoveKeyFromDict(updatedCatalog, PdfKeys.Perms);
             }
             string inserts = $"   /AcroForm {acroFormObjNum} 0 R\n";
             updatedCatalog = PdfStructureParser.InsertIntoDict(updatedCatalog, inserts);
@@ -692,7 +692,7 @@ public sealed class PdfSignatureWriter
             string keyName = acroFormText[keyStart..nameEnd];
 
             // Skip keys we already handle explicitly
-            if (keyName is "/Fields" or "/SigFlags" or "/Type")
+            if (keyName is PdfKeys.Fields or PdfKeys.SigFlags or PdfKeys.Type)
             {
                 pos = nameEnd;
                 continue;
@@ -759,7 +759,7 @@ public sealed class PdfSignatureWriter
 
     // ── Private: Xref & ByteRange ────────────────────────────────────────────
 
-    private static byte[] BuildXrefTableAndTrailer(SortedDictionary<int, long> objectOffsets, int newTrailerSize, int catalogObjNum, long prevXRef, long xrefOffset, string? trailerId = null, string? trailerInfo = null)
+    internal static byte[] BuildXrefTableAndTrailer(SortedDictionary<int, long> objectOffsets, int newTrailerSize, int catalogObjNum, long prevXRef, long xrefOffset, string? trailerId = null, string? trailerInfo = null)
     {
         StringBuilder xref = new StringBuilder();
         xref.Append("xref\n");
@@ -987,10 +987,10 @@ public sealed class PdfSignatureWriter
         else
         {
             // Check for /Annots as indirect reference (e.g., "/Annots 45 0 R")
-            int annotsKeyPos = pageText.IndexOf("/Annots", StringComparison.Ordinal);
+            int annotsKeyPos = pageText.IndexOf(PdfKeys.Annots, StringComparison.Ordinal);
             if (annotsKeyPos >= 0)
             {
-                int cursor = annotsKeyPos + "/Annots".Length;
+                int cursor = annotsKeyPos + PdfKeys.Annots.Length;
                 while (cursor < pageText.Length && (pageText[cursor] == ' ' || pageText[cursor] == '\n' || pageText[cursor] == '\r'))
                 {
                     cursor++;

@@ -21,7 +21,7 @@ public interface IChainValidationProvider
     /// <summary>
     /// Validates the certificate chain and returns region-specific results.
     /// </summary>
-    ChainValidationResult Validate(X509Certificate2 certificate, IReadOnlyList<X509Certificate2>? chain = null);
+    Task<ChainValidationResult> ValidateAsync(X509Certificate2 certificate, IReadOnlyList<X509Certificate2>? chain = null);
 }
 
 /// <summary>

@@ -54,14 +54,14 @@ public sealed class TrustAnchorProviderContractTests
 [Trait("Category", "Contract")]
 public sealed class ChainValidationProviderContractTests
 {
-    [Fact(DisplayName = "IChainValidationProvider: CanValidate returns true for known cert, Validate returns IsTrusted")]
-    public void CanValidate_KnownCert_ReturnsTrue()
+    [Fact(DisplayName = "IChainValidationProvider: CanValidate returns true for known cert, ValidateAsync returns IsTrusted")]
+    public async Task CanValidate_KnownCert_ReturnsTrue()
     {
         using var cert = TestCertificateFactory.CreateSelfSignedCert();
         var mock = new Mock<IChainValidationProvider>();
         mock.Setup(x => x.RegionCode).Returns("BR");
         mock.Setup(x => x.CanValidate(cert)).Returns(true);
-        mock.Setup(x => x.Validate(cert, null)).Returns(new ChainValidationResult
+        mock.Setup(x => x.ValidateAsync(cert, null)).ReturnsAsync(new ChainValidationResult
         {
             IsTrusted = true,
             RegionCode = "BR",
@@ -71,7 +71,7 @@ public sealed class ChainValidationProviderContractTests
         var provider = mock.Object;
 
         provider.CanValidate(cert).ShouldBeTrue();
-        provider.Validate(cert, null).IsTrusted.ShouldBeTrue();
+        (await provider.ValidateAsync(cert, null)).IsTrusted.ShouldBeTrue();
     }
 
     [Fact(DisplayName = "IChainValidationProvider: CanValidate returns false for unknown cert")]
@@ -84,19 +84,19 @@ public sealed class ChainValidationProviderContractTests
         mock.Object.CanValidate(cert).ShouldBeFalse();
     }
 
-    [Fact(DisplayName = "IChainValidationProvider: Validate with null chain still works")]
-    public void Validate_NullChain_Succeeds()
+    [Fact(DisplayName = "IChainValidationProvider: ValidateAsync with null chain still works")]
+    public async Task Validate_NullChain_Succeeds()
     {
         using var cert = TestCertificateFactory.CreateSelfSignedCert();
         var mock = new Mock<IChainValidationProvider>();
-        mock.Setup(x => x.Validate(cert, null)).Returns(new ChainValidationResult
+        mock.Setup(x => x.ValidateAsync(cert, null)).ReturnsAsync(new ChainValidationResult
         {
             IsTrusted = false,
             RegionCode = "TS",
             Errors = new List<string> { "Unknown issuer" },
         });
 
-        var result = mock.Object.Validate(cert, null);
+        var result = await mock.Object.ValidateAsync(cert, null);
 
         result.ShouldNotBeNull();
         result.RegionCode.ShouldBe("TS");

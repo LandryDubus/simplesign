@@ -86,11 +86,9 @@ internal sealed class IcpBrasilChainValidationProvider : IChainValidationProvide
     public bool CanValidate(X509Certificate2 certificate) =>
         IcpBrasilChainValidator.IsIcpBrasilCertificate(certificate);
 
-    public ChainValidationResult Validate(X509Certificate2 certificate, IReadOnlyList<X509Certificate2>? chain = null)
+    public async Task<ChainValidationResult> ValidateAsync(X509Certificate2 certificate, IReadOnlyList<X509Certificate2>? chain = null)
     {
-        // The existing validator is async; we provide a sync wrapper for the interface.
-        // In production, callers should use the async API directly via the validator.
-        var result = _validator.ValidateAsync(certificate, chain).GetAwaiter().GetResult();
+        var result = await _validator.ValidateAsync(certificate, chain).ConfigureAwait(false);
         var (cpf, cnpj) = IcpBrasilChainValidator.ExtractCpfCnpj(certificate);
 
         return new ChainValidationResult
@@ -119,9 +117,9 @@ internal sealed class GovBrChainValidationProvider : IChainValidationProvider
     public bool CanValidate(X509Certificate2 certificate) =>
         GovBrChainValidator.IsGovBrCertificate(certificate);
 
-    public ChainValidationResult Validate(X509Certificate2 certificate, IReadOnlyList<X509Certificate2>? chain = null)
+    public async Task<ChainValidationResult> ValidateAsync(X509Certificate2 certificate, IReadOnlyList<X509Certificate2>? chain = null)
     {
-        var result = _validator.ValidateAsync(certificate, chain).GetAwaiter().GetResult();
+        var result = await _validator.ValidateAsync(certificate, chain).ConfigureAwait(false);
         var cpf = GovBrChainValidator.ExtractCpfFromSan(certificate);
 
         return new ChainValidationResult

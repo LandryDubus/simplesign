@@ -1,10 +1,10 @@
 # Interop Testing
 
-This directory contains the cross-implementation validation infrastructure for SimpleSign. It runs 81 test scenarios against 7 independent verifiers to ensure signatures produced by SimpleSign are correctly validated by third-party tools, and vice versa.
+This directory contains the cross-implementation validation infrastructure for SimpleSign. It runs ~150 test scenarios against 8 independent verifiers across 18 test files to ensure signatures produced by SimpleSign are correctly validated by third-party tools, and vice versa.
 
 ## Features
 
-- 81 automated test scenarios
+- ~150 automated test scenarios across 18 test files
 - Forward interop: SimpleSign signatures → external verifiers
 - Reverse interop: external tool signatures → SimpleSign validation
 - Docker-based isolated environments for reproducibility
@@ -20,6 +20,7 @@ This directory contains the cross-implementation validation infrastructure for S
 | Apache PDFBox | PDF structure and signature inspection | `pdfbox/` |
 | EU DSS | ETSI EN 319 102 conformance validation | `eu-dss/` |
 | iText 9 | Independent PAdES validation | `itext/` |
+| veraPDF | PDF/A conformance after incremental signing | `verapdf/` |
 | pyHanko-sign | Reverse interop (external → SimpleSign) | `dss-validator/` |
 
 ## Running Locally
@@ -29,11 +30,12 @@ This directory contains the cross-implementation validation infrastructure for S
 docker compose build
 
 # Run all interop tests
-dotnet test tests/SimpleSign.Interop/
+dotnet test tests/interop/
 ```
 
 ## See Also
 
 - [Main README](../README.md)
+- [Interoperability Documentation](../docs/interoperability.md)
 - [EU DSS Validator](eu-dss/README.md)
 - [iText Validator](itext/README.md)

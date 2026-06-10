@@ -70,9 +70,19 @@ src/
 // Signing
 await SimpleSigner.Document(pdf).WithCertificate(cert).WithTimestamp(url).SignAsync();
 
+// With signature algorithm override (e.g., RSASSA-PSS)
+await SimpleSigner.Document(pdf).WithCertificate(cert).WithSignatureAlgorithm(Oids.RsaPss).SignAsync();
+
 // Deferred
 var prepared = await DeferredSigner.PrepareAsync(pdf, cert);
 await DeferredSigner.CompleteAsync(session, signature);
+
+// Deferred builder
+var builder = new DeferredSignerBuilder(pdfBytes, cert)
+    .WithSignerName("Jane Doe")
+    .WithTimestamp("http://timestamp.digicert.com");
+var prepared = await builder.PrepareAsync();
+var signedPdf = await builder.CompleteAsync(prepared.SessionData, signature);
 
 // Batch
 var batch = BatchSigner.Create(cert).WithTimestamp(url).Build();

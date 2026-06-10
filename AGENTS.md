@@ -12,6 +12,8 @@
 | Interop tests | `dotnet test tests/interop/` |
 | VeraPDF interop | `docker pull verapdf/cli && dotnet test tests/interop/ --filter "Category=VeraPdf"` |
 | Integration tests | `dotnet test tests/integration/` |
+| CLI tests | `dotnet test tests/cli/` |
+| Mutation tests | `dotnet stryker` |
 | Lint/format check | Build with 0 warnings (enforced) |
 | AOT smoke test | `dotnet publish tests/smoke/SimpleSign.AotSmokeTest -r linux-x64` |
 
@@ -25,11 +27,15 @@ SimpleSign/
 │   ├── SimpleSign.PAdES/         PAdES signing, validation, inspection
 │   ├── SimpleSign.Brasil/        ICP-Brasil extensions
 │   ├── SimpleSign.HtmlToPdf/     HTML→PDF layout engine
+│   ├── SimpleSign.Cli/           CLI tool (Spectre.Console)
+│   ├── SimpleSign.HostSigner/    Windows tray app — local signing API
 │   └── ...
 ├── tests/
-│   ├── unit/                     Unit tests (~1,600 tests, < 5s)
+│   ├── unit/                     Unit tests (~1,500 tests, < 5s)
 │   ├── integration/              Network-dependent tests
 │   ├── interop/                  Cross-platform signature verification
+│   ├── cli/                      CLI integration tests
+│   ├── fuzz/                     Fuzz testing harnesses
 │   ├── smoke/                    AOT compilation smoke test
 │   └── shared/                   Test fixtures & helpers
 ├── samples/                      Example applications
@@ -43,8 +49,10 @@ SimpleSign/
 - **SDK:** .NET 10 (global.json pins to 10.0.100)
 - **Targets:** net8.0 and net10.0 (multi-target)
 - **Language:** C# 13
-- **Analysis:** All rules enabled, warnings as errors
-- **Style:** Enforced in build (IDE0022, IDE0011, IDE0055 are errors)
+- **Analysis:** `AnalysisMode=All`, warnings as errors, code style enforced in build
+- **Style rules enforced as errors:** IDE0022 (expression bodies), IDE0011 (braces), IDE0055 (formatting)
+- **AOT compatible:** No reflection, no `dynamic`, no `Assembly.Load`
+- **Documentation:** All public APIs require XML docs (`GenerateDocumentationFile=true`)
 
 ## Code Quality Rules
 

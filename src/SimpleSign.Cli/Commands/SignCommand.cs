@@ -72,7 +72,7 @@ internal sealed class SignCommand : AsyncCommand<SignCommand.Settings>
         public bool Archival { get; init; }
 
         [CommandOption("--hash <ALGORITHM>")]
-        [Description("Hash algorithm: SHA256 (default), SHA384, SHA512")]
+        [Description("Hash algorithm: SHA256 (default), SHA384, SHA512, SHA3-256, SHA3-384, SHA3-512")]
         public string? Hash { get; init; }
 
         [CommandOption("--field-name <NAME>")]
@@ -236,9 +236,12 @@ internal sealed class SignCommand : AsyncCommand<SignCommand.Settings>
 
             if (Hash is not null && !Hash.Equals("SHA256", StringComparison.OrdinalIgnoreCase)
                 && !Hash.Equals("SHA384", StringComparison.OrdinalIgnoreCase)
-                && !Hash.Equals("SHA512", StringComparison.OrdinalIgnoreCase))
+                && !Hash.Equals("SHA512", StringComparison.OrdinalIgnoreCase)
+                && !Hash.Equals("SHA3-256", StringComparison.OrdinalIgnoreCase)
+                && !Hash.Equals("SHA3-384", StringComparison.OrdinalIgnoreCase)
+                && !Hash.Equals("SHA3-512", StringComparison.OrdinalIgnoreCase))
             {
-                return ValidationResult.Error("--hash must be SHA256, SHA384, or SHA512.");
+                return ValidationResult.Error("--hash must be SHA256, SHA384, SHA512, SHA3-256, SHA3-384, or SHA3-512.");
             }
 
             if (Certify is not null

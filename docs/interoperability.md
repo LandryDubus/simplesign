@@ -19,7 +19,7 @@ SimpleSign is built to survive the real world — legacy PDFs from Adobe, iText,
 ## Real-World PDF Generators Tested
 
 | Generator | Sign | Inspect | Validate | Notes |
-|---|---|---|---|
+|---|---|---|---|---|
 | **Adobe Acrobat/Reader** | ✅ | ✅ | ✅ | `adbe.pkcs7.detached`, embedded CRL/OCSP |
 | **iText 5/7/9** | ✅ | ✅ | ✅ | Interop CI tests (LTA, cross-validator, cert edge cases); xref streams + ObjStm |
 | **Apache PDFBox** | ✅ | ✅ | ✅ | Docker-based CI verification (PAdES-B-B, double-signed) |

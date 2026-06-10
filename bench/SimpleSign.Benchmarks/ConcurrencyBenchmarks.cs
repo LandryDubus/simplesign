@@ -5,10 +5,6 @@ using SimpleSign.PAdES;
 
 namespace SimpleSign.Benchmarks;
 
-/// <summary>
-/// Measures throughput under concurrent load.
-/// Proves thread-safety and shows how SimpleSign scales with parallelism.
-/// </summary>
 [MemoryDiagnoser]
 public class ConcurrencyBenchmarks
 {
@@ -33,34 +29,27 @@ public class ConcurrencyBenchmarks
     public void Cleanup() => _cert.Dispose();
 
     [Benchmark(Baseline = true, Description = "Sequential (32 ops)")]
-    public async Task<int> Sequential()
+    public async Task Sequential()
     {
-        int count = 0;
         for (int i = 0; i < OperationsPerRun; i++)
         {
-            var result = await SimpleSigner.Document(_pdfBytes)
+            _ = await SimpleSigner.Document(_pdfBytes)
                 .WithCertificate(_cert)
                 .SignAsync();
-            if (result.Length > 0)
-            {
-                count++;
-            }
         }
-        return count;
     }
 
     [Benchmark(Description = "Concurrent 8 tasks (32 ops)")]
-    public async Task<int> Concurrent_8() => await RunConcurrent(8);
+    public Task Concurrent_8() => RunConcurrent(8);
 
     [Benchmark(Description = "Concurrent 16 tasks (32 ops)")]
-    public async Task<int> Concurrent_16() => await RunConcurrent(16);
+    public Task Concurrent_16() => RunConcurrent(16);
 
     [Benchmark(Description = "Concurrent 32 tasks (32 ops)")]
-    public async Task<int> Concurrent_32() => await RunConcurrent(32);
+    public Task Concurrent_32() => RunConcurrent(32);
 
-    private async Task<int> RunConcurrent(int concurrency)
+    private async Task RunConcurrent(int concurrency)
     {
-        int count = 0;
         using var semaphore = new SemaphoreSlim(concurrency);
         var tasks = new Task[OperationsPerRun];
 
@@ -74,10 +63,7 @@ public class ConcurrencyBenchmarks
                     var result = await SimpleSigner.Document(_pdfBytes)
                         .WithCertificate(_cert)
                         .SignAsync();
-                    if (result.Length > 0)
-                    {
-                        Interlocked.Increment(ref count);
-                    }
+                    _ = result.Length;
                 }
                 finally
                 {
@@ -87,6 +73,5 @@ public class ConcurrencyBenchmarks
         }
 
         await Task.WhenAll(tasks);
-        return count;
     }
 }

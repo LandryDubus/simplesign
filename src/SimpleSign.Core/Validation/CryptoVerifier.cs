@@ -30,6 +30,11 @@ internal static class CryptoVerifier
             Oids.Sha256 => HashAlgorithmName.SHA256,
             Oids.Sha384 => HashAlgorithmName.SHA384,
             Oids.Sha512 => HashAlgorithmName.SHA512,
+#if NET9_0_OR_GREATER
+            Oids.Sha3_256 => HashAlgorithmName.SHA3_256,
+            Oids.Sha3_384 => HashAlgorithmName.SHA3_384,
+            Oids.Sha3_512 => HashAlgorithmName.SHA3_512,
+#endif
             Oids.Sha1 => HashAlgorithmName.SHA1,
             _ => throw new NotSupportedException($"Digest OID '{cmsData.DigestAlgorithmOid}' not supported.")
         };
@@ -97,6 +102,11 @@ internal static class CryptoVerifier
                 Oids.Sha256 => SHA256.HashData(certData),
                 Oids.Sha384 => SHA384.HashData(certData),
                 Oids.Sha512 => SHA512.HashData(certData),
+#if NET9_0_OR_GREATER
+                Oids.Sha3_256 => SHA3_256.HashData(certData),
+                Oids.Sha3_384 => SHA3_384.HashData(certData),
+                Oids.Sha3_512 => SHA3_512.HashData(certData),
+#endif
                 Oids.Sha1 => SHA1.HashData(certData),
                 _ => throw new NotSupportedException(
                     $"Unsupported hash algorithm OID '{cmsData.SigningCertificateHashAlgorithmOid}' in signingCertificateV2 attribute.")

@@ -49,7 +49,9 @@ SimpleSign (meta-package)
 │   ├── SimpleSign.Pdf   PDF structure parser
 │   └── SimpleSign.Core  Crypto primitives, CMS, TSA, revocation
 ├── SimpleSign.Brasil    ICP-Brasil + Gov.br extensions
-└── SimpleSign.HtmlToPdf Pure-.NET HTML→PDF converter
+├── SimpleSign.HtmlToPdf Pure-.NET HTML→PDF converter
+├── SimpleSign.Cli       CLI tool (Spectre.Console)
+└── SimpleSign.HostSigner Windows tray app — local signing API
 ```
 
 ## Docs

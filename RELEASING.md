@@ -24,11 +24,12 @@ Update the version string in **all** of these files:
 | `src/SimpleSign.Brasil/SimpleSign.Brasil.csproj` | `<Version>` | ICP-Brasil |
 | `src/SimpleSign.HtmlToPdf/SimpleSign.HtmlToPdf.csproj` | `<Version>` | HTML→PDF |
 | `src/SimpleSign.HostSigner/SimpleSign.HostSigner.csproj` | `<Version>` | Host signer |
+| `src/SimpleSign.Cli/SimpleSign.Cli.csproj` | `<Version>` | CLI tool |
 
 ### Quick sed command (macOS):
 ```bash
 VERSION="X.Y.Z"
-OLD="0.3.1"
+OLD="0.3.3"
 sed -i '' "s/<Version>$OLD</<Version>$VERSION</g" \
   Directory.Build.props \
   src/SimpleSign/SimpleSign.csproj \
@@ -37,7 +38,8 @@ sed -i '' "s/<Version>$OLD</<Version>$VERSION</g" \
   src/SimpleSign.PAdES/SimpleSign.PAdES.csproj \
   src/SimpleSign.Brasil/SimpleSign.Brasil.csproj \
   src/SimpleSign.HtmlToPdf/SimpleSign.HtmlToPdf.csproj \
-  src/SimpleSign.HostSigner/SimpleSign.HostSigner.csproj
+  src/SimpleSign.HostSigner/SimpleSign.HostSigner.csproj \
+  src/SimpleSign.Cli/SimpleSign.Cli.csproj
 ```
 
 ## Documentation Updates
@@ -114,4 +116,4 @@ NOTES
 - **MINOR** (0.x.0): New public API surface, deprecations
 - **MAJOR** (x.0.0): Breaking changes to public API
 
-Current version: `0.3.2`
+Current version: `0.3.3`

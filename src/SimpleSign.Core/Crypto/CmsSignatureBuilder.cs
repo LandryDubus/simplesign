@@ -512,6 +512,11 @@ public sealed class CmsSignatureBuilder
         _ when alg == HashAlgorithmName.SHA256 => Oids.Sha256,
         _ when alg == HashAlgorithmName.SHA384 => Oids.Sha384,
         _ when alg == HashAlgorithmName.SHA512 => Oids.Sha512,
+#if NET9_0_OR_GREATER
+        _ when alg == HashAlgorithmName.SHA3_256 => Oids.Sha3_256,
+        _ when alg == HashAlgorithmName.SHA3_384 => Oids.Sha3_384,
+        _ when alg == HashAlgorithmName.SHA3_512 => Oids.Sha3_512,
+#endif
         _ when alg == HashAlgorithmName.SHA1 => throw new NotSupportedException("SHA-1 is deprecated and not supported for new signatures. Use SHA-256 or stronger."),
         _ when alg == HashAlgorithmName.MD5 => throw new NotSupportedException("MD5 is insecure and not supported for signatures."),
         _ => throw new NotSupportedException($"Hash algorithm '{alg.Name}' is not supported.")

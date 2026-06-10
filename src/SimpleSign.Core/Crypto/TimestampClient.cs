@@ -475,6 +475,11 @@ public sealed class TimestampClient
         _ when alg == HashAlgorithmName.SHA256 => SHA256.HashData(data),
         _ when alg == HashAlgorithmName.SHA384 => SHA384.HashData(data),
         _ when alg == HashAlgorithmName.SHA512 => SHA512.HashData(data),
+#if NET9_0_OR_GREATER
+        _ when alg == HashAlgorithmName.SHA3_256 => SHA3_256.HashData(data),
+        _ when alg == HashAlgorithmName.SHA3_384 => SHA3_384.HashData(data),
+        _ when alg == HashAlgorithmName.SHA3_512 => SHA3_512.HashData(data),
+#endif
         _ => throw new NotSupportedException($"Hash algorithm '{alg.Name}' is not supported.")
     };
 
@@ -483,6 +488,11 @@ public sealed class TimestampClient
         _ when alg == HashAlgorithmName.SHA256 => Oids.Sha256,
         _ when alg == HashAlgorithmName.SHA384 => Oids.Sha384,
         _ when alg == HashAlgorithmName.SHA512 => Oids.Sha512,
+#if NET9_0_OR_GREATER
+        _ when alg == HashAlgorithmName.SHA3_256 => Oids.Sha3_256,
+        _ when alg == HashAlgorithmName.SHA3_384 => Oids.Sha3_384,
+        _ when alg == HashAlgorithmName.SHA3_512 => Oids.Sha3_512,
+#endif
         _ => throw new NotSupportedException($"Hash algorithm '{alg.Name}' is not supported.")
     };
     #endregion

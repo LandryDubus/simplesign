@@ -71,6 +71,51 @@ var prepared = await DeferredSigner.PrepareAsync(pdfBytes, cert);
 byte[] signedPdf = await DeferredSigner.CompleteAsync(prepared.SessionData, clientSignature);
 ```
 
+### ICP-Brasil Validation
+
+```csharp
+using SimpleSign.Brasil;
+
+var validator = new IcpBrasilChainValidator();
+var result = await validator.ValidateAsync(certificate);
+Console.WriteLine($"Policy: {result.DetectedPolicy}");  // AD_RB, AD_RT, AD_RV, AD_RC, AD_RA
+
+// CPF/CNPJ extraction
+var (cpf, cnpj) = IcpBrasilChainValidator.ExtractCpfCnpj(cert);
+```
+
+### CLI Tool
+
+```bash
+# Sign a PDF
+simplesign sign contract.pdf --cert mycert.pfx --password secret --timestamp
+
+# Validate
+simplesign validate signed.pdf
+
+# Inspect
+simplesign inspect signed.pdf
+
+# Batch sign
+simplesign batch-sign ./documents/ --cert mycert.pfx --parallel 8
+
+# Extract CMS
+simplesign extract signed.pdf --output signature.p7s
+```
+
+### HostSigner (local signing API)
+
+A Windows tray app at `http://localhost:21590` exposing certificate and signing endpoints:
+```bash
+# List certificates
+curl http://localhost:21590/api/certificates
+
+# Sign a hash
+curl -X POST http://localhost:21590/api/sign \
+  -H "Content-Type: application/json" \
+  -d '{"thumbprint":"A1B2...","hashAlgorithm":"SHA256","signRequests":[{"id":"0","authenticatedAttributeBase64":"..."}]}'
+```
+
 ## Common Mistakes to Avoid
 
 1. **Don't forget `await`** — all signing/validation methods are async
@@ -88,18 +133,28 @@ byte[] signedPdf = await DeferredSigner.CompleteAsync(prepared.SessionData, clie
 ## Architecture (for contributors)
 
 ```
-SimpleSign (meta-package)
-├── SimpleSign.PAdES     Signing, validation, inspection
-│   ├── SimpleSign.Pdf   PDF parser (xref, objects, incremental save)
-│   └── SimpleSign.Core  CMS, TSA, OCSP, CRL, hash algorithms
-├── SimpleSign.Brasil    ICP-Brasil chain validation, CPF/CNPJ
-└── SimpleSign.HtmlToPdf HTML→PDF layout engine (independent)
+src/
+├── SimpleSign.Core/        Crypto primitives: CMS, TSA, OCSP, CRL, hashing
+├── SimpleSign.Pdf/         PDF structure: xref, objects, incremental save, fields
+├── SimpleSign.PAdES/       PAdES signing, validation, inspection (main package)
+├── SimpleSign.Brasil/      ICP-Brasil: chain validation, CPF/CNPJ, Gov.br
+├── SimpleSign.HtmlToPdf/   HTML→PDF layout engine (independent, no signing)
+├── SimpleSign.Cli/         CLI tool (Spectre.Console)
+└── SimpleSign.HostSigner/  Windows tray app — local signing HTTP API
 ```
 
 ## Testing
 
 ```bash
 dotnet test                          # Run all tests
-dotnet test tests/unit/              # Unit tests only (~1600 tests)
+dotnet test tests/unit/              # Unit tests only (~1,500 tests)
+dotnet test tests/unit/SimpleSign.PAdES.Tests   # PAdES signing & validation
+dotnet test tests/unit/SimpleSign.Core.Tests    # Crypto primitives
+dotnet test tests/unit/SimpleSign.Pdf.Tests     # PDF parsing
+dotnet test tests/unit/SimpleSign.Brasil.Tests  # ICP-Brasil
+dotnet test tests/unit/SimpleSign.HtmlToPdf.Tests # HTML→PDF
 dotnet test tests/integration/       # Integration tests (needs network)
+dotnet test tests/cli/               # CLI integration tests
+dotnet test tests/interop/           # Cross-platform verification
+dotnet stryker                       # Mutation testing
 ```

@@ -13,7 +13,7 @@
   <img src="https://img.shields.io/badge/.NET-8%20%7C%2010-512BD4?style=flat-square&logo=dotnet" alt=".NET 8 | 10" />
   <img src="https://img.shields.io/badge/License-MIT-green?style=flat-square" alt="MIT License" />
   <img src="https://img.shields.io/badge/AOT-Compatible-blueviolet?style=flat-square" alt="Native AOT" />
-  <img src="https://img.shields.io/badge/Tests-1%2C519-brightgreen?style=flat-square" alt="1,519 tests" />
+  <img src="https://img.shields.io/badge/Tests-1%2C500%2B-brightgreen?style=flat-square" alt="1,500+ tests" />
   <img src="https://img.shields.io/badge/No%20Crypto%20Deps-✓-blue?style=flat-square" alt="No third-party crypto dependencies" />
 </p>
 
@@ -127,6 +127,8 @@ SimpleSign (meta-package)
 │
 SimpleSign.Brasil           ICP-Brasil + Gov.br + Lei 14.063  → depends on PAdES
 SimpleSign.HtmlToPdf        Pure-.NET HTML→PDF (independent)
+SimpleSign.Cli              CLI tool (install as dotnet tool)
+SimpleSign.HostSigner       Windows tray app — local signing API
 ```
 
 ---
@@ -439,8 +441,9 @@ contract-signed.pdf  1/1 valid
 ## Documentation
 
 | Document | Description |
-|---|---|
+|---|---|---|
 | [API Reference](https://eupassarin.github.io/simplesign/) | Full API documentation (Docfx) |
+| [Documentation Home](docs/index.md) | Docfx documentation entry point |
 | [Getting Started](docs/articles/getting-started.md) | Installation, first signature, validation |
 | [Deferred Signing](docs/articles/deferred-signing.md) | Two-phase signing for web apps |
 | [Inspection & Validation](docs/articles/inspection-validation.md) | Metadata extraction and cryptographic verification |
@@ -448,6 +451,7 @@ contract-signed.pdf  1/1 valid
 | [Interoperability](docs/interoperability.md) | PDF generators tested, cross-validation matrix, ETSI corpus |
 | [Conformance](docs/conformance.md) | ISO 32000, PAdES ETSI EN 319 142, RFC 5652 compliance |
 | [Performance](docs/performance.md) | Benchmarks: signing, validation, concurrency, vs competitors |
+| [Benchmark Results](docs/benchmarks.md) | Comprehensive 14-suite benchmark report with 67 metrics |
 | [Architecture](docs/architecture.md) | Package structure, design principles, quality metrics |
 | [HostSigner](src/SimpleSign.HostSigner/README.md) | Local signing tray app — API docs & install |
 | [Web Signing Sample](samples/WebSigningSample/README.md) | Browser-based PDF signing demo |

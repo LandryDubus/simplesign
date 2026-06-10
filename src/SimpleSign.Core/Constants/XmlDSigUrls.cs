@@ -49,6 +49,15 @@ internal static class XmlDSigUrls
     /// <summary>SHA-512 digest.</summary>
     internal const string Sha512Digest = "http://www.w3.org/2001/04/xmlenc#sha512";
 
+    /// <summary>SHA3-256 digest.</summary>
+    internal const string Sha3_256Digest = "http://www.w3.org/2001/04/xmldsig-more#sha3-256";
+
+    /// <summary>SHA3-384 digest.</summary>
+    internal const string Sha3_384Digest = "http://www.w3.org/2001/04/xmldsig-more#sha3-384";
+
+    /// <summary>SHA3-512 digest.</summary>
+    internal const string Sha3_512Digest = "http://www.w3.org/2001/04/xmldsig-more#sha3-512";
+
     /// <summary>SHA-1 digest (legacy).</summary>
     internal const string Sha1Digest = "http://www.w3.org/2000/09/xmldsig#sha1";
 
@@ -86,6 +95,9 @@ internal static class XmlDSigUrls
             "SHA256" => Sha256Digest,
             "SHA384" => Sha384Digest,
             "SHA512" => Sha512Digest,
+            "SHA3-256" => Sha3_256Digest,
+            "SHA3-384" => Sha3_384Digest,
+            "SHA3-512" => Sha3_512Digest,
             "SHA1" => Sha1Digest,
             _ => throw new NotSupportedException($"Hash algorithm '{algorithm.Name}' is not supported for XMLDSig."),
         };

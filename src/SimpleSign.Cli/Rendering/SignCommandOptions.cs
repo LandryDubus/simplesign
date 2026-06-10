@@ -10,6 +10,11 @@ internal static class SignCommandOptions
         "SHA256" => HashAlgorithmName.SHA256,
         "SHA384" => HashAlgorithmName.SHA384,
         "SHA512" => HashAlgorithmName.SHA512,
+#if NET9_0_OR_GREATER
+        "SHA3-256" => HashAlgorithmName.SHA3_256,
+        "SHA3-384" => HashAlgorithmName.SHA3_384,
+        "SHA3-512" => HashAlgorithmName.SHA3_512,
+#endif
         _ => HashAlgorithmName.SHA256
     };
 

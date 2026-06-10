@@ -11,8 +11,20 @@ internal static class Oids
     /// <summary>SHA-256 (id-sha256) — default for ICP-Brasil and PAdES.</summary>
     internal const string Sha256 = "2.16.840.1.101.3.4.2.1";
 
+    /// <summary>SHA-384 (id-sha384).</summary>
+    internal const string Sha384 = "2.16.840.1.101.3.4.2.2";
+
     /// <summary>SHA-512 (id-sha512).</summary>
     internal const string Sha512 = "2.16.840.1.101.3.4.2.3";
+
+    /// <summary>SHA3-256 (id-sha3-256).</summary>
+    internal const string Sha3_256 = "2.16.840.1.101.3.4.2.8";
+
+    /// <summary>SHA3-384 (id-sha3-384).</summary>
+    internal const string Sha3_384 = "2.16.840.1.101.3.4.2.9";
+
+    /// <summary>SHA3-512 (id-sha3-512).</summary>
+    internal const string Sha3_512 = "2.16.840.1.101.3.4.2.10";
 
     /// <summary>SHA-1 (id-sha1) — deprecated since 2016, supported for legacy validation.</summary>
     internal const string Sha1 = "1.3.14.3.2.26";
@@ -133,9 +145,6 @@ internal static class Oids
 
     /// <summary>id-ce-certificatePolicies.</summary>
     internal const string CertificatePolicies = "2.5.29.32";
-
-    /// <summary>SHA-384 hash algorithm OID.</summary>
-    internal const string Sha384 = "2.16.840.1.101.3.4.2.2";
 
     /// <summary>EC public key algorithm OID (id-ecPublicKey).</summary>
     internal const string EcPublicKey = "1.2.840.10045.2.1";

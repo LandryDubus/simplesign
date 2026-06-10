@@ -20,8 +20,10 @@ internal static class SignatureAppearanceRenderer
     /// <param name="width">Computed stamp width.</param>
     /// <param name="height">Computed stamp height.</param>
     /// <param name="imageObjNum">Object number for the image XObject (0 if no image).</param>
+    /// <param name="fontFileObjNum">Object number for the /FontFile2 stream (0 to skip embedding).</param>
+    /// <param name="fontDescriptorObjNum">Object number for the /FontDescriptor (0 to skip embedding).</param>
     /// <returns>Bytes for the Form XObject (and image XObject if present).</returns>
-    public static byte[] BuildAppearanceXObject(int objNum, SignatureFieldOptions options, DateTime sigTime, float width, float height, int imageObjNum = 0)
+    public static byte[] BuildAppearanceXObject(int objNum, SignatureFieldOptions options, DateTime sigTime, float width, float height, int imageObjNum = 0, int fontFileObjNum = 0, int fontDescriptorObjNum = 0)
     {
         var appearance = options.Appearance!;
         bool hasPng = appearance.BackgroundImagePng is { Length: > 0 } && imageObjNum > 0;
@@ -91,13 +93,13 @@ internal static class SignatureAppearanceRenderer
         {
             if (hasPng)
             {
-                return WrapInFormXObjectWithPngImage(objNum, width, height, streamBytes, appearance.BackgroundImagePng!.Value.ToArray(), imageObjNum, baseFontName);
+                return WrapInFormXObjectWithPngImage(objNum, width, height, streamBytes, appearance.BackgroundImagePng!.Value.ToArray(), imageObjNum, baseFontName, fontFileObjNum, fontDescriptorObjNum);
             }
 
-            return WrapInFormXObjectWithJpegImage(objNum, width, height, streamBytes, appearance.BackgroundImageJpeg!.Value.ToArray(), imageObjNum, baseFontName);
+            return WrapInFormXObjectWithJpegImage(objNum, width, height, streamBytes, appearance.BackgroundImageJpeg!.Value.ToArray(), imageObjNum, baseFontName, fontFileObjNum, fontDescriptorObjNum);
         }
 
-        return WrapInFormXObject(objNum, width, height, streamBytes, baseFontName);
+        return WrapInFormXObject(objNum, width, height, streamBytes, baseFontName, fontFileObjNum, fontDescriptorObjNum);
     }
 
     /// <summary>
@@ -170,16 +172,35 @@ internal static class SignatureAppearanceRenderer
     /// Wraps content stream bytes in a PDF Form XObject with
     /// <c>/BBox</c>, <c>/Resources</c> (Helvetica with WinAnsiEncoding), and <c>/Matrix</c>.
     /// </summary>
-    private static byte[] WrapInFormXObject(int objNum, float width, float height, byte[] streamBytes, string baseFontName)
+    private static byte[] WrapInFormXObject(int objNum, float width, float height, byte[] streamBytes, string baseFontName, int fontFileObjNum = 0, int fontDescriptorObjNum = 0)
     {
+        bool embedFont = fontFileObjNum > 0 && fontDescriptorObjNum > 0;
+        bool isHelvetica = string.Equals(baseFontName, "Helvetica", StringComparison.OrdinalIgnoreCase);
+
         StringBuilder xObjDict = new StringBuilder();
         xObjDict.Append($"{objNum} 0 obj\n");
         xObjDict.Append("<< /Type /XObject\n");
         xObjDict.Append("   /Subtype /Form\n");
         xObjDict.Append($"   /BBox [0 0 {F(width)} {F(height)}]\n");
-        xObjDict.Append("   /Resources << /Font << /F1 <<\n");
-        xObjDict.Append($"      /Type /Font /Subtype /Type1 /BaseFont /{baseFontName} /Encoding /WinAnsiEncoding\n");
-        xObjDict.Append("   >> >> >>\n");
+        xObjDict.Append("   /Resources << /Font << /F1 <<");
+
+        if (embedFont && isHelvetica)
+        {
+            xObjDict.Append('\n');
+            xObjDict.Append($"      /Type /Font /Subtype /TrueType /BaseFont /LiberationSans\n");
+            xObjDict.Append($"      /FirstChar {FontResources.FirstChar} /LastChar {FontResources.LastChar}\n");
+            xObjDict.Append($"      {PdfFontWriter.BuildWidthsArray()}\n");
+            xObjDict.Append($"      /FontDescriptor {fontDescriptorObjNum} 0 R\n");
+            xObjDict.Append($"      /Encoding /WinAnsiEncoding\n");
+            xObjDict.Append("   >> >> >>\n");
+        }
+        else
+        {
+            xObjDict.Append('\n');
+            xObjDict.Append($"      /Type /Font /Subtype /Type1 /BaseFont /{baseFontName} /Encoding /WinAnsiEncoding\n");
+            xObjDict.Append("   >> >> >>\n");
+        }
+
         xObjDict.Append($"   /Length {streamBytes.Length}\n");
         xObjDict.Append(">>\n");
         xObjDict.Append("stream\n");
@@ -198,7 +219,7 @@ internal static class SignatureAppearanceRenderer
     /// Wraps content stream in a Form XObject with both font and image resources.
     /// The JPEG image is embedded as a separate inline XObject (DCTDecode).
     /// </summary>
-    private static byte[] WrapInFormXObjectWithJpegImage(int objNum, float width, float height, byte[] streamBytes, byte[] jpegBytes, int imageObjNum, string baseFontName)
+    private static byte[] WrapInFormXObjectWithJpegImage(int objNum, float width, float height, byte[] streamBytes, byte[] jpegBytes, int imageObjNum, string baseFontName, int fontFileObjNum = 0, int fontDescriptorObjNum = 0)
     {
         // Build the image XObject first
         var (imgWidth, imgHeight) = DetectJpegDimensions(jpegBytes);
@@ -218,6 +239,9 @@ internal static class SignatureAppearanceRenderer
         byte[] imgHeader = Encoding.Latin1.GetBytes(imgObj.ToString());
         byte[] imgTrailer = Encoding.Latin1.GetBytes("\nendstream\nendobj\n");
 
+        bool embedFont = fontFileObjNum > 0 && fontDescriptorObjNum > 0;
+        bool isHelvetica = string.Equals(baseFontName, "Helvetica", StringComparison.OrdinalIgnoreCase);
+
         // Build the form XObject with image reference in resources
         var xObjDict = new StringBuilder();
         xObjDict.Append($"{objNum} 0 obj\n");
@@ -225,7 +249,22 @@ internal static class SignatureAppearanceRenderer
         xObjDict.Append("   /Subtype /Form\n");
         xObjDict.Append($"   /BBox [0 0 {F(width)} {F(height)}]\n");
         xObjDict.Append("   /Resources <<\n");
-        xObjDict.Append($"      /Font << /F1 << /Type /Font /Subtype /Type1 /BaseFont /{baseFontName} /Encoding /WinAnsiEncoding >> >>\n");
+        xObjDict.Append("      /Font << /F1 <<");
+
+        if (embedFont && isHelvetica)
+        {
+            xObjDict.Append('\n');
+            xObjDict.Append($"         /Type /Font /Subtype /TrueType /BaseFont /LiberationSans\n");
+            xObjDict.Append($"         /FirstChar {FontResources.FirstChar} /LastChar {FontResources.LastChar}\n");
+            xObjDict.Append($"         {PdfFontWriter.BuildWidthsArray()}\n");
+            xObjDict.Append($"         /FontDescriptor {fontDescriptorObjNum} 0 R\n");
+            xObjDict.Append($"         /Encoding /WinAnsiEncoding\n");
+            xObjDict.Append("      >> >>\n");
+        }
+        else
+        {
+            xObjDict.Append($" /Type /Font /Subtype /Type1 /BaseFont /{baseFontName} /Encoding /WinAnsiEncoding >> >>\n");
+        }
         xObjDict.Append($"      /XObject << /Img0 {imageObjNum} 0 R >>\n");
         xObjDict.Append("   >>\n");
         xObjDict.Append($"   /Length {streamBytes.Length}\n");
@@ -259,7 +298,7 @@ internal static class SignatureAppearanceRenderer
     /// Wraps content stream in a Form XObject with PNG image support (FlateDecode + predictors).
     /// Supports RGB/Gray 8-bit PNG without interlace.
     /// </summary>
-    private static byte[] WrapInFormXObjectWithPngImage(int objNum, float width, float height, byte[] streamBytes, byte[] pngBytes, int imageObjNum, string baseFontName)
+    private static byte[] WrapInFormXObjectWithPngImage(int objNum, float width, float height, byte[] streamBytes, byte[] pngBytes, int imageObjNum, string baseFontName, int fontFileObjNum = 0, int fontDescriptorObjNum = 0)
     {
         var png = ParsePng(pngBytes);
 
@@ -283,13 +322,32 @@ internal static class SignatureAppearanceRenderer
         byte[] imgHeader = Encoding.Latin1.GetBytes(imgObj.ToString());
         byte[] imgTrailer = Encoding.Latin1.GetBytes("\nendstream\nendobj\n");
 
+        bool embedFont = fontFileObjNum > 0 && fontDescriptorObjNum > 0;
+        bool isHelvetica = string.Equals(baseFontName, "Helvetica", StringComparison.OrdinalIgnoreCase);
+
         var xObjDict = new StringBuilder();
         xObjDict.Append($"{objNum} 0 obj\n");
         xObjDict.Append("<< /Type /XObject\n");
         xObjDict.Append("   /Subtype /Form\n");
         xObjDict.Append($"   /BBox [0 0 {F(width)} {F(height)}]\n");
         xObjDict.Append("   /Resources <<\n");
-        xObjDict.Append($"      /Font << /F1 << /Type /Font /Subtype /Type1 /BaseFont /{baseFontName} /Encoding /WinAnsiEncoding >> >>\n");
+        xObjDict.Append("      /Font << /F1 <<");
+
+        if (embedFont && isHelvetica)
+        {
+            xObjDict.Append('\n');
+            xObjDict.Append($"         /Type /Font /Subtype /TrueType /BaseFont /LiberationSans\n");
+            xObjDict.Append($"         /FirstChar {FontResources.FirstChar} /LastChar {FontResources.LastChar}\n");
+            xObjDict.Append($"         {PdfFontWriter.BuildWidthsArray()}\n");
+            xObjDict.Append($"         /FontDescriptor {fontDescriptorObjNum} 0 R\n");
+            xObjDict.Append($"         /Encoding /WinAnsiEncoding\n");
+            xObjDict.Append("      >> >>\n");
+        }
+        else
+        {
+            xObjDict.Append($" /Type /Font /Subtype /Type1 /BaseFont /{baseFontName} /Encoding /WinAnsiEncoding >> >>\n");
+        }
+
         xObjDict.Append($"      /XObject << /Img0 {imageObjNum} 0 R >>\n");
         xObjDict.Append("   >>\n");
         xObjDict.Append($"   /Length {streamBytes.Length}\n");

@@ -82,6 +82,7 @@ These will cause build failures:
 - **Incremental PDF save:** Signatures append to the PDF without modifying existing bytes
 - **Async-first:** All I/O operations are async (TSA, OCSP, CRL fetches)
 - **Result objects for validation:** Validation never throws — returns structured results
+- **Font embedding for PDF/A-1b:** Embedded LiberationSans TTF (WinAnsi subset, OFL-licensed) for visible signatures. Font file uses ZLibStream (RFC 1950 zlib wrapper, not raw DeflateStream). Widths array in 1000 UPM per ISO 32000-1 §9.2.2.
 
 ## Common Tasks
 

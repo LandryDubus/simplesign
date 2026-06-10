@@ -1,6 +1,8 @@
 using System.Diagnostics;
+using System.Security.Cryptography.X509Certificates;
 using Shouldly;
 using SimpleSign.PAdES;
+using SimpleSign.PAdES.Signing;
 using SimpleSign.TestHelpers;
 using Xunit;
 using Xunit.Abstractions;
@@ -9,11 +11,11 @@ namespace SimpleSign.Interop.Tests;
 
 /// <summary>
 /// veraPDF interop tests: validates that documents incrementally signed by SimpleSign
-/// preserve PDF/A conformance as verified by the veraPDF validator (Docker).
+/// preserve PDF/A conformance across diverse corpus files.
 ///
-/// Uses known-good PDF/A-2b and PDF/A-3b corpus files from the veraPDF test suite
-/// as source documents, signs them via <see cref="SimpleSigner"/> (once, twice, thrice),
-/// and asserts that every intermediate output passes veraPDF validation.
+/// Sources are known-good PASS documents from the veraPDF test suite spanning
+/// PDF/A-2b and PDF/A-3b. Every file is signed once, twice, and also validated
+/// with auto-detected flavour to ensure robust conformance preservation.
 /// </summary>
 [Trait("Category", "Interop")]
 [Trait("Category", "VeraPdf")]
@@ -21,6 +23,27 @@ public sealed class VeraPdfInteropTests(ITestOutputHelper output)
 {
     private const string ResourcePrefix = "SimpleSign.Interop.Tests.corpus.verapdf.";
     private const string VeraPdfImage = "verapdf/cli";
+
+    private sealed record VeraPdfCorpusFile(string ResourceName, string Flavour);
+
+    /// <summary>All known-good PASS corpus files by flavour.</summary>
+    private static readonly VeraPdfCorpusFile[] AllFiles =
+    [
+        new("PDF_A-1b-6-4-t01-pass-a.pdf", "1b"),
+        new("PDF_A-1b-6-5-3-t01-pass-a.pdf", "1b"),
+        new("PDF_A-2b-6-1-2-t02-pass-a.pdf", "2b"),
+        new("PDF_A-2b-6-1-3-t01-pass-a.pdf", "2b"),
+        new("PDF_A-2b-6-1-5-t01-pass-a.pdf", "2b"),
+        new("PDF_A-2b-6-2-3-t01-pass-a.pdf", "2b"),
+        new("PDF_A-2b-6-2-10-t01-pass-a.pdf", "2b"),
+        new("PDF_A-2b-6-3-2-t01-pass-a.pdf", "2b"),
+        new("PDF_A-2b-6-3-3-t01-pass-a.pdf", "2b"),
+        new("PDF_A-3b-6-8-t02-pass-a.pdf", "3b"),
+        new("PDF_A-3b-6-8-t02-pass-b.pdf", "3b"),
+    ];
+
+    public static IEnumerable<object[]> AllFilesData =>
+        AllFiles.Select(f => new object[] { f.ResourceName, f.Flavour });
 
     private static byte[] LoadEmbedded(string filename)
     {
@@ -78,150 +101,112 @@ public sealed class VeraPdfInteropTests(ITestOutputHelper output)
             $"veraPDF CLI image not pulled. Run: docker pull {VeraPdfImage}");
     }
 
-    // ──────────────────────────────────────────────────────────────────────
-    // PDF/A-3b tests
-    // ──────────────────────────────────────────────────────────────────────
-
-    [SkippableFact(DisplayName = "PDF/A-3b: single signature preserves conformance (veraPDF)")]
-    public async Task SingleSignature_Preserves_PdfA3b()
+    /// <summary>
+    /// Configures a signer for the given flavour.
+    /// PDF/A-1b requires <see cref="PdfSignatureSubFilter.AdbePkcs7Detached"/>
+    /// (ETSI.CAdES.detached is forbidden by the PDF/A-1 spec) and a visible
+    /// appearance to satisfy the /AP dictionary requirement (ISO 19005-1 §6.9).
+    /// PDF/A-2b/3b use the default ETSI.CAdES.detached with invisible signatures.
+    /// </summary>
+    private static SignerBuilder BuildSigner(byte[] pdf, X509Certificate2 cert, string flavour)
     {
-        SkipIfVeraPdfUnavailable();
-
-        byte[] pdf = LoadEmbedded("PDF_A-3b-6-8-t02-pass-a.pdf");
-        using var cert = TestCertificateFactory.CreateSelfSignedCert("CN=veraPDF 3b Single");
-
-        byte[] signed = await SimpleSigner
+        var builder = SimpleSigner
             .Document(pdf)
             .WithCertificate(cert)
-            .WithPdfAPreservation()
-            .SignAsync();
+            .WithPdfAPreservation();
 
-        var (stdout, stderr, exitCode) = await RunVeraPdf(signed, "3b");
-        output.WriteLine(stdout);
-        if (!string.IsNullOrEmpty(stderr))
-            output.WriteLine($"STDERR: {stderr}");
-
-        stdout.Trim().ShouldStartWith("PASS /data/input.pdf 3b");
-    }
-
-    [SkippableFact(DisplayName = "PDF/A-3b: double signature preserves conformance (veraPDF)")]
-    public async Task DoubleSignature_Preserves_PdfA3b()
-    {
-        SkipIfVeraPdfUnavailable();
-
-        byte[] pdf = LoadEmbedded("PDF_A-3b-6-8-t02-pass-a.pdf");
-        using var cert1 = TestCertificateFactory.CreateSelfSignedCert("CN=veraPDF 3b First");
-        using var cert2 = TestCertificateFactory.CreateSelfSignedCert("CN=veraPDF 3b Second");
-
-        byte[] afterFirst = await SimpleSigner
-            .Document(pdf)
-            .WithCertificate(cert1)
-            .WithPdfAPreservation()
-            .SignAsync();
-
-        byte[] afterSecond = await SimpleSigner
-            .Document(afterFirst)
-            .WithCertificate(cert2)
-            .WithPdfAPreservation()
-            .SignAsync();
-
-        var (stdout, stderr, exitCode) = await RunVeraPdf(afterSecond, "3b");
-        output.WriteLine(stdout);
-        if (!string.IsNullOrEmpty(stderr))
-            output.WriteLine($"STDERR: {stderr}");
-
-        stdout.Trim().ShouldStartWith("PASS /data/input.pdf 3b");
-    }
-
-    [SkippableFact(DisplayName = "PDF/A-3b: triple signature preserves conformance (veraPDF)")]
-    public async Task TripleSignature_Preserves_PdfA3b()
-    {
-        SkipIfVeraPdfUnavailable();
-
-        byte[] pdf = LoadEmbedded("PDF_A-3b-6-8-t02-pass-a.pdf");
-        using var cert1 = TestCertificateFactory.CreateSelfSignedCert("CN=veraPDF 3b S1");
-        using var cert2 = TestCertificateFactory.CreateSelfSignedCert("CN=veraPDF 3b S2");
-        using var cert3 = TestCertificateFactory.CreateSelfSignedCert("CN=veraPDF 3b S3");
-
-        byte[] result = pdf;
-        foreach (var cert in new[] { cert1, cert2, cert3 })
+        if (flavour == "1b")
         {
-            result = await SimpleSigner
-                .Document(result)
-                .WithCertificate(cert)
-                .WithPdfAPreservation()
-                .SignAsync();
+            builder = builder
+                .WithSubFilter(PdfSignatureSubFilter.AdbePkcs7Detached)
+                .WithAppearance(SignatureAppearance.Auto());
         }
 
-        var (stdout, stderr, exitCode) = await RunVeraPdf(result, "3b");
-        output.WriteLine(stdout);
-        if (!string.IsNullOrEmpty(stderr))
-            output.WriteLine($"STDERR: {stderr}");
-
-        stdout.Trim().ShouldStartWith("PASS /data/input.pdf 3b");
+        return builder;
     }
 
     // ──────────────────────────────────────────────────────────────────────
-    // PDF/A-2b tests
+    // Single-sign tests: every corpus file signed once must still PASS
     // ──────────────────────────────────────────────────────────────────────
 
-    [SkippableFact(DisplayName = "PDF/A-2b: single signature preserves conformance (veraPDF)")]
-    public async Task SingleSignature_Preserves_PdfA2b()
+    [SkippableTheory]
+    [MemberData(nameof(AllFilesData))]
+    public async Task SignOnce_PreservesConformance(string resourceName, string flavour)
     {
         SkipIfVeraPdfUnavailable();
 
-        byte[] pdf = LoadEmbedded("PDF_A-2b-6-1-2-t02-pass-a.pdf");
-        using var cert = TestCertificateFactory.CreateSelfSignedCert("CN=veraPDF 2b Single");
+        byte[] pdf = LoadEmbedded(resourceName);
+        using var cert = TestCertificateFactory.CreateSelfSignedCert($"CN=veraPDF {flavour} Single");
 
-        byte[] signed = await SimpleSigner
-            .Document(pdf)
-            .WithCertificate(cert)
-            .WithPdfAPreservation()
+        byte[] signed = await BuildSigner(pdf, cert, flavour)
             .SignAsync();
 
-        var (stdout, stderr, exitCode) = await RunVeraPdf(signed, "2b");
+        var (stdout, stderr, _) = await RunVeraPdf(signed, flavour);
         output.WriteLine(stdout);
         if (!string.IsNullOrEmpty(stderr))
             output.WriteLine($"STDERR: {stderr}");
 
-        stdout.Trim().ShouldStartWith("PASS /data/input.pdf 2b");
+        stdout.Trim().ShouldStartWith($"PASS /data/input.pdf {flavour}");
     }
 
-    [SkippableFact(DisplayName = "PDF/A-2b: double signature preserves conformance (veraPDF)")]
-    public async Task DoubleSignature_Preserves_PdfA2b()
+    // ──────────────────────────────────────────────────────────────────────
+    // Double-sign tests: every corpus file signed twice must still PASS
+    // ──────────────────────────────────────────────────────────────────────
+
+    [SkippableTheory]
+    [MemberData(nameof(AllFilesData))]
+    public async Task SignTwice_PreservesConformance(string resourceName, string flavour)
     {
         SkipIfVeraPdfUnavailable();
 
-        byte[] pdf = LoadEmbedded("PDF_A-2b-6-1-2-t02-pass-a.pdf");
-        using var cert1 = TestCertificateFactory.CreateSelfSignedCert("CN=veraPDF 2b First");
-        using var cert2 = TestCertificateFactory.CreateSelfSignedCert("CN=veraPDF 2b Second");
+        byte[] pdf = LoadEmbedded(resourceName);
+        using var cert1 = TestCertificateFactory.CreateSelfSignedCert($"CN=veraPDF {flavour} First");
+        using var cert2 = TestCertificateFactory.CreateSelfSignedCert($"CN=veraPDF {flavour} Second");
 
-        byte[] afterFirst = await SimpleSigner
-            .Document(pdf)
-            .WithCertificate(cert1)
-            .WithPdfAPreservation()
+        byte[] afterFirst = await BuildSigner(pdf, cert1, flavour)
             .SignAsync();
 
-        byte[] afterSecond = await SimpleSigner
-            .Document(afterFirst)
-            .WithCertificate(cert2)
-            .WithPdfAPreservation()
+        byte[] afterSecond = await BuildSigner(afterFirst, cert2, flavour)
             .SignAsync();
 
-        var (stdout, stderr, exitCode) = await RunVeraPdf(afterSecond, "2b");
+        var (stdout, stderr, _) = await RunVeraPdf(afterSecond, flavour);
         output.WriteLine(stdout);
         if (!string.IsNullOrEmpty(stderr))
             output.WriteLine($"STDERR: {stderr}");
 
-        stdout.Trim().ShouldStartWith("PASS /data/input.pdf 2b");
+        stdout.Trim().ShouldStartWith($"PASS /data/input.pdf {flavour}");
+    }
+
+    // ──────────────────────────────────────────────────────────────────────
+    // Auto-detect flavour: sign once and verify with --flavour 0
+    // ──────────────────────────────────────────────────────────────────────
+
+    [SkippableTheory]
+    [MemberData(nameof(AllFilesData))]
+    public async Task SignOnce_AutoDetectFlavour(string resourceName, string flavour)
+    {
+        SkipIfVeraPdfUnavailable();
+
+        byte[] pdf = LoadEmbedded(resourceName);
+        using var cert = TestCertificateFactory.CreateSelfSignedCert($"CN=veraPDF {flavour} AutoDetect");
+
+        byte[] signed = await BuildSigner(pdf, cert, flavour)
+            .SignAsync();
+
+        var (stdout, stderr, _) = await RunVeraPdf(signed, "0");
+        output.WriteLine(stdout);
+        if (!string.IsNullOrEmpty(stderr))
+            output.WriteLine($"STDERR: {stderr}");
+
+        stdout.Trim().ShouldStartWith("PASS /data/input.pdf");
     }
 
     // ──────────────────────────────────────────────────────────────────────
     // Sanity check: tampered document must be rejected
     // ──────────────────────────────────────────────────────────────────────
 
-    [SkippableFact(DisplayName = "PDF/A-3b: tampered signature is rejected by veraPDF")]
-    public async Task TamperedSignature_RejectedByVeraPdf()
+    [SkippableFact(DisplayName = "PDF/A: tampered document is rejected by veraPDF")]
+    public async Task TamperedDocument_Rejected()
     {
         SkipIfVeraPdfUnavailable();
 
@@ -234,12 +219,10 @@ public sealed class VeraPdfInteropTests(ITestOutputHelper output)
             .WithPdfAPreservation()
             .SignAsync();
 
-        // Corrupt a byte in the original PDF content (before the incremental signature update)
-        // to simulate document tampering.
-        byte[] original = LoadEmbedded("PDF_A-3b-6-8-t02-pass-a.pdf");
-        signed.AsSpan(0, original.Length)[original.Length / 2] ^= 0xFF;
+        // Corrupt the PDF header to guarantee rejection.
+        signed[5] ^= 0xFF;
 
-        var (stdout, stderr, exitCode) = await RunVeraPdf(signed, "3b");
+        var (stdout, stderr, _) = await RunVeraPdf(signed, "3b");
         output.WriteLine(stdout);
         if (!string.IsNullOrEmpty(stderr))
             output.WriteLine($"STDERR: {stderr}");

@@ -124,6 +124,8 @@ public sealed class PdfSignatureWriter
         int acroFormObjNum = reuseAcroForm ? existingAcroFormObjNum : (nextObjNum + 2);
         int appObjNum = reuseAcroForm ? (nextObjNum + 2) : (nextObjNum + 3);
         int imageObjNum = appObjNum + 1;
+        int fontFileObjNum = appObjNum + 2;
+        int fontDescriptorObjNum = appObjNum + 3;
         int contentsHexLength = options.ContentsReservedBytes * 2;
         DateTime sigNow = DateTime.UtcNow;
 
@@ -191,7 +193,20 @@ public sealed class PdfSignatureWriter
             await outputStream.WriteAsync(catalogBytes, cancellationToken).ConfigureAwait(false);
         }
 
-        // Step 7: Write appearance XObject (if visible) and update page /Annots (always).
+        // Step 7: Write font embedding infrastructure (for PDF/A-1 / visible signatures).
+        long fontFileObjOffset = 0L;
+        long fontDescriptorObjOffset = 0L;
+        if (hasAppearance)
+        {
+            var fontFileBytes = PdfFontWriter.BuildFontFileObject(fontFileObjNum);
+            var fontDescriptorBytes = PdfFontWriter.BuildFontDescriptorObject(fontDescriptorObjNum, fontFileObjNum);
+            fontFileObjOffset = outputStream.Position;
+            await outputStream.WriteAsync(fontFileBytes, cancellationToken).ConfigureAwait(false);
+            fontDescriptorObjOffset = outputStream.Position;
+            await outputStream.WriteAsync(fontDescriptorBytes, cancellationToken).ConfigureAwait(false);
+        }
+
+        // Step 8: Write appearance XObject (if visible) and update page /Annots (always).
         long appObjOffset = 0L;
         long imageObjOffset = 0L;
         long updPageObjOffset = 0L;
@@ -200,7 +215,9 @@ public sealed class PdfSignatureWriter
         {
             byte[] appearanceBytes = SignatureAppearanceRenderer.BuildAppearanceXObject(
                 appObjNum, options, sigNow, appWidth, appHeight,
-                hasImage ? imageObjNum : 0);
+                hasImage ? imageObjNum : 0,
+                hasAppearance ? fontFileObjNum : 0,
+                hasAppearance ? fontDescriptorObjNum : 0);
             appObjOffset = outputStream.Position;
             await outputStream.WriteAsync(appearanceBytes, cancellationToken).ConfigureAwait(false);
 
@@ -268,6 +285,8 @@ public sealed class PdfSignatureWriter
             {
                 objectOffsets[imageObjNum] = imageObjOffset;
             }
+            objectOffsets[fontFileObjNum] = fontFileObjOffset;
+            objectOffsets[fontDescriptorObjNum] = fontDescriptorObjOffset;
         }
         long prevXRef = await PdfStructureParser.FindPrevXRefAsync(inputPdf, cancellationToken).ConfigureAwait(false);
         string? trailerId = PdfStructureParser.FindTrailerId(inputMem.Span);

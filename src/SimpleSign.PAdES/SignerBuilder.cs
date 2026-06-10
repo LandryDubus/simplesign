@@ -665,6 +665,39 @@ public sealed class SignerBuilder
     }
 
     /// <summary>
+    /// Sets the signature SubFilter value independently of PAdES attribute configuration.
+    /// Default is <see cref="PdfSignatureSubFilter.EtsiCadesDetached"/>.
+    /// Use <see cref="PdfSignatureSubFilter.AdbePkcs7Detached"/> for PDF/A-1 compatibility
+    /// or when the target validator requires the legacy subfilter.
+    /// </summary>
+    /// <remarks>
+    /// Unlike <see cref="WithLegacyCms"/>, this method does NOT disable CAdES/PAdES attributes.
+    /// The resulting signature includes full PAdES-B-B attributes (signing-certificate-v2, etc.)
+    /// while using the specified SubFilter value in the PDF signature dictionary.
+    /// </remarks>
+    public SignerBuilder WithSubFilter(PdfSignatureSubFilter subFilter)
+    {
+        var newOptions = new SignatureFieldOptions
+        {
+            FieldName = _fieldOptions.FieldName,
+            SignerName = _fieldOptions.SignerName,
+            Reason = _fieldOptions.Reason,
+            Location = _fieldOptions.Location,
+            ContactInfo = _fieldOptions.ContactInfo,
+            ContentsReservedBytes = _fieldOptions.ContentsReservedBytes,
+            SubFilter = subFilter,
+            Appearance = _fieldOptions.Appearance,
+            CertificationLevel = _fieldOptions.CertificationLevel,
+            ExistingFieldName = _fieldOptions.ExistingFieldName
+        };
+        return new(
+            _inputPdf, _certificate, _chain, _tsaUrl, _hashAlgorithm,
+            _hashAlgorithmExplicitlySet, newOptions, _httpClient, _logger, _externalSigner,
+            _signatureAlgorithmOid, _enableLtv, _archivalTsaUrl, _operationId, _enforcePdfA,
+            _metadata, _padesAttributes);
+    }
+
+    /// <summary>
     /// Enables LTV (Long-Term Validation) by embedding DSS with CRLs, OCSP responses, and VRI
     /// in the signed PDF. Requires an HttpClient for downloading revocation data.
     /// Requires a timestamp (call <see cref="WithTimestamp(string)"/> first) — PAdES B-LT needs B-T.

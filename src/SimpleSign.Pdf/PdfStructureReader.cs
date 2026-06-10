@@ -444,6 +444,10 @@ public sealed class PdfStructureReader
             (3, 'A') => PdfALevel.A3a,
             (3, 'B') => PdfALevel.A3b,
             (3, 'U') => PdfALevel.A3u,
+            (4, 'A') => PdfALevel.A4a,
+            (4, 'B') => PdfALevel.A4b,
+            (4, 'U') => PdfALevel.A4u,
+            (4, 'E') => PdfALevel.A4e,
             _ => PdfALevel.Unknown
         };
     }

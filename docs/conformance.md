@@ -55,7 +55,7 @@ SimpleSign is designed with PDF 2.0 alignment in mind. The digital signature sub
 | | B-LT (Long-Term) | ✅ | DSS dictionary with CRL/OCSP |
 | | B-LTA (Archive) | ✅ | Document timestamp for decade-long validity |
 | | DocMDP (Certification) | ✅ | Three permission levels (P=1, 2, 3) |
-| | PDF/A preservation | ✅ | Detects and preserves 1a/1b/2a/2b/3a/3b |
+| | PDF/A preservation | ✅ | Detects and preserves 1a/1b/2a/2b/2u/3a/3b/3u/4a/4b/4u/4e |
 | **DOC-ICP-15** | AD-RB (Referência Básica) | ✅ | CMS + signingCertificateV2, ICP-Brasil chain |
 | | AD-RT (Referência Temporal) | ✅ | AD-RB + RFC 3161 timestamp |
 | | AD-RV/AD-RC/AD-RA | ❌ | Future: requires CAdES-XL/A validation references |
@@ -79,6 +79,6 @@ SimpleSign is designed with PDF 2.0 alignment in mind. The digital signature sub
 | **Signature** | RSA PKCS#1 v1.5, RSA-PSS, ECDSA (P-256/P-384/P-521), EdDSA (Ed25519/Ed448)¹ |
 | **Revocation** | CRL, OCSP, embedded DSS |
 | **Timestamps** | RFC 3161 |
-| **PDF/A** | 1a, 1b, 2a, 2b, 3a, 3b (detection + preservation) |
+| **PDF/A** | 1a, 1b, 2a, 2b, 2u, 3a, 3b, 3u, 4a, 4b, 4u, 4e (detection + preservation) |
 
 ¹ EdDSA via external signer pipeline; verification depends on runtime support.

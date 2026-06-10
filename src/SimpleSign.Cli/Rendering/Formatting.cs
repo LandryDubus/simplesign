@@ -38,6 +38,10 @@ internal static class Formatting
         PdfALevel.A3a => "PDF/A-3a",
         PdfALevel.A3b => "PDF/A-3b",
         PdfALevel.A3u => "PDF/A-3u",
+        PdfALevel.A4a => "PDF/A-4a",
+        PdfALevel.A4b => "PDF/A-4b",
+        PdfALevel.A4u => "PDF/A-4u",
+        PdfALevel.A4e => "PDF/A-4e",
         PdfALevel.Unknown => "PDF/A (level unknown)",
         _ => level.ToString()
     };
@@ -53,6 +57,10 @@ internal static class Formatting
         PdfALevel.A3a => "PDF/A-3a (ISO 19005-3)",
         PdfALevel.A3b => "PDF/A-3b (ISO 19005-3)",
         PdfALevel.A3u => "PDF/A-3u (ISO 19005-3)",
+        PdfALevel.A4a => "PDF/A-4a (ISO 19005-4)",
+        PdfALevel.A4b => "PDF/A-4b (ISO 19005-4)",
+        PdfALevel.A4u => "PDF/A-4u (ISO 19005-4)",
+        PdfALevel.A4e => "PDF/A-4e (ISO 19005-4)",
         PdfALevel.Unknown => "PDF/A (level unknown)",
         _ => level.ToString()
     };

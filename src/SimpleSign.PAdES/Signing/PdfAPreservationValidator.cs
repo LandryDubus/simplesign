@@ -66,6 +66,7 @@ public static class PdfAPreservationValidator
     private static void ValidateAppearance(PdfALevel level, SignatureAppearance appearance, List<PdfACompatibilityIssue> issues)
     {
         // PDF/A-1 forbids transparency; PNG images with alpha channel could be problematic
+        // PDF/A-2+ allow transparency; PDF/A-4 (ISO 19005-4) also allows it
         if (level is PdfALevel.A1a or PdfALevel.A1b)
         {
             if (appearance.BackgroundImagePng is { Length: > 0 })

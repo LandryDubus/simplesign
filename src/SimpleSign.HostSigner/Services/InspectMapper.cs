@@ -177,6 +177,10 @@ internal static class InspectMapper
         SimpleSign.Pdf.Enums.PdfALevel.A3a => "PDF/A-3a (ISO 19005-3)",
         SimpleSign.Pdf.Enums.PdfALevel.A3b => "PDF/A-3b (ISO 19005-3)",
         SimpleSign.Pdf.Enums.PdfALevel.A3u => "PDF/A-3u (ISO 19005-3)",
+        SimpleSign.Pdf.Enums.PdfALevel.A4a => "PDF/A-4a (ISO 19005-4)",
+        SimpleSign.Pdf.Enums.PdfALevel.A4b => "PDF/A-4b (ISO 19005-4)",
+        SimpleSign.Pdf.Enums.PdfALevel.A4u => "PDF/A-4u (ISO 19005-4)",
+        SimpleSign.Pdf.Enums.PdfALevel.A4e => "PDF/A-4e (ISO 19005-4)",
         _ => level.ToString()
     };
 }

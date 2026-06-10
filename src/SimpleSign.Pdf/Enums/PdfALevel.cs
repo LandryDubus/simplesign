@@ -32,6 +32,18 @@ public enum PdfALevel
     /// <summary>PDF/A-3u (ISO 19005-3, Level U).</summary>
     A3u,
 
+    /// <summary>PDF/A-4 (ISO 19005-4:2020, Level A — full accessibility).</summary>
+    A4a,
+
+    /// <summary>PDF/A-4 (ISO 19005-4:2020, Level B — basic visual reproduction).</summary>
+    A4b,
+
+    /// <summary>PDF/A-4 (ISO 19005-4:2020, Level U — Unicode text).</summary>
+    A4u,
+
+    /// <summary>PDF/A-4 (ISO 19005-4:2020, Level E — embedded files).</summary>
+    A4e,
+
     /// <summary>PDF/A detected but specific level could not be determined.</summary>
     Unknown
 }

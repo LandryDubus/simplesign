@@ -32,6 +32,8 @@ public sealed class FormattingTests
     [InlineData(PdfALevel.None, "Not detected")]
     [InlineData(PdfALevel.A1b, "PDF/A-1b")]
     [InlineData(PdfALevel.A3u, "PDF/A-3u")]
+    [InlineData(PdfALevel.A4b, "PDF/A-4b")]
+    [InlineData(PdfALevel.A4e, "PDF/A-4e")]
     public void FormatPdfA_ReturnsExpected(PdfALevel level, string expected) =>
         Formatting.FormatPdfA(level).ShouldBe(expected);
 
@@ -39,6 +41,8 @@ public sealed class FormattingTests
     [InlineData(PdfALevel.None, "Not detected")]
     [InlineData(PdfALevel.A1b, "PDF/A-1b (ISO 19005-1)")]
     [InlineData(PdfALevel.A3u, "PDF/A-3u (ISO 19005-3)")]
+    [InlineData(PdfALevel.A4b, "PDF/A-4b (ISO 19005-4)")]
+    [InlineData(PdfALevel.A4e, "PDF/A-4e (ISO 19005-4)")]
     public void FormatPdfAFull_ReturnsExpected(PdfALevel level, string expected) =>
         Formatting.FormatPdfAFull(level).ShouldBe(expected);
 

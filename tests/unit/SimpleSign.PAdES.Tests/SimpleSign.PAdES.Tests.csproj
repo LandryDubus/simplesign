@@ -4,7 +4,7 @@
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
     <RootNamespace>SimpleSign.PAdES.Tests</RootNamespace>
-    <NoWarn>$(NoWarn);NU1903;CA1829;CA1861</NoWarn>
+    <NoWarn>$(NoWarn);CA1829;CA1861</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>

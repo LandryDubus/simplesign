@@ -12,7 +12,7 @@
       "!**/obj/**/*.*",
       "!**/bin/**/*.*"
     ],
-    "mutation-level": "Standard",
+    "mutation-level": "Advanced",
     "ignore-mutations": [
       "Linq",
       "Block"

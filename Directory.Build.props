@@ -30,9 +30,8 @@
     <ContinuousIntegrationBuild Condition="'$(CI)' == 'true'">true</ContinuousIntegrationBuild>
     <!-- Allow restore/build of Windows-targeting projects (e.g. HostSigner) on Linux CI -->
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
-    <!-- NU1903: System.Security.Cryptography.Xml has a known vulnerability with no patched version yet.
-         Suppress so TreatWarningsAsErrors doesn't break CI. Remove once a fixed version is available. -->
-    <NoWarn>$(NoWarn);NU1903</NoWarn>
+    <!-- NU1903 was previously suppressed for System.Security.Cryptography.Xml (CVE-2024-30105).
+         Verified via `dotnet list package --vulnerable` — no vulnerable packages remain. -->
   </PropertyGroup>
 
   <ItemGroup>

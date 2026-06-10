@@ -1,0 +1,59 @@
+name: Fuzz
+
+on:
+  schedule:
+    - cron: '0 5 * * 3'
+  workflow_dispatch:
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+permissions:
+  contents: read
+
+jobs:
+  fuzz:
+    name: Fuzz ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [pdf, dss, timestamp, ocsp, cms, validator, xref]
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: |
+            8.0.x
+            10.0.x
+
+      - name: Restore
+        run: dotnet restore
+
+      - name: Publish fuzz harness
+        run: dotnet publish tests/fuzz/SimpleSign.Fuzz -c Release -f net8.0 -o ./fuzz-publish
+
+      - name: Install SharpFuzz
+        run: dotnet tool install --global SharpFuzz.CommandTool
+
+      - name: Instrument assemblies
+        run: |
+          sharpfuzz ./fuzz-publish/SimpleSign.Core.dll
+          sharpfuzz ./fuzz-publish/SimpleSign.Pdf.dll
+          sharpfuzz ./fuzz-publish/SimpleSign.PAdES.dll
+
+      - name: Run fuzz target
+        continue-on-error: true
+        timeout-minutes: 15
+        run: |
+          dotnet ./fuzz-publish/SimpleSign.Fuzz.dll ${{ matrix.target }} --timeout 900
+
+      - name: Upload crash artifacts
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: fuzz-crashes-${{ matrix.target }}
+          path: ./fuzz-publish/Crashes/

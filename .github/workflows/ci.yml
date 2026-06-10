@@ -153,6 +153,67 @@ jobs:
           name: nupkg
           path: ./nupkg/*.nupkg
 
+  mutation-test:
+    name: Mutation Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Restore
+        run: dotnet restore
+
+      - name: Build
+        run: dotnet build --configuration Release
+
+      - name: Run mutation tests
+        continue-on-error: true
+        run: dotnet stryker
+
+      - name: Upload Stryker report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: stryker-report
+          path: StrykerOutput/
+
+  stress-test:
+    name: Stress Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Restore
+        run: dotnet restore
+
+      - name: Build
+        run: dotnet build --configuration Release
+
+      - name: Run stress tests
+        continue-on-error: true
+        timeout-minutes: 15
+        run: |
+          dotnet test --no-build --configuration Release \
+            --filter "Category=Stress" \
+            --logger "console;verbosity=normal" \
+            --results-directory TestResults-Stress
+
+      - name: Upload stress test results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: stress-test-results
+          path: TestResults-Stress/
+
   aot-smoke-test:
     name: AOT Smoke Test
     runs-on: ubuntu-latest

@@ -101,7 +101,7 @@ public sealed class VeraPdfInteropTests(ITestOutputHelper output)
         if (!string.IsNullOrEmpty(stderr))
             output.WriteLine($"STDERR: {stderr}");
 
-        stdout.ShouldContain("Compliance: PASS");
+        stdout.Trim().ShouldStartWith("PASS /data/input.pdf 3b");
     }
 
     [SkippableFact(DisplayName = "PDF/A-3b: double signature preserves conformance (veraPDF)")]
@@ -130,7 +130,7 @@ public sealed class VeraPdfInteropTests(ITestOutputHelper output)
         if (!string.IsNullOrEmpty(stderr))
             output.WriteLine($"STDERR: {stderr}");
 
-        stdout.ShouldContain("Compliance: PASS");
+        stdout.Trim().ShouldStartWith("PASS /data/input.pdf 3b");
     }
 
     [SkippableFact(DisplayName = "PDF/A-3b: triple signature preserves conformance (veraPDF)")]
@@ -158,7 +158,7 @@ public sealed class VeraPdfInteropTests(ITestOutputHelper output)
         if (!string.IsNullOrEmpty(stderr))
             output.WriteLine($"STDERR: {stderr}");
 
-        stdout.ShouldContain("Compliance: PASS");
+        stdout.Trim().ShouldStartWith("PASS /data/input.pdf 3b");
     }
 
     // ──────────────────────────────────────────────────────────────────────
@@ -184,7 +184,7 @@ public sealed class VeraPdfInteropTests(ITestOutputHelper output)
         if (!string.IsNullOrEmpty(stderr))
             output.WriteLine($"STDERR: {stderr}");
 
-        stdout.ShouldContain("Compliance: PASS");
+        stdout.Trim().ShouldStartWith("PASS /data/input.pdf 2b");
     }
 
     [SkippableFact(DisplayName = "PDF/A-2b: double signature preserves conformance (veraPDF)")]
@@ -213,7 +213,7 @@ public sealed class VeraPdfInteropTests(ITestOutputHelper output)
         if (!string.IsNullOrEmpty(stderr))
             output.WriteLine($"STDERR: {stderr}");
 
-        stdout.ShouldContain("Compliance: PASS");
+        stdout.Trim().ShouldStartWith("PASS /data/input.pdf 2b");
     }
 
     // ──────────────────────────────────────────────────────────────────────
@@ -244,6 +244,6 @@ public sealed class VeraPdfInteropTests(ITestOutputHelper output)
         if (!string.IsNullOrEmpty(stderr))
             output.WriteLine($"STDERR: {stderr}");
 
-        stdout.ShouldContain("Compliance: FAIL");
+        stdout.Trim().ShouldStartWith("FAIL /data/input.pdf 3b");
     }
 }

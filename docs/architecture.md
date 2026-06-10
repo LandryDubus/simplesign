@@ -33,7 +33,7 @@ SimpleSign.Brasil              Brazilian PKI (ICP-Brasil + Gov.br + Lei 14.063)
 ├── AdvancedSignatureInfo      AEA Lei 14.063 metadata
 └── BrasilExtension            Registration entry point
 
-SimpleSign.Cli                 Commands via Spectre.Console
+SimpleSign.Cli                 CLI tool (Spectre.Console)
 SimpleSign.HostSigner          Windows tray app — local signing HTTP API
 ```
 
@@ -53,8 +53,8 @@ SimpleSign.HostSigner          Windows tray app — local signing HTTP API
 
 | Metric | Value |
 |---|---|
-| **Tests** | 1,602 (unit, integration, interop, fuzz, corpus, ISO compliance) |
-| **Test categories** | Unit (algorithm + ISO 32000 compliance), Integration (sign→validate round-trip), Interop (EU DSS, iText, PDFBox), ETSI Corpus (9 test methods), Fuzz (7 SharpFuzz harnesses), Stress (1,000-op memory + concurrency) |
+| **Tests** | 1,700+ (unit, integration, interop, fuzz, corpus, ISO compliance) |
+| **Test categories** | Unit (algorithm + ISO 32000 compliance), Integration (sign→validate round-trip), Interop (~150 scenarios, 18 files: EU DSS, iText, PDFBox, pyHanko, OpenSSL, xmlsec1, veraPDF), ETSI Corpus (multi-revision + 6 country fixtures), Fuzz (7 SharpFuzz harnesses), CLI (command-line tests), VeraPDF (PDF/A conformance), Stress (1,000-op memory + concurrency) |
 | **Real-world fixtures** | 57 PDFs from Adobe, iText, EU DSS, ICP-Brasil, Belgian eID, Spanish/German/French/Hungarian gov |
 | **Source lines** | ~32,800 |
 | **Warnings** | 0 (all warnings treated as errors) |

@@ -22,12 +22,12 @@ dotnet add package SimpleSign.PAdES
 using SimpleSign.PAdES;
 
 // Sign a PDF
-var signer = new SignerBuilder(pdfBytes, certificate)
+byte[] signedPdf = await SimpleSigner
+    .Document(pdfBytes)
+    .WithCertificate(certificate)
     .WithSignerName("John Doe")
     .WithReason("Approval")
-    .Build();
-
-byte[] signedPdf = await signer.SignAsync();
+    .SignAsync();
 ```
 
 ## Packages
@@ -39,6 +39,7 @@ byte[] signedPdf = await signer.SignAsync();
 | [`SimpleSign.PAdES`](xref:SimpleSign.PAdES) | PAdES signing, validation, inspection |
 | [`SimpleSign.Brasil`](xref:SimpleSign.Brasil) | ICP-Brasil trust anchors and certificate utilities |
 | [`SimpleSign.HtmlToPdf`](xref:SimpleSign.HtmlToPdf) | HTML-to-PDF conversion |
+| [`SimpleSign.Cli`](https://www.nuget.org/packages/SimpleSign.Cli) | CLI tool for signing, validation, inspection |
 
 ## Learn More
 
@@ -46,4 +47,6 @@ byte[] signedPdf = await signer.SignAsync();
 - [Deferred Signing](articles/deferred-signing.md)
 - [Inspection & Validation](articles/inspection-validation.md)
 - [ICP-Brasil](articles/icp-brasil.md)
+- [HostSigner](https://github.com/eupassarin/SimpleSign/tree/main/src/SimpleSign.HostSigner) — Windows tray app for local signing
+- [CLI Tool](https://www.nuget.org/packages/SimpleSign.Cli) — command-line signing and validation
 - [GitHub Repository](https://github.com/eupassarin/SimpleSign)

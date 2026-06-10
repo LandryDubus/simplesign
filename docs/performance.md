@@ -1,9 +1,12 @@
-← [Back to README](../README.md)
+← [Back to README](../README.md) — [Comprehensive Benchmark Report](benchmarks.md)
 
 # Performance
 
+> ⚠️ This page shows legacy benchmarks from .NET 8 on Intel hardware.  
+> See [`benchmarks.md`](benchmarks.md) for current results on .NET 10 (Apple M2 Pro) with 67 benchmarks across 14 suites.
+
 Benchmarks use [BenchmarkDotNet](https://benchmarkdotnet.org/) on **12th Gen Intel Core i7-1265U, .NET 8.0.27, Windows 11**.  
-Full results live in [`BenchmarkDotNet.Artifacts/`](../BenchmarkDotNet.Artifacts/).
+Full results live in [`bench/BenchmarkDotNet.Artifacts/`](../bench/BenchmarkDotNet.Artifacts/).
 
 ---
 
@@ -71,7 +74,7 @@ Comparing three input/output strategies for the same document:
 
 ```bash
 cd bench
-dotnet run -c Release -- --job short --runtimes net8.0
+dotnet run -c Release -- --job short --runtimes net10.0
 ```
 
 Filter to a specific suite:

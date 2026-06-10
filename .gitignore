@@ -28,6 +28,12 @@ Thumbs.db
 
 ## Secrets (never commit private keys)
 *.pfx
+
+## Node / Web frontends
+node_modules/
+
+## Sample generated files
+samples/WebHtmlToPDF/wwwroot/samples/
 *.p12
 *.snk
 !tests/SimpleSign.TestFixtures/**/*.pem

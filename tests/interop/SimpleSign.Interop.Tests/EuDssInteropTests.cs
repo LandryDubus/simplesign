@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using Shouldly;
 using SimpleSign.PAdES;
+using SimpleSign.PAdES.Signing;
 using SimpleSign.TestHelpers;
 using Xunit;
 using Xunit.Abstractions;
@@ -46,6 +47,19 @@ public sealed class EuDssInteropTests(ITestOutputHelper output)
         var signed1 = await SimpleSigner.Document(pdf).WithCertificate(cert1).SignAsync();
         var signed2 = await SimpleSigner.Document(signed1).WithCertificate(cert2).SignAsync();
         await ValidatePdfWithEuDss(signed2, "pades-double-signed");
+    }
+
+    [SkippableFact(DisplayName = "PAdES with AdbePkcs7Detached subfilter validates under EU DSS")]
+    public async Task PadesAdbePkcs7_ValidatesWithEuDss()
+    {
+        SkipIfDockerUnavailable();
+        var pdf = MinimalPdf();
+        using var cert = TestCertificateFactory.CreateSelfSignedCert("CN=PAdES ADBE EU DSS");
+        var signed = await SimpleSigner.Document(pdf)
+            .WithCertificate(cert)
+            .WithSubFilter(PdfSignatureSubFilter.AdbePkcs7Detached)
+            .SignAsync();
+        await ValidatePdfWithEuDss(signed, "pades-adbe-pkcs7");
     }
 
     private static void SkipIfDockerUnavailable()

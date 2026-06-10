@@ -115,6 +115,19 @@ public sealed class ITextInteropTests(ITestOutputHelper output)
         await ValidatePdfWithIText(signed, "pades-ltv");
     }
 
+    [SkippableFact(DisplayName = "PAdES with AdbePkcs7Detached subfilter validates under iText 9")]
+    public async Task PadesAdbePkcs7_ValidatesWithIText()
+    {
+        SkipIfDockerUnavailable();
+        var pdf = MinimalPdf();
+        using var cert = TestCertificateFactory.CreateSelfSignedCert("CN=PAdES ADBE iText");
+        var signed = await SimpleSigner.Document(pdf)
+            .WithCertificate(cert)
+            .WithSubFilter(PdfSignatureSubFilter.AdbePkcs7Detached)
+            .SignAsync();
+        await ValidatePdfWithIText(signed, "pades-adbe-pkcs7");
+    }
+
     private static void SkipIfDockerUnavailable()
     {
         Skip.IfNot(DockerProbe.IsDockerAvailable(), "Docker is not available on this host.");

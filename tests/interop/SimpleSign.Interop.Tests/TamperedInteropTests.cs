@@ -173,6 +173,124 @@ public sealed class TamperedInteropTests(ITestOutputHelper output)
         }
     }
 
+    // ─── Additional tamper types ───
+
+    [SkippableFact(DisplayName = "Tampered byte range — pyHanko rejects")]
+    public async Task TamperedByteRange_PyHankoRejects()
+    {
+        SkipIfDssUnavailable();
+
+        var pdf = MinimalPdf();
+        using var cert = TestCertificateFactory.CreateSelfSignedCert("CN=Tampered ByteRange");
+        var signed = await SimpleSigner.Document(pdf).WithCertificate(cert).SignAsync();
+
+        // Corrupt /ByteRange in the signature dictionary by modifying one digit
+        var text = System.Text.Encoding.Latin1.GetString(signed);
+        var brIdx = text.IndexOf("/ByteRange", StringComparison.Ordinal);
+        if (brIdx < 0)
+        {
+            throw new InvalidOperationException("Could not find /ByteRange");
+        }
+
+        var tampered = (byte[])signed.Clone();
+        int digitPos = brIdx + "/ByteRange [".Length;
+        while (digitPos < tampered.Length && tampered[digitPos] == ' ')
+        {
+            digitPos++;
+        }
+        tampered[digitPos] = tampered[digitPos] == '0' ? (byte)'1' : (byte)'0';
+
+        await AssertTamperedRejectedByDss(tampered, "tampered-byterange");
+    }
+
+    [SkippableFact(DisplayName = "Tampered xref entry — pyHanko rejects")]
+    public async Task TamperedXref_PyHankoRejects()
+    {
+        SkipIfDssUnavailable();
+
+        var pdf = MinimalPdf();
+        using var cert = TestCertificateFactory.CreateSelfSignedCert("CN=Tampered Xref");
+        var signed = await SimpleSigner.Document(pdf).WithCertificate(cert).SignAsync();
+
+        // Corrupt an "n" entry in the xref table after the original objects
+        var text = System.Text.Encoding.Latin1.GetString(signed);
+        var xrefIdx = text.IndexOf("\nxref\n", StringComparison.Ordinal);
+        if (xrefIdx < 0)
+        {
+            xrefIdx = text.IndexOf("\rxref\n", StringComparison.Ordinal);
+        }
+
+        if (xrefIdx < 0)
+        {
+            throw new InvalidOperationException("Could not find xref");
+        }
+
+        var tampered = (byte[])signed.Clone();
+        // Find the first " n " after xref and change to " f "
+        int searchStart = xrefIdx;
+        for (int i = searchStart; i < tampered.Length - 4; i++)
+        {
+            if (tampered[i] == (byte)' ' && tampered[i + 1] == (byte)'n' && tampered[i + 2] == (byte)' ')
+            {
+                tampered[i + 1] = (byte)'f';
+                break;
+            }
+        }
+
+        await AssertTamperedRejectedByDss(tampered, "tampered-xref");
+    }
+
+    [SkippableFact(DisplayName = "Tampered /Contents truncated — pyHanko rejects")]
+    public async Task TamperedContentsTruncated_PyHankoRejects()
+    {
+        SkipIfDssUnavailable();
+
+        var pdf = MinimalPdf();
+        using var cert = TestCertificateFactory.CreateSelfSignedCert("CN=Tampered Contents");
+        var signed = await SimpleSigner.Document(pdf).WithCertificate(cert).SignAsync();
+
+        var text = System.Text.Encoding.Latin1.GetString(signed);
+        var closeIdx = text.LastIndexOf('>');
+        if (closeIdx < 0)
+        {
+            throw new InvalidOperationException("Could not find closing > of /Contents");
+        }
+
+        var tampered = (byte[])signed.Clone();
+        // Truncate the last 100 hex chars of /Contents
+        int trimStart = closeIdx - 100;
+        if (trimStart > 0)
+        {
+            Array.Clear(tampered, trimStart, 100);
+        }
+
+        await AssertTamperedRejectedByDss(tampered, "tampered-contents-truncated");
+    }
+
+    private async Task AssertTamperedRejectedByDss(byte[] tampered, string label)
+    {
+        var tmpDir = CreateTempDir();
+        await File.WriteAllBytesAsync(Path.Combine(tmpDir, "signed.pdf"), tampered);
+        try
+        {
+            var (stdout, stderr, exitCode) = await DockerRun(
+                $"-v {tmpDir}:/in simplesign-dss validate-pades /in/signed.pdf");
+            output.WriteLine($"[{label}] exit={exitCode}");
+            output.WriteLine(stdout);
+            if (!string.IsNullOrEmpty(stderr))
+                output.WriteLine($"STDERR: {stderr}");
+            var combined = stdout + stderr;
+            (combined.Contains("INVALID") || combined.Contains("error")
+                || combined.Contains("Error") || combined.Contains("Traceback")
+                || !combined.Contains("VALID") || exitCode != 0).ShouldBeTrue(
+                $"pyHanko should reject the tampered PDF ({label})");
+        }
+        finally
+        {
+            Directory.Delete(tmpDir, recursive: true);
+        }
+    }
+
     // ─── Helpers ───
 
     private static byte[] TamperPdfContents(byte[] signed)

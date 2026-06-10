@@ -461,6 +461,22 @@ public sealed class PadesDssInteropTests(ITestOutputHelper output)
         }
     }
 
+    [SkippableFact(DisplayName = "PAdES with AdbePkcs7Detached subfilter — CMS validates under OpenSSL")]
+    public async Task PadesAdbePkcs7_CmsValidatesWithOpenSsl()
+    {
+        SkipIfDockerUnavailable();
+        var pdf = MinimalPdf();
+        using var cert = TestCertificateFactory.CreateSelfSignedCert("CN=PAdES ADBE Interop");
+        var signed = await SimpleSigner.Document(pdf)
+            .WithCertificate(cert)
+            .WithSubFilter(PdfSignatureSubFilter.AdbePkcs7Detached)
+            .SignAsync();
+        using var stream = new MemoryStream(signed);
+        var signatures = await PadesExtractor.ExtractAsync(stream);
+        signatures.Count().ShouldBeGreaterThan(0);
+        await ValidateDetachedCms(signatures[0].CmsSignature, signatures[0].SignedData, cert, "pades-adbe-pkcs7");
+    }
+
     [SkippableFact(DisplayName = "PAdES with LTV — pyHanko validates structure")]
     public async Task PadesLtv_PyHankoStructure()
     {

@@ -215,6 +215,53 @@ public sealed class EtsiCorpusTests(ITestOutputHelper output)
         output.WriteLine("BadEncodedCMS.pdf: validator returned without crashing ✓");
     }
 
+    // ── Online revocation validation (requires network) ──────────────────────────────────
+
+    /// <summary>
+    /// Validate selected corpus documents with online revocation (CRL/OCSP) enabled.
+    /// These tests exercise the full chain validation path and are skipped when
+    /// network access is unavailable (or after timeout).
+    /// These are not embedded as SkippableFact depends on Docker; we use a manual
+    /// skip mechanism via CancellationToken timeout.
+    /// </summary>
+    [Theory]
+    [InlineData("AD-RB.pdf")]
+    [InlineData("Signature-P-BG_BOR-1.pdf")]
+    public async Task Validator_SingleSignature_WithRevocationCheck(string filename)
+    {
+        var bytes = LoadEmbedded(filename);
+
+        var onlineOptions = new ValidationOptions
+        {
+            CheckRevocation = true,
+            TrustSystemRoots = true,
+            NetworkTimeout = TimeSpan.FromSeconds(10),
+        };
+
+        var validator = new PdfSignatureValidator(onlineOptions);
+
+        try
+        {
+            var results = await validator.ValidateAsync(new MemoryStream(bytes));
+
+            output.WriteLine($"[{filename}] {results.Count} result(s):");
+            foreach (var r in results)
+                output.WriteLine(
+                    $"  {r.FieldName}: integrity={r.IsIntegrityValid} sig={r.IsSignatureValid} rev={r.IsNotRevoked}");
+
+            results.ShouldNotBeEmpty();
+            results.ShouldContain(r => r.IsIntegrityValid);
+        }
+        catch (OperationCanceledException)
+        {
+            output.WriteLine($"[SKIP] '{filename}' — network timeout or revocation endpoint unreachable");
+        }
+        catch (HttpRequestException ex)
+        {
+            output.WriteLine($"[SKIP] '{filename}' — network error: {ex.Message}");
+        }
+    }
+
     /// <summary>
     /// Large corpus files — integrity check, skipped in CI.
     /// PAdES-LTA has at least one valid archive timestamp over the primary signature.

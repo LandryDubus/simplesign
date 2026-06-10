@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text;
 using Shouldly;
 using SimpleSign.PAdES;
 using SimpleSign.TestHelpers;
@@ -171,6 +172,58 @@ public sealed class ComplexPdfInteropTests(ITestOutputHelper output)
         }
     }
 
+    [SkippableFact(DisplayName = "Complex: XRef stream PDF (PDF 1.5+) — iText validates signature")]
+    public async Task XRefStreamPdf_ITextValidates()
+    {
+        SkipIfDockerUnavailable("simplesign-itext");
+        var pdf = MinimalXRefStreamPdf();
+        using var cert = TestCertificateFactory.CreateSelfSignedCert("CN=XRef Stream Test");
+
+        var signed = await SimpleSigner.Document(pdf).WithCertificate(cert).SignAsync();
+
+        var tmpDir = CreateTempDir();
+        await File.WriteAllBytesAsync(Path.Combine(tmpDir, "signed.pdf"), signed);
+        try
+        {
+            var (stdout, stderr, exitCode) = await DockerRun(
+                $"-v {tmpDir}:/in simplesign-itext validate-pdf /in/signed.pdf");
+            output.WriteLine($"[xref-stream-itext] exit={exitCode}");
+            output.WriteLine(stdout);
+            exitCode.ShouldBe(0, "iText should validate signature on xref-stream PDF");
+            stdout.ShouldContain("RESULT: VALID");
+        }
+        finally
+        {
+            Directory.Delete(tmpDir, recursive: true);
+        }
+    }
+
+    [SkippableFact(DisplayName = "Complex: XRef stream PDF — pyHanko validates structure")]
+    public async Task XRefStreamPdf_PyHankoValidates()
+    {
+        SkipIfDockerUnavailable("simplesign-dss");
+        var pdf = MinimalXRefStreamPdf();
+        using var cert = TestCertificateFactory.CreateSelfSignedCert("CN=XRef Stream pyHanko");
+
+        var signed = await SimpleSigner.Document(pdf).WithCertificate(cert).SignAsync();
+
+        var tmpDir = CreateTempDir();
+        await File.WriteAllBytesAsync(Path.Combine(tmpDir, "signed.pdf"), signed);
+        try
+        {
+            var (stdout, stderr, exitCode) = await DockerRun(
+                $"-v {tmpDir}:/in simplesign-dss validate-pades /in/signed.pdf");
+            output.WriteLine($"[xref-stream-pyhanko] exit={exitCode}");
+            output.WriteLine(stdout);
+            exitCode.ShouldBe(0, "pyHanko should validate signature on xref-stream PDF");
+            (stdout + stderr).ShouldContain("intact=True");
+        }
+        finally
+        {
+            Directory.Delete(tmpDir, recursive: true);
+        }
+    }
+
     [SkippableFact(DisplayName = "Complex: Sign 50-page PDF → iText validates (stress)")]
     public async Task Sign50Page_ValidatesWithIText()
     {
@@ -223,6 +276,71 @@ public sealed class ComplexPdfInteropTests(ITestOutputHelper output)
         string stderr = await proc.StandardError.ReadToEndAsync();
         await proc.WaitForExitAsync();
         return (stdout, stderr, proc.ExitCode);
+    }
+
+    /// <summary>
+    /// Build a minimal PDF that uses xref streams (PDF 1.5+) instead of a classic xref table.
+    /// This exercises the cross-reference stream parsing path in SimpleSign.Pdf.
+    /// </summary>
+    private static byte[] MinimalXRefStreamPdf()
+    {
+        var sb = new StringBuilder();
+        sb.Append("%PDF-1.7\n");
+
+        int obj1Offset = sb.Length;
+        sb.Append("1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n");
+
+        int obj2Offset = sb.Length;
+        sb.Append("2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n");
+
+        int obj3Offset = sb.Length;
+        sb.Append("3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>\nendobj\n");
+
+        long xrefOffset = sb.Length;
+
+        // Build xref stream entries: type(1) + offset(4) + gen(1) = 6 bytes per entry
+        byte[] entries =
+        [
+            0, 0, 0, 0, 0, 0xFF, // entry 0: free
+            1,
+            (byte)((obj1Offset >> 24) & 0xFF),
+            (byte)((obj1Offset >> 16) & 0xFF),
+            (byte)((obj1Offset >> 8) & 0xFF),
+            (byte)(obj1Offset & 0xFF),
+            0,
+            1,
+            (byte)((obj2Offset >> 24) & 0xFF),
+            (byte)((obj2Offset >> 16) & 0xFF),
+            (byte)((obj2Offset >> 8) & 0xFF),
+            (byte)(obj2Offset & 0xFF),
+            0,
+            1,
+            (byte)((obj3Offset >> 24) & 0xFF),
+            (byte)((obj3Offset >> 16) & 0xFF),
+            (byte)((obj3Offset >> 8) & 0xFF),
+            (byte)(obj3Offset & 0xFF),
+            0,
+        ];
+
+        sb.Append("4 0 obj\n");
+        sb.Append("<< /Type /XRef\n");
+        sb.Append("   /Size 5\n");
+        sb.Append("   /Root 1 0 R\n");
+        sb.Append("   /W [1 4 1]\n");
+        sb.Append("   /Index [0 4]\n");
+        sb.Append($"   /Length {entries.Length}\n");
+        sb.Append(">>\n");
+        sb.Append("stream\n");
+
+        byte[] headerBytes = Encoding.Latin1.GetBytes(sb.ToString());
+        byte[] footerText = Encoding.Latin1.GetBytes($"\nendstream\nendobj\nstartxref\n{xrefOffset}\n%%EOF\n");
+
+        byte[] result = new byte[headerBytes.Length + entries.Length + footerText.Length];
+        Buffer.BlockCopy(headerBytes, 0, result, 0, headerBytes.Length);
+        Buffer.BlockCopy(entries, 0, result, headerBytes.Length, entries.Length);
+        Buffer.BlockCopy(footerText, 0, result, headerBytes.Length + entries.Length, footerText.Length);
+
+        return result;
     }
 
     private static byte[] MultiPagePdf(int pageCount)

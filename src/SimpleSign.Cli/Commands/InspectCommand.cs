@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Text.Json;
 using SimpleSign.Brasil.Signing;
 using SimpleSign.Cli.Json;
+using SimpleSign.Cli.Rendering;
 using SimpleSign.Core.Inspection;
 using SimpleSign.PAdES.Inspection;
 using Spectre.Console;
@@ -83,7 +84,7 @@ internal sealed class InspectCommand : AsyncCommand<InspectCommand.Settings>
 
         // Document properties
         var docNode = tree.AddNode("[blue]Document[/]");
-        docNode.AddNode($"PDF Version:      [bold]{FormatPdfVersion(doc.PdfVersion)}[/]");
+        docNode.AddNode($"PDF Version:      [bold]{Formatting.FormatVersion(doc.PdfVersion)}[/]");
         docNode.AddNode($"Signatures:       [bold]{userSigs.Count}[/]");
         if (archiveTss.Count > 0)
         {
@@ -91,7 +92,7 @@ internal sealed class InspectCommand : AsyncCommand<InspectCommand.Settings>
         }
         docNode.AddNode($"Encrypted:        {(doc.IsEncrypted ? "[green]✓[/] Yes" : "No")}");
         docNode.AddNode($"DocMDP:           {FormatDocMdp(doc)}");
-        docNode.AddNode($"PDF/A:            {FormatPdfA(doc.PdfALevel).EscapeMarkup()}");
+        docNode.AddNode($"PDF/A:            {Formatting.FormatPdfAFull(doc.PdfALevel).EscapeMarkup()}");
 
         // DSS
         if (doc.SecurityStore is { IsPresent: true } dss)
@@ -147,7 +148,7 @@ internal sealed class InspectCommand : AsyncCommand<InspectCommand.Settings>
         // Properties
         var propsNode = sigNode.AddNode("[blue]Properties[/]");
         propsNode.AddNode($"SubFilter:  {sig.SubFilter?.EscapeMarkup() ?? "[dim]— not present[/]"}");
-        propsNode.AddNode($"Level:      [bold]{FormatLevel(level).EscapeMarkup()}[/]");
+        propsNode.AddNode($"Level:      [bold]{Formatting.FormatLevel(level).EscapeMarkup()}[/]");
         propsNode.AddNode(sig.IsDigestAlgorithmDeprecated
             ? $"[yellow]\u26a0[/] Digest:     {FormatAlgo(sig.DigestAlgorithm)} [yellow](DEPRECATED per ISO 32000-2)[/]"
             : $"Digest:     {FormatAlgo(sig.DigestAlgorithm)}");
@@ -244,12 +245,12 @@ internal sealed class InspectCommand : AsyncCommand<InspectCommand.Settings>
             }
         }
 
-        propsNode.AddNode($"CMS Data:   {FormatBytes(sig.CmsRawData.Length)}");
+        propsNode.AddNode($"CMS Data:   {Formatting.FormatBytes(sig.CmsRawData.Length)}");
 
         // Byte range
         var br = sig.ByteRange;
         propsNode.AddNode($"Byte Range: [[{br.Offset1}, {br.Length1}, {br.Offset2}, {br.Length2}]]  {(br.IsValid ? "[green]✓[/]" : "[red]✗ inconsistent[/]")}");
-        propsNode.AddNode($"Contents:   {FormatBytes(br.ContentsLength)}");
+        propsNode.AddNode($"Contents:   {Formatting.FormatBytes(br.ContentsLength)}");
 
         // Signer Certificate
         BuildSignerNode(sigNode, sig);
@@ -279,7 +280,7 @@ internal sealed class InspectCommand : AsyncCommand<InspectCommand.Settings>
             ? $"[[0 \u2192 {br.Offset2 + br.Length2:N0} bytes]]  [green]✓[/]"
             : "[red]✗ inconsistent[/]";
         tsNode.AddNode($"Covers:     {coverageText}");
-        tsNode.AddNode($"Token Size: {FormatBytes(sig.CmsRawData.Length)}");
+        tsNode.AddNode($"Token Size: {Formatting.FormatBytes(sig.CmsRawData.Length)}");
 
         // TSA certificate
         if (sig.Signer is not null)
@@ -294,7 +295,7 @@ internal sealed class InspectCommand : AsyncCommand<InspectCommand.Settings>
                 : "Expired:    [green]✓[/] No");
             if (cert.ExtendedKeyUsages.Count > 0)
             {
-                tsaCertNode.AddNode($"Extended KU: {string.Join(", ", cert.ExtendedKeyUsages.Select(FormatEku))}");
+                tsaCertNode.AddNode($"Extended KU: {string.Join(", ", cert.ExtendedKeyUsages.Select(Formatting.FormatEku))}");
             }
         }
         else
@@ -319,7 +320,7 @@ internal sealed class InspectCommand : AsyncCommand<InspectCommand.Settings>
         certNode.AddNode($"Subject:        [bold]{cert.Subject.EscapeMarkup()}[/]");
         certNode.AddNode($"Issuer:         {cert.Issuer.EscapeMarkup()}");
         certNode.AddNode($"Serial:         {cert.SerialNumber}");
-        certNode.AddNode($"Thumbprint:     {FormatThumbprint(cert.Thumbprint)}");
+        certNode.AddNode($"Thumbprint:     {Formatting.FormatThumbprint(cert.Thumbprint)}");
         certNode.AddNode($"Key:            {cert.KeyAlgorithm} {(cert.KeySizeBits.HasValue ? $"{cert.KeySizeBits}-bit" : "[dim](unknown)[/]")}");
         certNode.AddNode($"Valid:          {cert.NotBefore:yyyy-MM-dd HH:mm:ss} → {cert.NotAfter:yyyy-MM-dd HH:mm:ss}");
         certNode.AddNode(cert.IsExpired
@@ -332,7 +333,7 @@ internal sealed class InspectCommand : AsyncCommand<InspectCommand.Settings>
             ? "NonRepudiation: [green]✓[/] [dim]— suitable for legal signatures[/]"
             : "NonRepudiation: [red]✗[/] Not set");
         certNode.AddNode(cert.ExtendedKeyUsages.Count > 0
-            ? $"Extended KU:    {string.Join(", ", cert.ExtendedKeyUsages.Select(FormatEku))}"
+            ? $"Extended KU:    {string.Join(", ", cert.ExtendedKeyUsages.Select(Formatting.FormatEku))}"
             : "Extended KU:    [dim]— not present[/]");
         certNode.AddNode(cert.OcspUrl is not null
             ? $"OCSP:           {cert.OcspUrl.EscapeMarkup()}"
@@ -382,7 +383,7 @@ internal sealed class InspectCommand : AsyncCommand<InspectCommand.Settings>
         tsNode.AddNode(ts.SerialNumber is not null
             ? $"Serial:     {ts.SerialNumber}"
             : "Serial:     [dim]— not present[/]");
-        tsNode.AddNode($"Token Size: {FormatBytes(ts.RawToken.Length)}");
+        tsNode.AddNode($"Token Size: {Formatting.FormatBytes(ts.RawToken.Length)}");
     }
 
     private static void BuildEmbeddedCertsNode(TreeNode parent, SignatureFieldInfo sig)
@@ -406,54 +407,6 @@ internal sealed class InspectCommand : AsyncCommand<InspectCommand.Settings>
 
     #region Formatting Helpers
 
-    private static string FormatPdfVersion(Pdf.PdfVersion version) => version switch
-    {
-        Pdf.PdfVersion.Pdf10 => "1.0",
-        Pdf.PdfVersion.Pdf11 => "1.1",
-        Pdf.PdfVersion.Pdf12 => "1.2",
-        Pdf.PdfVersion.Pdf13 => "1.3",
-        Pdf.PdfVersion.Pdf14 => "1.4",
-        Pdf.PdfVersion.Pdf15 => "1.5",
-        Pdf.PdfVersion.Pdf16 => "1.6",
-        Pdf.PdfVersion.Pdf17 => "1.7",
-        Pdf.PdfVersion.Pdf20 => "2.0",
-        _ => "Unknown"
-    };
-
-    private static string FormatDocMdp(PdfDocumentInfo doc) => doc.DocMdpPermissionLevel switch
-    {
-        1 => "[red]✗[/] Locked — [bold]no changes[/] allowed",
-        2 => "[yellow]![/] Locked — [bold]form filling[/] only",
-        3 => "[green]✓[/] Certified — [bold]form filling and annotations[/] allowed",
-        _ => "Not locked"
-    };
-
-    private static string FormatLevel(PAdESConformanceLevel level) => level switch
-    {
-        PAdESConformanceLevel.Unknown => "Unknown",
-        PAdESConformanceLevel.CmsOnly => "CMS (no PAdES attributes)",
-        PAdESConformanceLevel.BaselineB => "PAdES B-B",
-        PAdESConformanceLevel.BaselineT => "PAdES B-T",
-        PAdESConformanceLevel.BaselineLT => "PAdES B-LT",
-        PAdESConformanceLevel.BaselineLTA => "PAdES B-LTA",
-        _ => level.ToString()
-    };
-
-    private static string FormatPdfA(Pdf.Enums.PdfALevel level) => level switch
-    {
-        Pdf.Enums.PdfALevel.None => "Not detected",
-        Pdf.Enums.PdfALevel.A1a => "PDF/A-1a (ISO 19005-1)",
-        Pdf.Enums.PdfALevel.A1b => "PDF/A-1b (ISO 19005-1)",
-        Pdf.Enums.PdfALevel.A2a => "PDF/A-2a (ISO 19005-2)",
-        Pdf.Enums.PdfALevel.A2b => "PDF/A-2b (ISO 19005-2)",
-        Pdf.Enums.PdfALevel.A2u => "PDF/A-2u (ISO 19005-2)",
-        Pdf.Enums.PdfALevel.A3a => "PDF/A-3a (ISO 19005-3)",
-        Pdf.Enums.PdfALevel.A3b => "PDF/A-3b (ISO 19005-3)",
-        Pdf.Enums.PdfALevel.A3u => "PDF/A-3u (ISO 19005-3)",
-        Pdf.Enums.PdfALevel.Unknown => "PDF/A (level unknown)",
-        _ => level.ToString()
-    };
-
     private static string FormatAlgo(AlgorithmInfo? algo)
     {
         if (algo is null || string.IsNullOrEmpty(algo.Oid))
@@ -464,46 +417,12 @@ internal sealed class InspectCommand : AsyncCommand<InspectCommand.Settings>
         return $"{algo.Name} [dim]({algo.Oid})[/]";
     }
 
-    private static string FormatBytes(int bytes) => bytes switch
+    private static string FormatDocMdp(PdfDocumentInfo doc) => doc.DocMdpPermissionLevel switch
     {
-        0 => "0 bytes",
-        < 1024 => $"{bytes:N0} bytes",
-        < 1048576 => $"{bytes / 1024.0:N1} KB ({bytes:N0} bytes)",
-        _ => $"{bytes / 1048576.0:N1} MB ({bytes:N0} bytes)"
-    };
-
-    private static string FormatThumbprint(string hex)
-    {
-        if (string.IsNullOrEmpty(hex) || hex.Length < 4)
-        {
-            return hex;
-        }
-
-        var chars = new char[hex.Length + (hex.Length / 2) - 1];
-        var pos = 0;
-        for (var i = 0; i < hex.Length; i++)
-        {
-            if (i > 0 && i % 2 == 0)
-            {
-                chars[pos++] = ':';
-            }
-
-            chars[pos++] = char.ToUpperInvariant(hex[i]);
-        }
-
-        return new string(chars, 0, pos);
-    }
-
-    private static string FormatEku(string oid) => oid switch
-    {
-        "1.3.6.1.5.5.7.3.1" => "serverAuth",
-        "1.3.6.1.5.5.7.3.2" => "clientAuth",
-        "1.3.6.1.5.5.7.3.3" => "codeSigning",
-        "1.3.6.1.5.5.7.3.4" => "emailProtection",
-        "1.3.6.1.5.5.7.3.8" => "timeStamping",
-        "1.3.6.1.5.5.7.3.9" => "OCSPSigning",
-        "1.3.6.1.4.1.311.10.3.12" => "documentSigning",
-        _ => oid
+        1 => "[red]✗[/] Locked — [bold]no changes[/] allowed",
+        2 => "[yellow]![/] Locked — [bold]form filling[/] only",
+        3 => "[green]✓[/] Certified — [bold]form filling and annotations[/] allowed",
+        _ => "Not locked"
     };
 
     private static string TranslateCommitment(string commitment) => commitment switch

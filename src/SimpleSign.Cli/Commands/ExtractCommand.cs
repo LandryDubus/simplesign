@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using SimpleSign.Cli.Rendering;
 using SimpleSign.PAdES.Inspection;
 using Spectre.Console;
 using Spectre.Console.Cli;
@@ -68,52 +69,22 @@ internal sealed class ExtractCommand : AsyncCommand<ExtractCommand.Settings>
 
         foreach (var sig in signatures)
         {
-            var safeName = SanitizeFieldName(sig.FieldName);
+            var safeName = ExtractOutputRenderer.SanitizeFieldName(sig.FieldName);
             var binPath = Path.Combine(outputDir, $"{safeName}.bin");
             var p7sPath = Path.Combine(outputDir, $"{safeName}.p7s");
 
             await sig.SaveSignedDataAsync(binPath, cancellationToken);
             await sig.SaveSignatureAsync(p7sPath, cancellationToken);
 
-            var subFilter = sig.SubFilter ?? "unknown";
-            AnsiConsole.MarkupLine($"[bold]{sig.FieldName.EscapeMarkup()}[/] ({subFilter.EscapeMarkup()})");
-            AnsiConsole.MarkupLine($"├── Signed data: [cyan]{sig.SignedData.Length:N0}[/] bytes → {Path.GetFileName(binPath).EscapeMarkup()}");
-            AnsiConsole.MarkupLine($"├── CMS signature: [cyan]{sig.CmsSignature.Length:N0}[/] bytes → {Path.GetFileName(p7sPath).EscapeMarkup()}");
-
             if (!settings.NoRevision)
             {
                 var pdfPath = Path.Combine(outputDir, $"{safeName}.pdf");
                 await sig.SavePdfRevisionAsync(pdfPath, cancellationToken);
-                AnsiConsole.MarkupLine($"└── PDF revision: [cyan]{sig.PdfRevision.Length:N0}[/] bytes → {Path.GetFileName(pdfPath).EscapeMarkup()}");
             }
-            else
-            {
-                AnsiConsole.MarkupLine($"└── PDF revision: [cyan]{sig.PdfRevision.Length:N0}[/] bytes [dim](skipped)[/]");
-            }
-
-            AnsiConsole.WriteLine();
         }
 
-        var firstSafe = SanitizeFieldName(signatures[0].FieldName);
-        AnsiConsole.MarkupLine($"[dim]Tip: Validate with: simplesign cades-validate {firstSafe}.p7s --data {firstSafe}.bin[/]");
+        AnsiConsole.MarkupLine(ExtractOutputRenderer.Render(signatures, settings.NoRevision));
 
         return 0;
-    }
-
-    private static string SanitizeFieldName(string fieldName)
-    {
-        if (string.IsNullOrWhiteSpace(fieldName))
-        {
-            return "Signature";
-        }
-
-        var sanitized = new char[fieldName.Length];
-        for (int i = 0; i < fieldName.Length; i++)
-        {
-            char c = fieldName[i];
-            sanitized[i] = char.IsLetterOrDigit(c) || c == '_' || c == '-' ? c : '_';
-        }
-
-        return new string(sanitized);
     }
 }

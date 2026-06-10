@@ -3,10 +3,10 @@ using System.Text.Json;
 using SimpleSign.Brasil;
 using SimpleSign.Brasil.Signing;
 using SimpleSign.Cli.Json;
+using SimpleSign.Cli.Rendering;
 using SimpleSign.Core.Validation;
 using SimpleSign.PAdES.Inspection;
 using SimpleSign.PAdES.Validation;
-using SimpleSign.Pdf.Enums;
 using Spectre.Console;
 using Spectre.Console.Cli;
 
@@ -78,7 +78,33 @@ internal sealed class ValidateCommand : AsyncCommand<ValidateCommand.Settings>
         }
         else if (settings.Simple)
         {
-            OutputSimple(settings.InputPath, results, conformanceLevels);
+            var fileName = Path.GetFileName(settings.InputPath);
+            var userSigs = results.Where(r => !r.IsDocumentTimestamp).ToList();
+            var validCount = userSigs.Count(r => r.IsValid);
+            var allValid = validCount == userSigs.Count;
+            var statusIcon = userSigs.Count == 0 ? "[yellow]?[/]" : (allValid ? "[green]✓[/]" : "[red]✗[/]");
+
+            AnsiConsole.MarkupLine($"{statusIcon} [bold]{fileName.EscapeMarkup()}[/]  {validCount}/{userSigs.Count} valid");
+
+            foreach (var r in results)
+            {
+                string icon;
+                if (r.IsDocumentTimestamp)
+                {
+                    icon = r.IsChainTrustWarning ? "[yellow]T[/]" : (r.IsValid ? "[green]T[/]" : "[red]T[/]");
+                }
+                else
+                {
+                    icon = r.IsValid ? "[green]✓[/]" : "[red]✗[/]";
+                }
+
+                var signer = (r.SignerName ?? "unknown").EscapeMarkup();
+                var level = conformanceLevels.TryGetValue(r.FieldName, out var l) ? $"  [dim]{Formatting.FormatLevel(l)}[/]" : string.Empty;
+                var time = r.SigningTime.HasValue ? $"  [dim]{r.SigningTime.Value:yyyy-MM-dd}[/]" : string.Empty;
+                var errSuffix = r.IsValid ? string.Empty : $"  [red]{(r.Errors.Count > 0 ? r.Errors[0].EscapeMarkup() : "invalid")}[/]";
+
+                AnsiConsole.MarkupLine($"  {icon} {r.FieldName.EscapeMarkup()}  {signer}{level}{time}{errSuffix}");
+            }
         }
         else
         {
@@ -113,7 +139,7 @@ internal sealed class ValidateCommand : AsyncCommand<ValidateCommand.Settings>
         docNode.AddNode($"Signatures: [bold]{userSigs.Count}[/] user + [bold]{docTimestamps.Count}[/] timestamps");
         docNode.AddNode($"Encrypted:  {(doc.IsEncrypted ? "[green]✓[/] Yes" : "No")}");
         docNode.AddNode($"DocMDP:     {FormatDocMdp(doc)}");
-        docNode.AddNode($"PDF/A:      {FormatPdfA(doc.PdfALevel).EscapeMarkup()}");
+        docNode.AddNode($"PDF/A:      {Formatting.FormatPdfA(doc.PdfALevel).EscapeMarkup()}");
         if (doc.SecurityStore is { IsPresent: true })
         {
             docNode.AddNode("[green]✓[/] DSS [dim](embedded)[/]");
@@ -147,7 +173,7 @@ internal sealed class ValidateCommand : AsyncCommand<ValidateCommand.Settings>
             // PAdES level
             if (conformanceLevels.TryGetValue(result.FieldName, out var level))
             {
-                sigNode.AddNode($"PAdES:        [bold]{FormatLevel(level).EscapeMarkup()}[/]");
+                sigNode.AddNode($"PAdES:        [bold]{Formatting.FormatLevel(level).EscapeMarkup()}[/]");
             }
 
             // Metadata
@@ -180,7 +206,7 @@ internal sealed class ValidateCommand : AsyncCommand<ValidateCommand.Settings>
                         : signerInfo.Issuer;
                     certNode.AddNode($"Issuer:         [dim]{issuer.EscapeMarkup()}[/]");
                     certNode.AddNode($"Serial:         {signerInfo.SerialNumber}");
-                    certNode.AddNode($"Thumbprint:     {FormatThumbprint(signerInfo.Thumbprint)}");
+                    certNode.AddNode($"Thumbprint:     {Formatting.FormatThumbprint(signerInfo.Thumbprint)}");
                     certNode.AddNode($"Key:            {signerInfo.KeyAlgorithm} {(signerInfo.KeySizeBits.HasValue ? $"{signerInfo.KeySizeBits}-bit" : "[dim](unknown)[/]")}");
                     if (result.SignerCertificate is not null)
                     {
@@ -198,7 +224,7 @@ internal sealed class ValidateCommand : AsyncCommand<ValidateCommand.Settings>
                         : "Key Usage:      [dim]— not present[/]");
                     if (signerInfo.ExtendedKeyUsages.Count > 0)
                     {
-                        certNode.AddNode($"Extended KU:    {string.Join(", ", signerInfo.ExtendedKeyUsages.Select(FormatEku))}");
+                        certNode.AddNode($"Extended KU:    {string.Join(", ", signerInfo.ExtendedKeyUsages.Select(Formatting.FormatEku))}");
                     }
                 }
                 else if (result.SignerCertificate is not null)
@@ -273,7 +299,7 @@ internal sealed class ValidateCommand : AsyncCommand<ValidateCommand.Settings>
             {
                 var br = sig.ByteRange;
                 sigNode.AddNode($"Byte Range:   [[{br.Offset1}, {br.Length1}, {br.Offset2}, {br.Length2}]]  {(br.IsValid ? "[green]✓[/]" : "[red]✗ inconsistent[/]")}");
-                sigNode.AddNode($"CMS Data:     {FormatBytes(sig.CmsRawData.Length)}");
+                sigNode.AddNode($"CMS Data:     {Formatting.FormatBytes(sig.CmsRawData.Length)}");
                 sigNode.AddNode($"Embedded Certs: {sig.EmbeddedCertificates.Count}");
 
                 // Timestamp details from inspection
@@ -286,7 +312,7 @@ internal sealed class ValidateCommand : AsyncCommand<ValidateCommand.Settings>
                         tsNode.AddNode($"TSA:        {ts.TsaCertificate.Subject.EscapeMarkup()}");
                         tsNode.AddNode($"TSA Valid:  {ts.TsaCertificate.NotBefore:yyyy-MM-dd} \u2192 {ts.TsaCertificate.NotAfter:yyyy-MM-dd}");
                     }
-                    tsNode.AddNode($"Token Size: {FormatBytes(ts.RawToken.Length)}");
+                    tsNode.AddNode($"Token Size: {Formatting.FormatBytes(ts.RawToken.Length)}");
                 }
             }
 
@@ -358,14 +384,14 @@ internal sealed class ValidateCommand : AsyncCommand<ValidateCommand.Settings>
                     ? $"[[0 \u2192 {br.Offset2 + br.Length2:N0} bytes]]  [green]✓[/]"
                     : "[red]✗ inconsistent[/]";
                 tsNode.AddNode($"Covers:       {coverageText}");
-                tsNode.AddNode($"Token Size:   {FormatBytes(tsSig.CmsRawData.Length)}");
+                tsNode.AddNode($"Token Size:   {Formatting.FormatBytes(tsSig.CmsRawData.Length)}");
                 tsNode.AddNode($"Embedded Certs: {tsSig.EmbeddedCertificates.Count}");
 
                 if (tsSig.Signer is { } tsaInfo)
                 {
                     var tsaCertNode = tsNode.AddNode("[blue]TSA Certificate[/]");
                     tsaCertNode.AddNode($"Serial:     {tsaInfo.SerialNumber}");
-                    tsaCertNode.AddNode($"Thumbprint: {FormatThumbprint(tsaInfo.Thumbprint)}");
+                    tsaCertNode.AddNode($"Thumbprint: {Formatting.FormatThumbprint(tsaInfo.Thumbprint)}");
                     tsaCertNode.AddNode($"Key:        {tsaInfo.KeyAlgorithm} {(tsaInfo.KeySizeBits.HasValue ? $"{tsaInfo.KeySizeBits}-bit" : "[dim](unknown)[/]")}");
                     tsaCertNode.AddNode($"Valid:      {tsaInfo.NotBefore:yyyy-MM-dd} \u2192 {tsaInfo.NotAfter:yyyy-MM-dd}");
                 }
@@ -387,38 +413,6 @@ internal sealed class ValidateCommand : AsyncCommand<ValidateCommand.Settings>
     {
         var output = JsonMapper.MapValidation(Path.GetFileName(inputPath), results, conformanceLevels);
         Console.WriteLine(JsonSerializer.Serialize(output, CliJsonContext.Default.ValidateOutput));
-    }
-
-    internal static void OutputSimple(string inputPath, IReadOnlyList<SignatureValidationResult> results,
-        Dictionary<string, PAdESConformanceLevel> conformanceLevels)
-    {
-        var fileName = Path.GetFileName(inputPath);
-        var userSigs = results.Where(r => !r.IsDocumentTimestamp).ToList();
-        var validCount = userSigs.Count(r => r.IsValid);
-        var allValid = validCount == userSigs.Count;
-        var statusIcon = userSigs.Count == 0 ? "[yellow]?[/]" : (allValid ? "[green]✓[/]" : "[red]✗[/]");
-
-        AnsiConsole.MarkupLine($"{statusIcon} [bold]{fileName.EscapeMarkup()}[/]  {validCount}/{userSigs.Count} valid");
-
-        foreach (var r in results)
-        {
-            string icon;
-            if (r.IsDocumentTimestamp)
-            {
-                icon = r.IsChainTrustWarning ? "[yellow]T[/]" : (r.IsValid ? "[green]T[/]" : "[red]T[/]");
-            }
-            else
-            {
-                icon = r.IsValid ? "[green]✓[/]" : "[red]✗[/]";
-            }
-
-            var signer = (r.SignerName ?? "unknown").EscapeMarkup();
-            var level = conformanceLevels.TryGetValue(r.FieldName, out var l) ? $"  [dim]{FormatLevel(l)}[/]" : string.Empty;
-            var time = r.SigningTime.HasValue ? $"  [dim]{r.SigningTime.Value:yyyy-MM-dd}[/]" : string.Empty;
-            var errSuffix = r.IsValid ? string.Empty : $"  [red]{(r.Errors.Count > 0 ? r.Errors[0].EscapeMarkup() : "invalid")}[/]";
-
-            AnsiConsole.MarkupLine($"  {icon} {r.FieldName.EscapeMarkup()}  {signer}{level}{time}{errSuffix}");
-        }
     }
 
     private static string Check(bool value, bool invert = false)
@@ -458,73 +452,5 @@ internal sealed class ValidateCommand : AsyncCommand<ValidateCommand.Settings>
         RevocationSource.OnlineOcsp => " [dim](online OCSP)[/]",
         RevocationSource.Indeterminate => " [yellow](indeterminate)[/]",
         _ => string.Empty
-    };
-
-    private static string FormatLevel(PAdESConformanceLevel level) => level switch
-    {
-        PAdESConformanceLevel.Unknown => "Unknown",
-        PAdESConformanceLevel.CmsOnly => "CMS (no PAdES attributes)",
-        PAdESConformanceLevel.BaselineB => "PAdES B-B",
-        PAdESConformanceLevel.BaselineT => "PAdES B-T",
-        PAdESConformanceLevel.BaselineLT => "PAdES B-LT",
-        PAdESConformanceLevel.BaselineLTA => "PAdES B-LTA",
-        _ => level.ToString()
-    };
-
-    private static string FormatPdfA(PdfALevel level) => level switch
-    {
-        PdfALevel.None => "Not detected",
-        PdfALevel.A1a => "PDF/A-1a",
-        PdfALevel.A1b => "PDF/A-1b",
-        PdfALevel.A2a => "PDF/A-2a",
-        PdfALevel.A2b => "PDF/A-2b",
-        PdfALevel.A2u => "PDF/A-2u",
-        PdfALevel.A3a => "PDF/A-3a",
-        PdfALevel.A3b => "PDF/A-3b",
-        PdfALevel.A3u => "PDF/A-3u",
-        PdfALevel.Unknown => "PDF/A (level unknown)",
-        _ => level.ToString()
-    };
-
-    private static string FormatBytes(int bytes) => bytes switch
-    {
-        0 => "0 bytes",
-        < 1024 => $"{bytes:N0} bytes",
-        < 1048576 => $"{bytes / 1024.0:N1} KB ({bytes:N0} bytes)",
-        _ => $"{bytes / 1048576.0:N1} MB ({bytes:N0} bytes)"
-    };
-
-    private static string FormatThumbprint(string hex)
-    {
-        if (string.IsNullOrEmpty(hex) || hex.Length < 4)
-        {
-            return hex;
-        }
-
-        var chars = new char[hex.Length + (hex.Length / 2) - 1];
-        var pos = 0;
-        for (var i = 0; i < hex.Length; i++)
-        {
-            if (i > 0 && i % 2 == 0)
-            {
-                chars[pos++] = ':';
-            }
-
-            chars[pos++] = char.ToUpperInvariant(hex[i]);
-        }
-
-        return new string(chars, 0, pos);
-    }
-
-    private static string FormatEku(string oid) => oid switch
-    {
-        "1.3.6.1.5.5.7.3.1" => "serverAuth",
-        "1.3.6.1.5.5.7.3.2" => "clientAuth",
-        "1.3.6.1.5.5.7.3.3" => "codeSigning",
-        "1.3.6.1.5.5.7.3.4" => "emailProtection",
-        "1.3.6.1.5.5.7.3.8" => "timeStamping",
-        "1.3.6.1.5.5.7.3.9" => "OCSPSigning",
-        "1.3.6.1.4.1.311.10.3.12" => "documentSigning",
-        _ => oid
     };
 }

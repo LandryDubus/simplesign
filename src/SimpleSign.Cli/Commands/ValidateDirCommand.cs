@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using SimpleSign.Brasil;
+using SimpleSign.Cli.Rendering;
 using SimpleSign.Core.Validation;
 using SimpleSign.PAdES.Inspection;
 using SimpleSign.PAdES.Validation;
@@ -72,6 +73,14 @@ internal sealed class ValidateDirCommand : AsyncCommand<ValidateDirCommand.Setti
         AnsiConsole.MarkupLine($"[bold]Validating {files.Length} file(s)[/] in [dim]{settings.DirectoryPath.EscapeMarkup()}[/]");
         AnsiConsole.WriteLine();
 
+        // Build filename → full path lookup. For duplicate filenames, the first path wins.
+        var fileLookup = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var f in files)
+        {
+            var name = Path.GetFileName(f);
+            fileLookup.TryAdd(name, f);
+        }
+
         int invalidFiles = 0;
         int totalSigs = 0;
         int validSigs = 0;
@@ -87,7 +96,7 @@ internal sealed class ValidateDirCommand : AsyncCommand<ValidateDirCommand.Setti
             }
 
             // Build conformance level map from inspection for the full file path
-            var filePath = files.First(f => Path.GetFileName(f) == bulkResult.Id);
+            var filePath = fileLookup.TryGetValue(bulkResult.Id, out var found) ? found : bulkResult.Id;
             Dictionary<string, PAdESConformanceLevel> conformanceLevels;
             try
             {
@@ -102,7 +111,24 @@ internal sealed class ValidateDirCommand : AsyncCommand<ValidateDirCommand.Setti
                 conformanceLevels = [];
             }
 
-            ValidateCommand.OutputSimple(filePath, bulkResult.Results!, conformanceLevels);
+            var fileName = Path.GetFileName(filePath);
+            var dirUserSigs = bulkResult.Results!.Where(r => !r.IsDocumentTimestamp).ToList();
+            var dirValidCount = dirUserSigs.Count(r => r.IsValid);
+            var dirAllValid = dirValidCount == dirUserSigs.Count;
+            var dirStatusIcon = dirUserSigs.Count == 0 ? "?" : (dirAllValid ? "[green]✓[/]" : "[red]✗[/]");
+
+            AnsiConsole.MarkupLine($"{dirStatusIcon} [bold]{fileName.EscapeMarkup()}[/]  {dirValidCount}/{dirUserSigs.Count} valid");
+
+            foreach (var r in bulkResult.Results!)
+            {
+                var icon = r.IsValid ? "[green]✓[/]" : "[red]✗[/]";
+                var signer = (r.SignerName ?? "unknown").EscapeMarkup();
+                var level = conformanceLevels.TryGetValue(r.FieldName, out var l) ? $"  [dim]{Formatting.FormatLevel(l)}[/]" : string.Empty;
+                var time = r.SigningTime.HasValue ? $"  [dim]{r.SigningTime.Value:yyyy-MM-dd}[/]" : string.Empty;
+                var errSuffix = r.IsValid ? string.Empty : $"  [red]{(r.Errors.Count > 0 ? r.Errors[0].EscapeMarkup() : "invalid")}[/]";
+
+                AnsiConsole.MarkupLine($"  {icon} {r.FieldName.EscapeMarkup()}  {signer}{level}{time}{errSuffix}");
+            }
 
             var userSigs = bulkResult.Results!.Where(r => !r.IsDocumentTimestamp).ToList();
             totalSigs += userSigs.Count;

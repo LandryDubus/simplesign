@@ -1,10 +1,10 @@
 using System.ComponentModel;
-using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using Microsoft.Extensions.Logging;
+using SimpleSign.Brasil.Signing;
 using SimpleSign.Core.Crypto;
+using SimpleSign.Cli.Rendering;
 using SimpleSign.PAdES;
-using SimpleSign.PAdES.Signing;
 using Spectre.Console;
 using Spectre.Console.Cli;
 
@@ -26,6 +26,18 @@ internal sealed class SignCommand : AsyncCommand<SignCommand.Settings>
         [CommandOption("--password|-p <PASSWORD>")]
         [Description("Certificate password")]
         public string? Password { get; init; }
+
+        [CommandOption("--store <NAME>")]
+        [Description("OS certificate store name: My (default), Root, CA, TrustedPublisher. Requires --thumbprint.")]
+        public string? StoreName { get; init; }
+
+        [CommandOption("--store-location <LOC>")]
+        [Description("OS store location: CurrentUser (default) or LocalMachine. Requires --thumbprint.")]
+        public string? StoreLocation { get; init; }
+
+        [CommandOption("--thumbprint <HEX>")]
+        [Description("Certificate thumbprint in OS certificate store (alternative to --cert)")]
+        public string? Thumbprint { get; init; }
 
         [CommandOption("--output|-o <PATH>")]
         [Description("Output file (default: input_signed.pdf)")]
@@ -75,6 +87,14 @@ internal sealed class SignCommand : AsyncCommand<SignCommand.Settings>
         [Description("Create certification (DocMDP) signature: no-changes, form-filling (default), annotations")]
         public string? Certify { get; init; }
 
+        [CommandOption("--sub-filter <VALUE>")]
+        [Description("Signature sub-filter: etsi-cades-detached (default) or adbe-pkcs7-detached")]
+        public string? SubFilter { get; init; }
+
+        [CommandOption("--signature-algorithm <ALGO>")]
+        [Description("Signature algorithm: rsa-pkcs1 (default) or rsassa-pss")]
+        public string? SignatureAlgorithm { get; init; }
+
         [CommandOption("--legacy-cms")]
         [Description("Use adbe.pkcs7.detached without PAdES attributes (legacy compatibility)")]
         public bool LegacyCms { get; init; }
@@ -107,11 +127,83 @@ internal sealed class SignCommand : AsyncCommand<SignCommand.Settings>
         [Description("Verification URL — renders QR code in visible signature")]
         public string? QrUrl { get; init; }
 
+        [CommandOption("--font-size <PT>")]
+        [Description("Font size for signer name in points (default: 7)")]
+        public float? FontSize { get; init; }
+
+        [CommandOption("--label-font-size <PT>")]
+        [Description("Font size for labels in points (default: 6)")]
+        public float? LabelFontSize { get; init; }
+
+        [CommandOption("--text-color <R,G,B>")]
+        [Description("Text color as RGB values 0-1, e.g. 0.5,0.5,0.5")]
+        public string? TextColor { get; init; }
+
+        [CommandOption("--font <NAME>")]
+        [Description("Base14 font: Helvetica (default), Times-Roman, Courier, Helvetica-Bold")]
+        public string? Font { get; init; }
+
+        [CommandOption("--border-color <R,G,B>")]
+        [Description("Border color as RGB values 0-1, e.g. 0.2,0.2,0.2")]
+        public string? BorderColor { get; init; }
+
+        [CommandOption("--border-width <PT>")]
+        [Description("Border width in points (default: 0.5, requires --border-color)")]
+        public float? BorderWidth { get; init; }
+
+        [CommandOption("--no-date")]
+        [Description("Hide signing date in visible signature")]
+        public bool NoDate { get; init; }
+
+        [CommandOption("--brasil")]
+        [Description("Advanced Electronic Signature (AEA) per Lei 14.063/2020. Requires --cpf and --signer-name.")]
+        public bool Brasil { get; init; }
+
+        [CommandOption("--cpf <CPF>")]
+        [Description("CPF (11 digits, no punctuation) for AEA")]
+        public string? Cpf { get; init; }
+
+        [CommandOption("--auth-method <METHOD>")]
+        [Description("Authentication method for AEA: digital-certificate (default), gov-br, institutional-login, facial-biometrics, token-otp, username-password")]
+        public string? AuthMethod { get; init; }
+
+        [CommandOption("--signer-email <EMAIL>")]
+        [Description("Signer email for AEA")]
+        public string? SignerEmail { get; init; }
+
+        [CommandOption("--institution <NAME>")]
+        [Description("Institution name for AEA")]
+        public string? Institution { get; init; }
+
+        [CommandOption("--institution-cnpj <CNPJ>")]
+        [Description("Institution CNPJ (14 digits) for AEA")]
+        public string? InstitutionCnpj { get; init; }
+
+        [CommandOption("--commitment <TYPE>")]
+        [Description("Commitment type for AEA: approval (default) or origin")]
+        public string? Commitment { get; init; }
+
+        [CommandOption("--policy-oid <OID>")]
+        [Description("Signature policy OID for AEA")]
+        public string? PolicyOid { get; init; }
+
+        [CommandOption("--policy-uri <URI>")]
+        [Description("Signature policy URI for AEA")]
+        public string? PolicyUri { get; init; }
+
         public override ValidationResult Validate()
         {
-            if (string.IsNullOrWhiteSpace(CertPath))
+            bool hasCertPath = !string.IsNullOrWhiteSpace(CertPath);
+            bool hasThumbprint = !string.IsNullOrWhiteSpace(Thumbprint);
+
+            if (!hasCertPath && !hasThumbprint)
             {
-                return ValidationResult.Error("--cert is required.");
+                return ValidationResult.Error("Either --cert or --thumbprint is required.");
+            }
+
+            if (hasCertPath && hasThumbprint)
+            {
+                return ValidationResult.Error("--cert and --thumbprint are mutually exclusive.");
             }
 
             if (!File.Exists(InputPath))
@@ -119,9 +211,22 @@ internal sealed class SignCommand : AsyncCommand<SignCommand.Settings>
                 return ValidationResult.Error($"File not found: {InputPath}");
             }
 
-            if (!string.IsNullOrWhiteSpace(CertPath) && !File.Exists(CertPath))
+            if (hasCertPath && !File.Exists(CertPath))
             {
                 return ValidationResult.Error($"Certificate not found: {CertPath}");
+            }
+
+            if (hasThumbprint)
+            {
+                if (StoreName is not null && !ParseStoreName(StoreName).HasValue)
+                {
+                    return ValidationResult.Error("--store must be My, Root, CA, or TrustedPublisher.");
+                }
+
+                if (StoreLocation is not null && !ParseStoreLocation(StoreLocation).HasValue)
+                {
+                    return ValidationResult.Error("--store-location must be CurrentUser or LocalMachine.");
+                }
             }
 
             if (Ltv && string.IsNullOrWhiteSpace(TsaUrl))
@@ -154,6 +259,72 @@ internal sealed class SignCommand : AsyncCommand<SignCommand.Settings>
                 return ValidationResult.Error("--page, --pos-x, --pos-y require --visible.");
             }
 
+            if (SubFilter is not null && SignCommandOptions.ParseSubFilter(SubFilter) is null)
+            {
+                return ValidationResult.Error("--sub-filter must be etsi-cades-detached or adbe-pkcs7-detached.");
+            }
+
+            if (SignatureAlgorithm is not null && SignCommandOptions.ParseSignatureAlgorithm(SignatureAlgorithm) is null)
+            {
+                return ValidationResult.Error("--signature-algorithm must be rsa-pkcs1 or rsassa-pss.");
+            }
+
+            if (FontSize.HasValue && (FontSize < 1 || FontSize > 72))
+            {
+                return ValidationResult.Error("--font-size must be between 1 and 72.");
+            }
+
+            if (LabelFontSize.HasValue && (LabelFontSize < 1 || LabelFontSize > 72))
+            {
+                return ValidationResult.Error("--label-font-size must be between 1 and 72.");
+            }
+
+            if (TextColor is not null && AppearanceBuilder.ParseColor(TextColor) is null)
+            {
+                return ValidationResult.Error("--text-color must be in format R,G,B with values between 0 and 1.");
+            }
+
+            if (BorderColor is not null && AppearanceBuilder.ParseColor(BorderColor) is null)
+            {
+                return ValidationResult.Error("--border-color must be in format R,G,B with values between 0 and 1.");
+            }
+
+            if (FontSize.HasValue || LabelFontSize.HasValue || TextColor is not null
+                || Font is not null || BorderColor is not null || BorderWidth.HasValue || NoDate)
+            {
+                if (!Visible)
+                {
+                    return ValidationResult.Error("Appearance options (--font-size, --text-color, etc.) require --visible.");
+                }
+            }
+
+#pragma warning disable IDE0046 // Convert to conditional expression — readability
+            if (Brasil)
+            {
+                if (string.IsNullOrWhiteSpace(Cpf))
+                {
+                    return ValidationResult.Error("--brasil requires --cpf.");
+                }
+
+                if (string.IsNullOrWhiteSpace(SignerName))
+                {
+                    return ValidationResult.Error("--brasil requires --signer-name.");
+                }
+
+                if (AuthMethod is not null && !IsValidAuthMethod(AuthMethod))
+                {
+                    return ValidationResult.Error("--auth-method must be digital-certificate, gov-br, institutional-login, facial-biometrics, token-otp, or username-password.");
+                }
+
+                if (Commitment is not null
+                    && !Commitment.Equals("approval", StringComparison.OrdinalIgnoreCase)
+                    && !Commitment.Equals("origin", StringComparison.OrdinalIgnoreCase))
+                {
+                    return ValidationResult.Error("--commitment must be approval or origin.");
+                }
+            }
+#pragma warning restore IDE0046
+
             return ValidationResult.Success();
         }
     }
@@ -169,18 +340,60 @@ internal sealed class SignCommand : AsyncCommand<SignCommand.Settings>
         return await ExecuteCertSigningAsync(settings, outputPath, loggerFactory, cancellationToken);
     }
 
+    private static async Task<(X509Certificate2 Cert, List<X509Certificate2> Chain)> LoadSigningCertificateAsync(
+        Settings settings, CancellationToken cancellation)
+    {
+        if (!string.IsNullOrWhiteSpace(settings.Thumbprint))
+        {
+            var storeName = ParseStoreName(settings.StoreName) ?? System.Security.Cryptography.X509Certificates.StoreName.My;
+            var storeLocation = ParseStoreLocation(settings.StoreLocation) ?? System.Security.Cryptography.X509Certificates.StoreLocation.CurrentUser;
+            using var sysStore = new SystemCertificateStore(storeName, storeLocation);
+            var cert = sysStore.FindByThumbprint(settings.Thumbprint)
+                ?? throw new InvalidOperationException($"Certificate with thumbprint '{settings.Thumbprint}' not found in {storeName}/{storeLocation}.");
+            return (cert, []);
+        }
+
+        var password = await PasswordResolver.ResolveAsync(settings.Password);
+        var collection = CertificateLoader.LoadPkcs12CollectionFromFile(settings.CertPath!, password);
+        var signerCert = collection.OfType<X509Certificate2>().FirstOrDefault(c => c.HasPrivateKey)
+            ?? throw new InvalidOperationException("No certificate with a private key was found in the PFX file.");
+        var chainCerts = collection.OfType<X509Certificate2>()
+            .Where(c => c.Thumbprint != signerCert.Thumbprint)
+            .ToList();
+        return (signerCert, chainCerts);
+    }
+
+    internal static System.Security.Cryptography.X509Certificates.StoreName? ParseStoreName(string? value) => value?.ToLowerInvariant() switch
+    {
+        "my" => System.Security.Cryptography.X509Certificates.StoreName.My,
+        "root" => System.Security.Cryptography.X509Certificates.StoreName.Root,
+        "ca" => System.Security.Cryptography.X509Certificates.StoreName.CertificateAuthority,
+        "trustedpublisher" => System.Security.Cryptography.X509Certificates.StoreName.TrustedPublisher,
+        _ => null
+    };
+
+    private static bool IsValidAuthMethod(string value)
+    {
+        var lower = value.ToLowerInvariant();
+        return lower is "digital-certificate" or "digital_certificate"
+            or "gov-br" or "gov_br" or "govbr"
+            or "institutional-login" or "institutional_login"
+            or "facial-biometrics" or "facial_biometrics"
+            or "token-otp" or "token_otp"
+            or "username-password" or "username_password";
+    }
+
+    internal static System.Security.Cryptography.X509Certificates.StoreLocation? ParseStoreLocation(string? value) => value?.ToLowerInvariant() switch
+    {
+        "currentuser" => System.Security.Cryptography.X509Certificates.StoreLocation.CurrentUser,
+        "localmachine" => System.Security.Cryptography.X509Certificates.StoreLocation.LocalMachine,
+        _ => null
+    };
+
     private static async Task<int> ExecuteCertSigningAsync(
         Settings settings, string outputPath, ILoggerFactory? loggerFactory, CancellationToken cancellation)
     {
-        var password = await PasswordResolver.ResolveAsync(settings.Password);
-
-        // Load all certs from the PFX so that intermediate CAs are available for LTV chain building
-        var collection = CertificateLoader.LoadPkcs12CollectionFromFile(settings.CertPath!, password);
-        var cert = collection.OfType<X509Certificate2>().FirstOrDefault(c => c.HasPrivateKey)
-            ?? throw new InvalidOperationException("No certificate with a private key was found in the PFX file.");
-        var chainCerts = collection.OfType<X509Certificate2>()
-            .Where(c => c.Thumbprint != cert.Thumbprint)
-            .ToList();
+        var (cert, chainCerts) = await LoadSigningCertificateAsync(settings, cancellation);
 
         try
         {
@@ -204,7 +417,7 @@ internal sealed class SignCommand : AsyncCommand<SignCommand.Settings>
 
                     if (settings.Hash is not null)
                     {
-                        builder = builder.WithHashAlgorithm(ParseHash(settings.Hash));
+                        builder = builder.WithHashAlgorithm(SignCommandOptions.ParseHash(settings.Hash));
                     }
 
                     if (settings.FieldName is not null)
@@ -219,7 +432,7 @@ internal sealed class SignCommand : AsyncCommand<SignCommand.Settings>
 
                     if (settings.Certify is not null)
                     {
-                        builder = builder.AsCertification(ParseCertificationLevel(settings.Certify));
+                        builder = builder.AsCertification(SignCommandOptions.ParseCertificationLevel(settings.Certify));
                     }
 
                     // Metadata: reason, location, contact, signer name
@@ -233,16 +446,72 @@ internal sealed class SignCommand : AsyncCommand<SignCommand.Settings>
                             contactInfo: settings.Contact);
                     }
 
+                    // Brasil AEA — after explicit metadata so it adds extra CMS attributes
+                    if (settings.Brasil)
+                    {
+                        var info = BrasilSignOptions.Build(
+                            signerName: settings.SignerName ?? "",
+                            cpf: settings.Cpf!,
+                            authMethod: settings.AuthMethod,
+                            email: settings.SignerEmail,
+                            institution: settings.Institution,
+                            institutionCnpj: settings.InstitutionCnpj,
+                            commitmentType: settings.Commitment,
+                            policyOid: settings.PolicyOid,
+                            policyUri: settings.PolicyUri);
+                        builder = builder.WithAdvancedSignature(info);
+                    }
+
                     // Visual appearance
                     if (settings.Visible)
                     {
-                        var appearance = BuildAppearance(settings);
+                        var appearance = AppearanceBuilder.Build(
+                            visible: true,
+                            backgroundImage: settings.BackgroundImage,
+                            qrUrl: settings.QrUrl,
+                            page: settings.Page,
+                            x: settings.X,
+                            y: settings.Y,
+                            hasReason: settings.Reason is not null || settings.Brasil,
+                            hasLocation: settings.Location is not null,
+                            fontSize: settings.FontSize,
+                            labelFontSize: settings.LabelFontSize,
+                            textColor: settings.TextColor,
+                            font: settings.Font,
+                            borderColor: settings.BorderColor,
+                            borderWidth: settings.BorderWidth,
+                            noDate: settings.NoDate);
+
+                        if (settings.Brasil)
+                        {
+                            appearance = AppearanceBuilder.AddAeaExtraLines(
+                                appearance, settings.SignerName!, settings.Cpf!);
+                        }
+
                         builder = builder.WithAppearance(appearance);
                     }
 
                     if (settings.LegacyCms)
                     {
                         builder = builder.WithLegacyCms();
+                    }
+
+                    if (settings.SubFilter is not null)
+                    {
+                        var parsed = SignCommandOptions.ParseSubFilter(settings.SubFilter);
+                        if (parsed.HasValue)
+                        {
+                            builder = builder.WithSubFilter(parsed.Value);
+                        }
+                    }
+
+                    if (settings.SignatureAlgorithm is not null)
+                    {
+                        var oid = SignCommandOptions.ParseSignatureAlgorithm(settings.SignatureAlgorithm);
+                        if (oid is not null)
+                        {
+                            builder = builder.WithSignatureAlgorithm(oid);
+                        }
                     }
 
                     if (settings.PdfA)
@@ -300,66 +569,4 @@ internal sealed class SignCommand : AsyncCommand<SignCommand.Settings>
         }
     }
 
-    private static HashAlgorithmName ParseHash(string hash) => hash.ToUpperInvariant() switch
-    {
-        "SHA256" => HashAlgorithmName.SHA256,
-        "SHA384" => HashAlgorithmName.SHA384,
-        "SHA512" => HashAlgorithmName.SHA512,
-        _ => HashAlgorithmName.SHA256
-    };
-
-    private static CertificationLevel ParseCertificationLevel(string level) => level.ToLowerInvariant() switch
-    {
-        "no-changes" => CertificationLevel.NoChanges,
-        "form-filling" => CertificationLevel.FormFilling,
-        "annotations" => CertificationLevel.FormFillingAndAnnotations,
-        _ => CertificationLevel.FormFilling
-    };
-
-    private static SignatureAppearance BuildAppearance(Settings settings)
-    {
-        bool hasCoords = settings.Page.HasValue || settings.X.HasValue || settings.Y.HasValue;
-
-        var appearance = new SignatureAppearance
-        {
-            AutoPosition = !hasCoords,
-            Page = settings.Page ?? 1,
-            X = settings.X ?? 20f,
-            Y = settings.Y ?? 20f,
-            ShowReason = settings.Reason is not null,
-            ShowLocation = settings.Location is not null,
-            VerificationUrl = settings.QrUrl,
-        };
-
-        if (settings.BackgroundImage is not null)
-        {
-            var imageBytes = File.ReadAllBytes(settings.BackgroundImage);
-            var ext = Path.GetExtension(settings.BackgroundImage).ToLowerInvariant();
-            appearance = ext is ".png"
-                ? new SignatureAppearance
-                {
-                    AutoPosition = appearance.AutoPosition,
-                    Page = appearance.Page,
-                    X = appearance.X,
-                    Y = appearance.Y,
-                    ShowReason = appearance.ShowReason,
-                    ShowLocation = appearance.ShowLocation,
-                    VerificationUrl = appearance.VerificationUrl,
-                    BackgroundImagePng = imageBytes,
-                }
-                : new SignatureAppearance
-                {
-                    AutoPosition = appearance.AutoPosition,
-                    Page = appearance.Page,
-                    X = appearance.X,
-                    Y = appearance.Y,
-                    ShowReason = appearance.ShowReason,
-                    ShowLocation = appearance.ShowLocation,
-                    VerificationUrl = appearance.VerificationUrl,
-                    BackgroundImageJpeg = imageBytes,
-                };
-        }
-
-        return appearance;
-    }
 }

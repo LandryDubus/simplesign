@@ -18,6 +18,12 @@
     <PackageReference Include="Xunit.SkippableFact" Version="1.5.61" />
   </ItemGroup>
 
+  <!-- veraPDF corpus — known-good PDF/A-2b and PDF/A-3b documents for incremental-signing preservation tests -->
+  <ItemGroup>
+    <EmbeddedResource Include="corpus\verapdf\PDF_A-2b-6-1-2-t02-pass-a.pdf" Visible="false" />
+    <EmbeddedResource Include="corpus\verapdf\PDF_A-3b-6-8-t02-pass-a.pdf" Visible="false" />
+  </ItemGroup>
+
   <!-- ETSI corpus PDFs (<500 KB) embedded as test resources. Large files (51sigs, DSS-1443, PAdES-LTA) are skipped in CI. -->
   <ItemGroup>
     <EmbeddedResource Include="corpus\pades\AD-RB.pdf" Visible="false" />

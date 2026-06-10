@@ -9,6 +9,8 @@
 | Build all | `dotnet build` |
 | Unit tests | `dotnet test tests/unit/` |
 | Specific tests | `dotnet test tests/unit/SimpleSign.PAdES.Tests` |
+| Interop tests | `dotnet test tests/interop/` |
+| VeraPDF interop | `docker pull verapdf/cli && dotnet test tests/interop/ --filter "Category=VeraPdf"` |
 | Integration tests | `dotnet test tests/integration/` |
 | Lint/format check | Build with 0 warnings (enforced) |
 | AOT smoke test | `dotnet publish tests/smoke/SimpleSign.AotSmokeTest -r linux-x64` |

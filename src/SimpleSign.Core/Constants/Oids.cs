@@ -171,6 +171,25 @@ internal static class Oids
 
     #endregion
 
+    #region CAdES XL/A Validation References
+
+    /// <summary>id-aa-ets-certificateRefs (RFC 5126 §5.4.2) — CAdES-X/L.</summary>
+    internal const string CertificateRefs = "1.2.840.113549.1.9.16.2.21";
+
+    /// <summary>id-aa-ets-revocationRefs (RFC 5126 §5.4.3) — CAdES-X/L.</summary>
+    internal const string RevocationRefs = "1.2.840.113549.1.9.16.2.22";
+
+    /// <summary>id-aa-ets-certValues (RFC 5126 §5.5.1) — CAdES-XL.</summary>
+    internal const string CertValues = "1.2.840.113549.1.9.16.2.23";
+
+    /// <summary>id-aa-ets-revocationValues (RFC 5126 §5.5.2) — CAdES-XL.</summary>
+    internal const string RevocationValues = "1.2.840.113549.1.9.16.2.24";
+
+    /// <summary>id-aa-ets-archiveTimeStamp (RFC 5126 §6.3) — CAdES-A.</summary>
+    internal const string ArchiveTimeStamp = "1.2.840.113549.1.9.16.2.48";
+
+    #endregion
+
     #region ICP-Brasil
 
     /// <summary>ICP-Brasil SAN: holder data containing CPF at positions 8–18.</summary>

@@ -58,7 +58,7 @@ SimpleSign is designed with PDF 2.0 alignment in mind. The digital signature sub
 | | PDF/A preservation | ✅ | Detects and preserves 1a/1b/2a/2b/2u/3a/3b/3u/4a/4b/4u/4e |
 | **DOC-ICP-15** | AD-RB (Referência Básica) | ✅ | CMS + signingCertificateV2, ICP-Brasil chain |
 | | AD-RT (Referência Temporal) | ✅ | AD-RB + RFC 3161 timestamp |
-| | AD-RV/AD-RC/AD-RA | ❌ | Future: requires CAdES-XL/A validation references |
+| | AD-RV/AD-RC/AD-RA | ✅ | CAdES-XL/A: certificate-refs, revocation-refs, cert-values, revocation-values via CmsAttribute |
 | **RFC 5652** | CMS SignedData | ✅ | Full compliance (§5.1–5.6), detached signatures |
 | **ETSI EN 319 142-1** | PAdES core (B-B, B-T, B-LT, B-LTA) | ✅ | Signature creation & augmentation |
 | **ETSI EN 319 142-2** | PAdES extended (LTV, archival) | ✅ | DSS/VRI + document timestamps |

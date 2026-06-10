@@ -40,13 +40,6 @@ internal static class CryptoVerifier
         };
 #pragma warning restore CA5350
 
-        if (cmsData.SignatureAlgorithmOid is Oids.Ed25519 or Oids.Ed448)
-        {
-            throw new NotSupportedException(
-                $"EdDSA signature algorithm '{cmsData.SignatureAlgorithmOid}' is not currently supported by this runtime. " +
-                "Use an environment/runtime that supports EdDSA key algorithms in System.Security.Cryptography.");
-        }
-
         (logger ?? NullLogger.Instance).VerifyingCryptoSignature(
             cmsData.SignatureAlgorithmOid,
             cmsData.SignerCertificate.Subject);
@@ -78,7 +71,16 @@ internal static class CryptoVerifier
             return ecValid;
         }
 
-        throw new NotSupportedException("Unsupported key algorithm in signer certificate.");
+        string algo = cmsData.SignatureAlgorithmOid switch
+        {
+            Oids.Ed25519 => "Ed25519",
+            Oids.Ed448 => "Ed448",
+            _ => cmsData.SignatureAlgorithmOid
+        };
+        throw new NotSupportedException(
+            $"Signature algorithm '{algo}' is not supported by this runtime. " +
+            "Use an environment/runtime that supports the required key algorithm.");
+
     }
 
     /// <summary>

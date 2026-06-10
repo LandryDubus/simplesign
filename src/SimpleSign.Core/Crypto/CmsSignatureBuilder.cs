@@ -478,8 +478,17 @@ public sealed class CmsSignatureBuilder
             return ecKey.SignData(signedAttrs, hashAlg, DSASignatureFormat.Rfc3279DerSequence);
         }
 
+        string keyOid = cert.PublicKey.Oid.Value ?? "";
+        if (keyOid is Oids.Ed25519 or Oids.Ed448)
+        {
+            throw new NotSupportedException(
+                $"EdDSA key algorithm '{cert.PublicKey.Oid.FriendlyName}' is not supported for direct signing. " +
+                "Use the external signer pipeline (BuildAsync) with an external signing delegate.");
+        }
+
         throw new NotSupportedException(
-            $"Certificate key algorithm '{cert.PublicKey.Oid.FriendlyName}' is not supported. Use RSA or ECDSA.");
+            $"Certificate key algorithm '{cert.PublicKey.Oid.FriendlyName}' is not supported. Use RSA, ECDSA, or EdDSA via external signer.");
+
     }
 
     /// <summary>

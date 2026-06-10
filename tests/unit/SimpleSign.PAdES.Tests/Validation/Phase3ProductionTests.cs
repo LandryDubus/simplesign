@@ -167,8 +167,8 @@ public sealed class Phase3ProductionTests
         CryptoVerifier.VerifySignature(cmsData).ShouldBeFalse();
     }
 
-    [Fact(DisplayName = "EdDSA (Ed25519) returns explicit unsupported runtime error")]
-    public void CryptoVerifier_VerifySignature_Ed25519_ThrowsNotSupportedException()
+    [Fact(DisplayName = "EdDSA (Ed25519) returns NotSupportedException when runtime cannot verify")]
+    public void CryptoVerifier_VerifySignature_Ed25519_NoRsaKey_Throws()
     {
         using var cert = CreateCert();
         var cmsData = new CmsSignedData
@@ -180,9 +180,13 @@ public sealed class Phase3ProductionTests
             SignatureAlgorithmOid = Oids.Ed25519
         };
 
+        // EdDSA verification falls through to ECDSA path; if the runtime doesn't
+        // expose EdDSA via GetECDsaPublicKey, we'll get a NotSupportedException
+        // from the fallback error message.
         Action act = () => CryptoVerifier.VerifySignature(cmsData);
         var ex = Should.Throw<NotSupportedException>(act);
-        ex.Message.ShouldContain("EdDSA");
+        ex.Message.ShouldContain("Ed25519");
+        ex.Message.ShouldContain("not supported");
     }
 
     [Fact(DisplayName = "SigningCertV2 with matching hash generates no errors")]

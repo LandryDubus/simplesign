@@ -152,7 +152,7 @@ public sealed class LtvEmbedderTests
         LtvEmbedder ltvEmbedder = new LtvEmbedder();
         using X509Certificate2 cert = TestCertificateFactory.CreateSelfSignedCert();
         byte[] garbage = [0, 255, 222, 173];
-        // v0.3.3: garbage input still passes through EnsureTrailingEol — it adds a
+        // v0.4.0: garbage input still passes through EnsureTrailingEol — it adds a
         // trailing \n if the input is not already EOL-terminated. Garbage [173] is
         // not EOL, so the output gains 1 byte.
         byte[] result = await ltvEmbedder.EmbedLtvDataAsync(garbage, [cert]);
@@ -167,7 +167,7 @@ public sealed class LtvEmbedderTests
         LtvEmbedder ltvEmbedder = new LtvEmbedder();
         using X509Certificate2 cert = TestCertificateFactory.CreateSelfSignedCert();
         byte[] pdf = TestPdfFactory.CreateMinimalPdf();
-        // v0.3.3: even when no LTV data is embedded, EnsureTrailingEol adds a trailing
+        // v0.4.0: even when no LTV data is embedded, EnsureTrailingEol adds a trailing
         // \n if the source PDF is bare-%%EOF (no EOL after %%EOF).
         byte[] result = await ltvEmbedder.EmbedLtvDataAsync(pdf, [cert]);
         result.AsSpan(0, pdf.Length).SequenceEqual(pdf).ShouldBeTrue();
@@ -204,7 +204,7 @@ public sealed class LtvEmbedderTests
     [Fact(DisplayName = "LTV catalog write (BuildUpdatedCatalogDss) ends with LF after endobj")]
     public async Task EmbedLtvDataAsync_WithCrlData_CatalogWriteEndsWithLfAfterEndobj()
     {
-        // Regression for the v0.3.3 fix to BuildUpdatedCatalogDss — the catalog write
+        // Regression for the v0.4.0 fix to BuildUpdatedCatalogDss — the catalog write
         // returned by the embedder must end with an EOL marker after "endobj" so the
         // XRef stream written immediately after is LF-preceded.
         byte[] content = [48, 130, 1, 0];
@@ -254,7 +254,7 @@ public sealed class LtvEmbedderTests
         LtvEmbedder ltvEmbedder = new LtvEmbedder(httpClient);
         using X509Certificate2 cert = CreateCertWithCrlUrl();
         byte[] pdf = TestPdfFactory.CreateMinimalPdf();
-        // v0.3.3: failed CRL/OCSP download → no DSS to embed → EnsureTrailingEol
+        // v0.4.0: failed CRL/OCSP download → no DSS to embed → EnsureTrailingEol
         // adds a trailing \n if the source is bare-%%EOF.
         byte[] result = await ltvEmbedder.EmbedLtvDataAsync(pdf, [cert]);
         result.AsSpan(0, pdf.Length).SequenceEqual(pdf).ShouldBeTrue();
@@ -267,7 +267,7 @@ public sealed class LtvEmbedderTests
     {
         LtvEmbedder ltvEmbedder = new LtvEmbedder();
         byte[] pdf = TestPdfFactory.CreateMinimalPdf();
-        // v0.3.3: empty chain → no DSS to embed → EnsureTrailingEol adds a trailing
+        // v0.4.0: empty chain → no DSS to embed → EnsureTrailingEol adds a trailing
         // \n if the source is bare-%%EOF.
         byte[] result = await ltvEmbedder.EmbedLtvDataAsync(pdf, []);
         result.AsSpan(0, pdf.Length).SequenceEqual(pdf).ShouldBeTrue();

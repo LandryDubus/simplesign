@@ -208,7 +208,7 @@ public sealed class LtvEmbedder
         if (crlData is [] && ocspData is [])
         {
             _logger.LtvNoRevocationDataCollected();
-            // v0.3.3: even when no LTV data is embedded, the source PDF must end
+            // v0.4.0: even when no LTV data is embedded, the source PDF must end
             // with an EOL marker so any downstream incremental update is LF-preceded.
             // Avoid a full double-copy: check the last byte and only allocate when
             // the trailing EOL is actually missing.

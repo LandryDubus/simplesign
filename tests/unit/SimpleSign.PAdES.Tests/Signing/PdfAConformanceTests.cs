@@ -247,7 +247,7 @@ public sealed class PdfAConformanceTests
         text.ShouldContain("/F 132");
     }
 
-    // ── Incremental-update EOL guards (v0.3.3) ────────────────────────────────
+    // ── Incremental-update EOL guards (v0.4.0) ────────────────────────────────
 
     // 1-4: Direct tests on the shared helper.
     [Fact(DisplayName = "EnsureTrailingEol on empty stream is a no-op")]

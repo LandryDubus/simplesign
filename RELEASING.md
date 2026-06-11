@@ -29,7 +29,7 @@ Update the version string in **all** of these files:
 ### Quick sed command (macOS):
 ```bash
 VERSION="X.Y.Z"
-OLD="0.3.3"
+OLD="0.4.0"
 sed -i '' "s/<Version>$OLD</<Version>$VERSION</g" \
   Directory.Build.props \
   src/SimpleSign/SimpleSign.csproj \
@@ -116,4 +116,4 @@ NOTES
 - **MINOR** (0.x.0): New public API surface, deprecations
 - **MAJOR** (x.0.0): Breaking changes to public API
 
-Current version: `0.3.3`
+Current version: `0.4.0`

@@ -27,27 +27,45 @@ All cryptography is handled by `System.Security.Cryptography` — **no third-par
 
 ---
 
-## What's New in v0.3.3
+## What's New in v0.4.0
 
-**Algorithm inference + signature algorithm override API:**
-- **PSS cert hash inference** — certificates issued with `id-RSASSA-PSS` now have their `RSASSA-PSS-params` (RFC 4055 §3.1) honoured when selecting the digest algorithm. SHA-384 and SHA-512 PSS certs no longer default to SHA-256.
-- **RSA key-size-based hash** — RSA PKCS#1 keys >= 3072 bits now default to SHA-384 per NIST SP 800-57 Part 1 Rev. 5. Smaller keys remain at SHA-256.
-- **`.WithSignatureAlgorithm(oid)`** — new API to force RSASSA-PSS on plain `rsaEncryption` certificates for local signing, without the external-signer workaround.
-- **Compatibility validation** — incompatible signature algorithm OIDs (e.g., ECDSA OID on RSA cert) now throw `ArgumentException` at signing time instead of producing invalid CMS.
+**CI infrastructure:**
+- 🧪 **Weekly fuzz testing** — 7 targets (pdf, dss, cms, timestamp, ocsp, validator, xref) via SharpFuzz, non-blocking
+- 🧪 **Stryker mutation testing** — Advanced level, thresholds high=80/low=60/break=50
+- 🧪 **Stress tests in CI** — 1,000 sequential, 500 concurrent, 100 incremental (non-blocking job)
+- 🧪 **NU1903 suppression removed** — `dotnet list package --vulnerable` confirms zero vulnerable packages
 
-**SPKI-level PSS detection (RFC 4055 §4):**
-- PSS constraints encoded at the SubjectPublicKeyInfo level are now correctly detected by all 4 PSS detection points (`AlgorithmInference`, `SignerBuilder`, `DeferredSigner`, `CmsSignatureBuilder`).
+**PDF/A-4 (ISO 19005-4:2020):**
+- 📄 Detection via XMP metadata (`pdfaid:part=4`), CLI formatting, HostSigner display
+- 📄 New enum values: `A4a`, `A4b`, `A4u`, `A4e` (plus previously missing `A2u`, `A3u`)
+- 📄 Preservation validation allows PNG/transparency (relaxed in ISO 19005-4 vs -1)
 
-**Code review bug fixes:**
-- **Deferred timestamp hash** — `CompleteAsync` now uses the correct hash algorithm (fixes SHA-384/512 TSA hashing)
-- **External signer inference** — `WithExternalSigner` resolves effective hash before auto-detecting the signature algorithm OID
-- **PSS logging** — `BuildSignedData` correctly logs `signatureOid == Oids.RsaPss` instead of comparing the original OID
-- **Hex extraction** — `ExtractCmsFromPdf` corrects `/Contents` hex stripping (was stripping individual `'0'` chars instead of `"00"` pairs)
-- **Catch narrowing** — `SelectHashForRsaKeySize` narrowed from broad `Exception` to `CryptographicException`
+**EdDSA verification:**
+- `CryptoVerifier.VerifySignature` no longer throws for Ed25519/Ed448 — falls through to ECDSA path on .NET 9+
+- Direct signing remains external-signer pipeline only; `CmsSignatureBuilder` provides clear guidance
 
-**PDF/A-3b `spacingCompliesPDFA` fix (residual objects 99, 75, 114):**
-- 📄 **Shared `IncrementalUpdateUtility.EnsureTrailingEol`** — all three writers (`PdfSignatureWriter`, `LtvEmbedder`, `DocTimeStampWriter`) now guarantee the first new object appended to a bare-`%%EOF` source PDF is preceded by an EOL marker. ISO 19005-3 §6.1.9 Test 1 passes for all incremental objects.
-- 📄 **LTV catalog write EOL fix** — `BuildUpdatedCatalogDss` normalises CRLF→LF, falls back to a depth-aware `FindOutermostDictClose`, and appends a trailing `\n` to the rewritten catalog. Root cause of the 3 residual object failures.
+**CAdES-XL validation references (AD-RV/RC/RA):**
+- New `CmsAttribute` factory methods: `CertificateRefs()`, `RevocationRefs()`, `CertValues()`, `RevocationValues()`
+- Enables ICP-Brasil AD-RV/AD-RC/AD-RA signing via attribute injection
+
+**SHA-3 hash support (NET 9+):**
+- SHA3-256/384/512 across hashing, CMS digest OIDs, timestamping, verification, XMLDSig URIs
+
+**Documentation:**
+- 📚 **4 Architecture Decision Records** — no BouncyCastle, incremental PDF, result-object validation, AOT
+- 📚 **Migration guides** — v0.2→v0.3 and v0.3→v0.4 with breaking changes
+- 📚 **Issue templates** — bug report, feature request, standards request
+
+**Algorithm inference + signature algorithm override (from v0.3.3):**
+- **PSS cert hash inference** — `RSASSA-PSS-params` (RFC 4055 §3.1) honoured when selecting digest algorithm
+- **RSA key-size-based hash** — PKCS#1 keys >= 3072 bits default to SHA-384 per NIST SP 800-57
+- **`.WithSignatureAlgorithm(oid)`** — force RSASSA-PSS on plain `rsaEncryption` certificates
+- **Compatibility validation** — incompatible OIDs throw `ArgumentException` at signing time
+
+**Bug fixes (from v0.3.3):**
+- PDF/A-3b `spacingCompliesPDFA` — residual EOL failures fixed via shared `EnsureTrailingEol` helper
+- Deferred timestamp hash, external signer inference, PSS logging, hex extraction fixes
+- Empty stub projects removed (DocxToPdf, Europa, App)
 - 📄 **LTV early-return EOL guard** — even when no CRL/OCSP data is collected, the source PDF is now passed through `EnsureTrailingEol` so any follow-up incremental update remains LF-preceded.
 
 **Test coverage:**

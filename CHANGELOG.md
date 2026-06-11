@@ -5,10 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.3.3] - 2026-06-09
+## [0.4.0] - 2026-06-11
 
 ### Added
 
+- **CI infrastructure** — three new GitHub Actions workflows: weekly fuzz testing (7 targets via SharpFuzz), Stryker mutation testing (Advanced level), and stress tests (1,000 sequential / 500 concurrent / 100 incremental). NU1903 suppression removed — no vulnerable packages remain.
+- **PDF/A-4 (ISO 19005-4:2020)** — new `A4a`, `A4b`, `A4u`, `A4e` enum values, detection via XMP metadata (`pdfaid:part=4`), CLI/HostSigner formatting, and preservation validation (PNG/transparency allowed as per ISO 19005-4).
+- **EdDSA verification** — `CryptoVerifier.VerifySignature` no longer throws `NotSupportedException` for Ed25519/Ed448; verification falls through to the ECDSA path. Direct signing remains via external signer pipeline only.
+- **CAdES-XL validation references** — new OIDs and `CmsAttribute` factory methods for CAdES-X/L/A: `CertificateRefs`, `RevocationRefs`, `CertValues`, `RevocationValues`. Enables ICP-Brasil AD-RV/AD-RC/AD-RA profile use via attribute injection.
+- **SHA-3 hash support** — `HashAlgorithmName.SHA3_256/384/512` on .NET 9+ across hashing, CMS digest OID mapping, timestamping, verification, and XMLDSig URIs (guarded with `#if NET9_0_OR_GREATER`).
+- **Architecture Decision Records** — 4 ADRs: use of `System.Security.Cryptography` (no BouncyCastle), incremental PDF save, result-object validation, AOT compatibility.
+- **Migration guides** — `docs/migration/v0.2-to-v0.3.md` and `docs/migration/v0.3-to-v0.4.md` with breaking changes and upgrade steps.
+- **Issue templates** — `bug_report.md`, `feature_request.md`, `standards_request.md` for structured issue triage.
 - **`SignerBuilder.WithSignatureAlgorithm(oid)`** — new public API to force a specific signature algorithm OID on the local signing path. Primary use case: producing RSASSA-PSS signatures with certificates whose public key OID is `rsaEncryption` (`1.2.840.113549.1.1.1`). Compatibility with the certificate's key type is validated at signing time.
 - **`CmsSignatureBuilder.ValidateSignatureAlgorithmCompatibility`** — shared validator that throws `ArgumentException` when the requested signature OID is incompatible with the certificate's public key family (e.g., ECDSA OID on an RSA cert).
 - **`DeferredSigningOptions.HashAlgorithmExplicitlySet`** — new `bool` property that distinguishes "user chose SHA-256" from "library defaulted to SHA-256", enabling algorithm inference on the deferred signing path.
@@ -18,6 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Directory.Build.props XML comment** — `--vulnerable` contained `--` which broke XML parsing (`MSB4024`). Fixed to use `-vulnerable` instead.
 - **PSS cert's `RSASSA-PSS-params` ignored at the SPKI level** — certificates that encode the PSS constraint at the SubjectPublicKeyInfo level (`PublicKey.Oid.Value == Oids.RsaPss`, RFC 4055 §4) were not detected as PSS certs, causing `DetectRsaPadding` to return PKCS#1 and `DetectSignatureAlgorithmOid` to produce `rsaEncryption` instead of `id-RSASSA-PSS`. The new `AlgorithmInference.ExtractPssParamsFromSpki` reads the SPKI parameters field, and all four PSS detection points (`AlgorithmInference`, `SignerBuilder.DetectSignatureAlgorithmOid`, `DeferredSigner.DetectSignatureAlgorithmOid`, `CmsSignatureBuilder.GetSignatureAlgorithmOid`) now check both `PublicKey.Oid.Value` and `SignatureAlgorithm.Value`.
 - **PSS cert's `RSASSA-PSS-params` ignored when inferring hash** — certificates issued with `id-RSASSA-PSS` and declaring SHA-384 or SHA-512 in their PSS params were always signed with SHA-256 unless the caller explicitly called `.WithHashAlgorithm()`. The new `AlgorithmInference.ResolveEffectiveHashAlgorithm` helper reads the hash from the cert's DER-encoded PSS params (via `CryptoUtility.ParsePssHashAlgorithm`) and uses it when the user has not overridden the default. Applied to `SignerBuilder`, `DeferredSigner`, and `DeferredSignerBuilder`.
 - **Default hash for RSA PKCS#1 always SHA-256 regardless of key size** — RSA keys >= 3072 bits now default to SHA-384 per NIST SP 800-57 Part 1 Rev. 5, Table 2. Smaller keys remain at SHA-256. Applied to all three signing paths.
@@ -31,6 +40,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **PDF/A-3b `spacingCompliesPDFA` on signed PDFs** — residual ISO 19005-3 §6.1.9 Test 1 failures on objects 99, 75, and 114 (the three objects appended by the LTV + DocTimeStamp signing chain) when the source PDF is bare-`%%EOF` (no EOL after `%%EOF`). The new `IncrementalUpdateUtility.EnsureTrailingEol` helper is called by all three writers (`PdfSignatureWriter`, `LtvEmbedder`, `DocTimeStampWriter`) after they copy the source PDF into the result stream, guaranteeing the first new object written is preceded by an EOL marker.
 - **LTV catalog write missing trailing EOL** — `LtvEmbedder.BuildUpdatedCatalogDss` now also normalises CRLF→LF and falls back to a depth-aware `PdfStructureParser.FindOutermostDictClose` when the `>>\nendobj` sentinel is not found, and appends a `\n` to the rewritten catalog if it does not end with an EOL marker. This is the root cause of the 3 object-level failures (the xref stream written immediately after the catalog rewrite would otherwise be the first object not preceded by an EOL).
 - **LTV early-return path with bare-`%%EOF` source** — when no CRL/OCSP data can be collected, the embedder now still passes the source through `EnsureTrailingEol` so a follow-up incremental update is always LF-preceded. The 4 corresponding tests were updated to assert the new trailing-EOL behavior.
+- **`DocxToPdf`, `Europa`, `App` stub projects** — removed (empty projects with no source code).
 
 ### Improved
 
@@ -41,6 +51,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `CmsSignatureBuilderCompatibilityTests.cs` (7 tests) — RSA, ECDSA, EdDSA compatible/incompatible OID pairs; PSS OID build.
 - **EdDSA support** — `TestCertificateFactory.TryCreateEdDsaCert` on .NET 9+ with `#if`-wrapped platform guards. EdDSA compatibility tests auto-skip on unsupported platforms.
 - **New test helpers** — `TestCertificateFactory.CreatePssSelfSignedCert` for PSS-issued certs with arbitrary hash.
+- **Documentation** — ADRs (4), migration guides (2), issue templates (3), updated conformance matrix.
+- **`PdfALevel` enum** — fully classified with `A1a`–`A4e` values (previously missing `A2u`, `A3u`, all `A4` variants).
 
 ## [0.3.2] - 2026-06-08
 
@@ -214,7 +226,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **HostSigner** — React/shadcn UI overhaul
 - **README** — comprehensive rewrite: lib-focused structure, real benchmark numbers, dependency clarity, merged enterprise features
 
-[0.3.3]: https://github.com/eupassarin/SimpleSign/releases/tag/v0.3.3
+[0.4.0]: https://github.com/eupassarin/SimpleSign/releases/tag/v0.4.0
 [0.3.2]: https://github.com/eupassarin/SimpleSign/releases/tag/v0.3.2
 [0.3.1]: https://github.com/eupassarin/SimpleSign/releases/tag/v0.3.1
 [0.3.0]: https://github.com/eupassarin/SimpleSign/releases/tag/v0.3.0

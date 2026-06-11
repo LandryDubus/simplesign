@@ -5,7 +5,7 @@
     <RootNamespace>SimpleSign</RootNamespace>
     <PackageId>SimpleSign</PackageId>
     <Description>Meta-package that includes all SimpleSign digital signature capabilities: PAdES (PDF) signing and validation.</Description>
-    <Version>0.3.3</Version>
+    <Version>0.4.0</Version>
     <IsAotCompatible Condition="$([MSBuild]::IsTargetFrameworkCompatible('$(TargetFramework)', 'net9.0'))">true</IsAotCompatible>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <PackageReadmeFile>README.md</PackageReadmeFile>

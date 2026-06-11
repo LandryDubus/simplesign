@@ -47,6 +47,12 @@ byte[] signedPdf = await SimpleSigner
 - [Deferred Signing](articles/deferred-signing.md)
 - [Inspection & Validation](articles/inspection-validation.md)
 - [ICP-Brasil](articles/icp-brasil.md)
+- [Architecture](architecture.md)
+- [Standards Conformance](conformance.md)
+- [Interoperability](interoperability.md)
+- [Performance](performance.md)
+- [ADRs](adr/) — Architecture Decision Records
+- [Migration Guides](migration/)
 - [HostSigner](https://github.com/eupassarin/SimpleSign/tree/main/src/SimpleSign.HostSigner) — Windows tray app for local signing
 - [CLI Tool](https://www.nuget.org/packages/SimpleSign.Cli) — command-line signing and validation
 - [GitHub Repository](https://github.com/eupassarin/SimpleSign)

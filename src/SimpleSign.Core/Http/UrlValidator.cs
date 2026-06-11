@@ -12,8 +12,8 @@ internal static class UrlValidator
 {
     /// <summary>
     /// Validates that a URL is safe for outbound HTTP requests (CRL, OCSP, AIA, TSA).
-    /// Blocks localhost, private IPs, link-local, and non-HTTP(S) schemes.
-    /// Resolves hostnames and validates all resolved addresses.
+    /// Blocks localhost, private IPs, and non-HTTP(S) schemes.
+    /// Does NOT resolve hostnames — use <see cref="IsSafeUrlAsync"/> for DNS rebinding protection.
     /// </summary>
     internal static bool IsSafeUrl(string url)
     {
@@ -31,7 +31,43 @@ internal static class UrlValidator
         return !IsBlockedHost(uri.Host);
     }
 
+    /// <summary>
+    /// Validates that a URL is safe for outbound HTTP requests with DNS rebinding protection.
+    /// Resolves hostnames and validates all resolved IP addresses.
+    /// Prefer this overload for async code paths.
+    /// </summary>
+    internal static async Task<bool> IsSafeUrlAsync(string url, CancellationToken ct = default)
+    {
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri))
+        {
+            return false;
+        }
+
+        if (!uri.Scheme.Equals("http", StringComparison.OrdinalIgnoreCase) &&
+            !uri.Scheme.Equals("https", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        return !await IsBlockedHostAsync(uri.Host, ct).ConfigureAwait(false);
+    }
+
     private static bool IsBlockedHost(string host)
+    {
+        if (string.Equals(host, "localhost", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (IPAddress.TryParse(host, out var ip))
+        {
+            return IsPrivateOrReserved(ip);
+        }
+
+        return false;
+    }
+
+    private static async Task<bool> IsBlockedHostAsync(string host, CancellationToken ct)
     {
         if (string.Equals(host, "localhost", StringComparison.OrdinalIgnoreCase))
         {
@@ -46,7 +82,7 @@ internal static class UrlValidator
         // Resolve hostname and check all resolved IPs to prevent DNS rebinding
         try
         {
-            var addresses = Dns.GetHostAddresses(host);
+            var addresses = await Dns.GetHostAddressesAsync(host, ct).ConfigureAwait(false);
             foreach (var address in addresses)
             {
                 if (IsPrivateOrReserved(address))
@@ -59,6 +95,11 @@ internal static class UrlValidator
         {
             // DNS resolution failed — allow through (HTTP client will handle the connection failure).
             // Blocking here would break offline scenarios and test environments.
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // Cancellation requested — rethrow
+            throw;
         }
 
         return false;

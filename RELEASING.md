@@ -112,7 +112,7 @@ NOTES
 
 ## Versioning Policy
 
-- **PATCH** (0.3.x): Bug fixes, performance, internal improvements, new non-breaking features
+- **PATCH** (0.4.x): Bug fixes, performance, internal improvements, new non-breaking features
 - **MINOR** (0.x.0): New public API surface, deprecations
 - **MAJOR** (x.0.0): Breaking changes to public API
 

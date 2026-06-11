@@ -8,6 +8,10 @@
   href: interoperability.md
 - name: Performance
   href: performance.md
+- name: ADRs
+  href: adr/
+- name: Migration Guides
+  href: migration/
 - name: API Reference
   href: api/
   homepage: api/index.md

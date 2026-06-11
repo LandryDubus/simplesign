@@ -1,4 +1,5 @@
 using System.Formats.Asn1;
+using System.Security.Cryptography;
 using SimpleSign.Core.Constants;
 using SimpleSign.Core.Signing;
 
@@ -131,9 +132,16 @@ public sealed class CmsAttribute
     /// OtherCertID ::= OtherHash { issuerSerial OPTIONAL }
     /// </code>
     /// </summary>
-    /// <param name="certHashes">Array of (certHash, hashAlgorithmOid, issuerSerialBytes) tuples.</param>
+    /// <param name="certHashes">Array of (certHash, hashAlgorithmOid, issuerSerialBytes) tuples.
+    /// The <c>issuerSerial</c> must be DER-encoded <c>IssuerSerial</c> bytes when provided.</param>
     public static CmsAttribute CertificateRefs(params (byte[] Hash, string HashOid, byte[]? IssuerSerial)[] certHashes)
     {
+        ArgumentNullException.ThrowIfNull(certHashes);
+        if (certHashes.Length == 0)
+        {
+            throw new ArgumentException("At least one certificate reference must be provided.", nameof(certHashes));
+        }
+
         var writer = new AsnWriter(AsnEncodingRules.DER);
         using (writer.PushSequence()) // CompleteCertificateRefs
         {
@@ -162,21 +170,59 @@ public sealed class CmsAttribute
 
     /// <summary>
     /// Creates a revocation-refs attribute (CAdES-X/L, RFC 5126 §5.4.3).
+    /// Each CRL is SHA-256 hashed and wrapped in a <c>CrlValidatedID</c> inside a
+    /// single <c>CRLListID</c>.
+    /// <code>
+    /// CompleteRevocationRefs ::= SEQUENCE OF CrlOcspRef
+    /// CrlOcspRef ::= CHOICE { crl [0] CRLListID }
+    /// CRLListID ::= SEQUENCE OF CrlValidatedID
+    /// CrlValidatedID ::= SEQUENCE { crlHash  OtherHash }
+    /// OtherHash ::= SEQUENCE { hashAlgorithm  AlgorithmIdentifier,
+    ///                          hashValue      OCTET STRING }
+    /// </code>
     /// </summary>
     /// <param name="crlDerBytes">Array of DER-encoded CRL bytes.</param>
     public static CmsAttribute RevocationRefs(params byte[][] crlDerBytes)
     {
-        var writer = new AsnWriter(AsnEncodingRules.DER);
-        using (writer.PushSequence()) // CompleteRevocationRefs
+        ArgumentNullException.ThrowIfNull(crlDerBytes);
+        if (crlDerBytes.Length == 0)
         {
-            foreach (var crl in crlDerBytes)
+            throw new ArgumentException("At least one CRL must be provided.", nameof(crlDerBytes));
+        }
+
+        var writer = new AsnWriter(AsnEncodingRules.DER);
+
+        // CompleteRevocationRefs ::= SEQUENCE OF CrlOcspRef
+        using (writer.PushSequence())
+        {
+            // CrlOcspRef CHOICE → crl [0] EXPLICIT CRLListID
+            using (writer.PushSequence(new Asn1Tag(TagClass.ContextSpecific, 0, true)))
             {
-                using (writer.PushSequence()) // CrlIdentifier (simplified: just the CRL bytes)
+                // CRLListID ::= SEQUENCE OF CrlValidatedID
+                using (writer.PushSequence())
                 {
-                    writer.WriteEncodedValue(crl);
+                    foreach (var crl in crlDerBytes)
+                    {
+                        byte[] crlHash = SHA256.HashData(crl);
+
+                        // CrlValidatedID ::= SEQUENCE { crlHash OtherHash }
+                        using (writer.PushSequence())
+                        {
+                            // OtherHash ::= SEQUENCE { hashAlgorithm, hashValue }
+                            using (writer.PushSequence())
+                            {
+                                using (writer.PushSequence()) // AlgorithmIdentifier
+                                {
+                                    writer.WriteObjectIdentifier(Oids.Sha256);
+                                }
+                                writer.WriteOctetString(crlHash);
+                            }
+                        }
+                    }
                 }
             }
         }
+
         return new CmsAttribute(Oids.RevocationRefs, writer.Encode());
     }
 
@@ -184,9 +230,14 @@ public sealed class CmsAttribute
     /// Creates a cert-values attribute (CAdES-XL, RFC 5126 §5.5.1).
     /// Embeds the full DER-encoded signer and CA certificates.
     /// </summary>
-    /// <param name="certDerBytes">DER-encoded certificates.</param>
+    /// <param name="certDerBytes">DER-encoded certificates. Must contain at least one certificate.</param>
     public static CmsAttribute CertValues(params byte[][] certDerBytes)
     {
+        ArgumentNullException.ThrowIfNull(certDerBytes);
+        if (certDerBytes.Length == 0)
+        {
+            throw new ArgumentException("At least one certificate must be provided.", nameof(certDerBytes));
+        }
         var writer = new AsnWriter(AsnEncodingRules.DER);
         using (writer.PushSequence()) // CertificateValues
         {
@@ -204,10 +255,19 @@ public sealed class CmsAttribute
     /// </summary>
     /// <param name="ocspDerResponses">DER-encoded OCSP responses.</param>
     /// <param name="crlDerBytes">DER-encoded CRLs.</param>
+    /// <exception cref="ArgumentException">
+    /// Both parameters are null or empty — at least one revocation source is required.
+    /// </exception>
     public static CmsAttribute RevocationValues(
         byte[][]? ocspDerResponses = null,
         byte[][]? crlDerBytes = null)
     {
+        if ((ocspDerResponses is null || ocspDerResponses.Length == 0)
+            && (crlDerBytes is null || crlDerBytes.Length == 0))
+        {
+            throw new ArgumentException(
+                "At least one revocation source (CRL or OCSP) must be provided.");
+        }
         var writer = new AsnWriter(AsnEncodingRules.DER);
         using (writer.PushSequence()) // RevocationValues
         {

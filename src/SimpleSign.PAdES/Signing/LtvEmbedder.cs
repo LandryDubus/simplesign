@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
@@ -91,60 +92,69 @@ public sealed class LtvEmbedder
             }
         }
 
-        // Iterative stabilisation loop: process certificates until no new ones are discovered
-        var processedThumbprints = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        // Iterative stabilisation loop: process certificates in parallel until no new ones are discovered.
+        // Each iteration snapshots the current cert list for issuer lookups and runs all
+        // OCSP/CRL/AIA fetches concurrently. Newly discovered certs are merged after the
+        // iteration completes so reads within the iteration are lock-free.
+        var processedThumbprints = new ConcurrentDictionary<string, byte>(StringComparer.OrdinalIgnoreCase);
         var workingSet = new Queue<X509Certificate2>(allCerts);
+        var parallelOptions = new ParallelOptions
+        {
+            MaxDegreeOfParallelism = Environment.ProcessorCount * 2,
+            CancellationToken = cancellationToken,
+        };
         int iteration = 0;
 
         while (workingSet.Count > 0 && iteration < MaxIterations)
         {
             iteration++;
-            var nextRound = new List<X509Certificate2>();
 
+            var allCertsSnapshot = allCerts.ToList();
+
+            var certs = new List<X509Certificate2>(workingSet.Count);
             while (workingSet.Count > 0)
             {
-                var cert = workingSet.Dequeue();
+                certs.Add(workingSet.Dequeue());
+            }
 
-                if (!processedThumbprints.Add(cert.Thumbprint))
+            var ocspBag = new ConcurrentBag<byte[]>();
+            var crlBag = new ConcurrentBag<byte[]>();
+            var nextRoundCerts = new ConcurrentDictionary<string, X509Certificate2>(StringComparer.OrdinalIgnoreCase);
+
+            await Parallel.ForEachAsync(certs, parallelOptions, async (cert, ct) =>
+            {
+                if (!processedThumbprints.TryAdd(cert.Thumbprint, 0))
                 {
-                    continue; // Already processed
+                    return;
                 }
 
-                // Check for id-pkix-ocsp-nocheck — skip revocation check for this cert
                 if (HasOcspNoCheckExtension(cert))
                 {
                     _logger.LtvProcessingCert($"{cert.Subject} (OcspNoCheck — skipping revocation)");
-                    continue;
+                    return;
                 }
 
                 _logger.LtvProcessingCert(cert.Subject);
 
-                // Try OCSP first (smaller, faster, more current)
                 var ocspUrl = OcspClient.GetOcspUrl(cert);
                 if (ocspUrl is not null)
                 {
                     try
                     {
-                        var issuerCert = allCerts.FirstOrDefault(c => c.SubjectName.RawData.AsSpan().SequenceEqual(cert.IssuerName.RawData));
-                        var ocspResult = await ocspClient.FetchOcspResponseAsync(cert, issuerCert, ocspUrl, cancellationToken).ConfigureAwait(false);
-                        ocspData.Add(ocspResult.ResponseBytes);
+                        var issuerCert = allCertsSnapshot.FirstOrDefault(c => c.SubjectName.RawData.AsSpan().SequenceEqual(cert.IssuerName.RawData));
+                        var ocspResult = await ocspClient.FetchOcspResponseAsync(cert, issuerCert, ocspUrl, ct).ConfigureAwait(false);
+                        ocspBag.Add(ocspResult.ResponseBytes);
 
-                        // Queue responder certificates for next round
                         foreach (var respCert in ocspResult.ResponderCertificates)
                         {
-                            if (!processedThumbprints.Contains(respCert.Thumbprint) &&
-                                !allCerts.Any(c => c.Thumbprint.Equals(respCert.Thumbprint, StringComparison.OrdinalIgnoreCase)))
-                            {
-                                allCerts.Add(respCert);
-                                nextRound.Add(respCert);
-                            }
-                            else
+                            if (processedThumbprints.ContainsKey(respCert.Thumbprint) ||
+                                !nextRoundCerts.TryAdd(respCert.Thumbprint, respCert))
                             {
                                 respCert.Dispose();
                             }
                         }
 
-                        continue; // OCSP succeeded, skip CRL for this cert
+                        return;
                     }
                     catch (Exception ex) when (ex is HttpRequestException or InvalidOperationException or InvalidDataException)
                     {
@@ -152,40 +162,36 @@ public sealed class LtvEmbedder
                     }
                 }
 
-                // Fallback to CRL
                 var crlUrl = CrlClient.GetCrlUrl(cert, _logger);
                 if (crlUrl is not null)
                 {
                     try
                     {
-                        var crl = await ResilientHttp.GetBytesAsync(_httpClient, crlUrl, logger: _logger, ct: cancellationToken).ConfigureAwait(false);
+                        var crl = await ResilientHttp.GetBytesAsync(_httpClient, crlUrl, logger: _logger, ct: ct).ConfigureAwait(false);
                         if (crl is not null)
                         {
-                            crlData.Add(crl);
+                            crlBag.Add(crl);
 
-                            // Chase CRL issuer certificate if it differs from the cert's issuer (indirect CRL)
                             var crlIssuerDn = CrlClient.ExtractCrlIssuerDn(crl, _logger);
                             if (crlIssuerDn is not null)
                             {
-                                // Check if any cert in the working set has this DN as subject
-                                bool crlIssuerFound = allCerts.Any(c =>
+                                bool crlIssuerFound = allCertsSnapshot.Any(c =>
                                     c.SubjectName.RawData.AsSpan().SequenceEqual(crlIssuerDn));
 
                                 if (!crlIssuerFound)
                                 {
-                                    // Try to fetch the CRL issuer cert via AIA caIssuers
-                                    var crlIssuerCert = await TryFetchCrlIssuerCertAsync(crlIssuerDn, cert, cancellationToken).ConfigureAwait(false);
-                                    if (crlIssuerCert is not null &&
-                                        !processedThumbprints.Contains(crlIssuerCert.Thumbprint) &&
-                                        !allCerts.Any(c => c.Thumbprint.Equals(crlIssuerCert.Thumbprint, StringComparison.OrdinalIgnoreCase)))
+                                    var crlIssuerCert = await TryFetchCrlIssuerCertAsync(crlIssuerDn, cert, ct).ConfigureAwait(false);
+                                    if (crlIssuerCert is not null)
                                     {
-                                        allCerts.Add(crlIssuerCert);
-                                        nextRound.Add(crlIssuerCert);
-                                        _logger.LtvProcessingCert($"CRL issuer discovered: {crlIssuerCert.Subject}");
-                                    }
-                                    else
-                                    {
-                                        crlIssuerCert?.Dispose();
+                                        if (processedThumbprints.ContainsKey(crlIssuerCert.Thumbprint) ||
+                                            !nextRoundCerts.TryAdd(crlIssuerCert.Thumbprint, crlIssuerCert))
+                                        {
+                                            crlIssuerCert.Dispose();
+                                        }
+                                        else
+                                        {
+                                            _logger.LtvProcessingCert($"CRL issuer discovered: {crlIssuerCert.Subject}");
+                                        }
                                     }
                                 }
                             }
@@ -196,12 +202,31 @@ public sealed class LtvEmbedder
                         _logger.CrlDownloadFailed(ex.Message);
                     }
                 }
+            });
+
+            foreach (var ocsp in ocspBag)
+            {
+                ocspData.Add(ocsp);
             }
 
-            // Enqueue newly discovered certificates for next iteration
-            foreach (var cert in nextRound)
+            foreach (var crl in crlBag)
             {
-                workingSet.Enqueue(cert);
+                crlData.Add(crl);
+            }
+
+            var allCertsThumbprints = new HashSet<string>(allCerts.Count + nextRoundCerts.Count, StringComparer.OrdinalIgnoreCase);
+            foreach (var c in allCerts)
+            {
+                allCertsThumbprints.Add(c.Thumbprint);
+            }
+
+            foreach (var (thumbprint, cert) in nextRoundCerts)
+            {
+                if (allCertsThumbprints.Add(thumbprint))
+                {
+                    allCerts.Add(cert);
+                    workingSet.Enqueue(cert);
+                }
             }
         }
 

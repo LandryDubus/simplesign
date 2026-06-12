@@ -67,6 +67,12 @@ public sealed class AlgorithmInfo
         Constants.Oids.EcdsaSha256 => "ECDSA-SHA256",
         Constants.Oids.EcdsaSha384 => "ECDSA-SHA384",
         Constants.Oids.EcdsaSha512 => "ECDSA-SHA512",
+        Constants.Oids.EcdsaSha3_256 => "ECDSA-SHA3-256",
+        Constants.Oids.EcdsaSha3_384 => "ECDSA-SHA3-384",
+        Constants.Oids.EcdsaSha3_512 => "ECDSA-SHA3-512",
+        Constants.Oids.RsaSha3_256 => "RSA-SHA3-256",
+        Constants.Oids.RsaSha3_384 => "RSA-SHA3-384",
+        Constants.Oids.RsaSha3_512 => "RSA-SHA3-512",
         Constants.Oids.Ed25519 => "Ed25519",
         Constants.Oids.Ed448 => "Ed448",
         _ => oid

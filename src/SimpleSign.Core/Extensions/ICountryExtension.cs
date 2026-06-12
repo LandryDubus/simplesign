@@ -16,9 +16,6 @@ public interface ICountryExtension
     /// <summary>Trust anchor providers for this region (root CA bundles).</summary>
     IReadOnlyList<ITrustAnchorProvider> TrustAnchorProviders { get; }
 
-    /// <summary>Signature manifest provider, or null if no manifest is used.</summary>
-    ISignatureManifestProvider? ManifestProvider { get; }
-
     /// <summary>Chain validation providers for this region.</summary>
     IReadOnlyList<IChainValidationProvider> ChainValidationProviders { get; }
 }

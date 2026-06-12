@@ -59,6 +59,9 @@ public sealed class SignatureValidationResult
         Oids.Sha256 => "SHA-256",
         Oids.Sha512 => "SHA-512",
         Oids.Sha384 => "SHA-384",
+        Oids.Sha3_256 => "SHA3-256",
+        Oids.Sha3_384 => "SHA3-384",
+        Oids.Sha3_512 => "SHA3-512",
         Oids.Sha1 => "SHA-1 (legacy)",
         _ => DigestAlgorithmOid
     };

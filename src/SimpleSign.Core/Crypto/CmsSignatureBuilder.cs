@@ -521,11 +521,9 @@ public sealed class CmsSignatureBuilder
         _ when alg == HashAlgorithmName.SHA256 => Oids.Sha256,
         _ when alg == HashAlgorithmName.SHA384 => Oids.Sha384,
         _ when alg == HashAlgorithmName.SHA512 => Oids.Sha512,
-#if NET9_0_OR_GREATER
         _ when alg == HashAlgorithmName.SHA3_256 => Oids.Sha3_256,
         _ when alg == HashAlgorithmName.SHA3_384 => Oids.Sha3_384,
         _ when alg == HashAlgorithmName.SHA3_512 => Oids.Sha3_512,
-#endif
         _ when alg == HashAlgorithmName.SHA1 => throw new NotSupportedException("SHA-1 is deprecated and not supported for new signatures. Use SHA-256 or stronger."),
         _ when alg == HashAlgorithmName.MD5 => throw new NotSupportedException("MD5 is insecure and not supported for signatures."),
         _ => throw new NotSupportedException($"Hash algorithm '{alg.Name}' is not supported.")
@@ -546,9 +544,15 @@ public sealed class CmsSignatureBuilder
             (Oids.RsaEncryption, _) when hashAlg == HashAlgorithmName.SHA256 => Oids.RsaSha256,
             (Oids.RsaEncryption, _) when hashAlg == HashAlgorithmName.SHA384 => Oids.RsaSha384,
             (Oids.RsaEncryption, _) when hashAlg == HashAlgorithmName.SHA512 => Oids.RsaSha512,
+            (Oids.RsaEncryption, _) when hashAlg == HashAlgorithmName.SHA3_256 => Oids.RsaSha3_256,
+            (Oids.RsaEncryption, _) when hashAlg == HashAlgorithmName.SHA3_384 => Oids.RsaSha3_384,
+            (Oids.RsaEncryption, _) when hashAlg == HashAlgorithmName.SHA3_512 => Oids.RsaSha3_512,
             (Oids.EcPublicKey, _) when hashAlg == HashAlgorithmName.SHA256 => Oids.EcdsaSha256,
             (Oids.EcPublicKey, _) when hashAlg == HashAlgorithmName.SHA384 => Oids.EcdsaSha384,
             (Oids.EcPublicKey, _) when hashAlg == HashAlgorithmName.SHA512 => Oids.EcdsaSha512,
+            (Oids.EcPublicKey, _) when hashAlg == HashAlgorithmName.SHA3_256 => Oids.EcdsaSha3_256,
+            (Oids.EcPublicKey, _) when hashAlg == HashAlgorithmName.SHA3_384 => Oids.EcdsaSha3_384,
+            (Oids.EcPublicKey, _) when hashAlg == HashAlgorithmName.SHA3_512 => Oids.EcdsaSha3_512,
             (Oids.Ed25519, _) => Oids.Ed25519,
             (Oids.Ed448, _) => Oids.Ed448,
             _ => throw new NotSupportedException(

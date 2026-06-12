@@ -45,6 +45,15 @@ internal static class Oids
     /// <summary>RSA with SHA-1 (sha1WithRSAEncryption) — legacy.</summary>
     internal const string RsaSha1 = "1.2.840.113549.1.1.5";
 
+    /// <summary>RSA with SHA3-256 (id-rsassa-pkcs1-v1_5-with-sha3-256).</summary>
+    internal const string RsaSha3_256 = "2.16.840.1.101.3.4.3.14";
+
+    /// <summary>RSA with SHA3-384 (id-rsassa-pkcs1-v1_5-with-sha3-384).</summary>
+    internal const string RsaSha3_384 = "2.16.840.1.101.3.4.3.15";
+
+    /// <summary>RSA with SHA3-512 (id-rsassa-pkcs1-v1_5-with-sha3-512).</summary>
+    internal const string RsaSha3_512 = "2.16.840.1.101.3.4.3.16";
+
     /// <summary>ECDSA with SHA-256.</summary>
     internal const string EcdsaSha256 = "1.2.840.10045.4.3.2";
 
@@ -53,6 +62,15 @@ internal static class Oids
 
     /// <summary>ECDSA with SHA-512.</summary>
     internal const string EcdsaSha512 = "1.2.840.10045.4.3.4";
+
+    /// <summary>ECDSA with SHA3-256 (id-ecdsa-with-sha3-256).</summary>
+    internal const string EcdsaSha3_256 = "2.16.840.1.101.3.4.3.10";
+
+    /// <summary>ECDSA with SHA3-384 (id-ecdsa-with-sha3-384).</summary>
+    internal const string EcdsaSha3_384 = "2.16.840.1.101.3.4.3.11";
+
+    /// <summary>ECDSA with SHA3-512 (id-ecdsa-with-sha3-512).</summary>
+    internal const string EcdsaSha3_512 = "2.16.840.1.101.3.4.3.12";
 
     /// <summary>RSA-PSS (id-RSASSA-PSS) — signature algorithm with PSS padding.</summary>
     internal const string RsaPss = "1.2.840.113549.1.1.10";

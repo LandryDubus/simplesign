@@ -125,6 +125,56 @@ public sealed class SimpleSignServiceCollectionExtensionsTests
         o1.ShouldBeSameAs(o2);
     }
 
+    [Fact(DisplayName = "AddSimpleSign with IHttpClientFactory in container uses factory-backed provider")]
+    public void AddSimpleSign_WithHttpClientFactory_UsesFactoryProvider()
+    {
+        var services = new ServiceCollection();
+        var factory = new FakeHttpClientFactory();
+        services.AddSingleton<IHttpClientFactory>(factory);
+        services.AddSimpleSign();
+        var provider = services.BuildServiceProvider();
+
+        var httpProvider = provider.GetRequiredService<IHttpClientProvider>();
+        httpProvider.ShouldBeOfType<HttpClientFactoryProvider>();
+    }
+
+    [Fact(DisplayName = "AddSimpleSign uses HttpClientName from options for factory-backed provider")]
+    public void AddSimpleSign_HttpClientName_IsUsedByFactoryProvider()
+    {
+        var services = new ServiceCollection();
+        var factory = new FakeHttpClientFactory();
+        services.AddSingleton<IHttpClientFactory>(factory);
+        services.AddSimpleSign(opts => opts.HttpClientName = "CustomName");
+        var provider = services.BuildServiceProvider();
+
+        var httpProvider = provider.GetRequiredService<IHttpClientProvider>();
+        httpProvider.GetClient();
+
+        factory.LastName.ShouldBe("CustomName");
+    }
+
+    [Fact(DisplayName = "AddSimpleSign without IHttpClientFactory falls back to default provider")]
+    public void AddSimpleSign_NoHttpClientFactory_UsesDefaultProvider()
+    {
+        var services = new ServiceCollection();
+        services.AddSimpleSign();
+        var provider = services.BuildServiceProvider();
+
+        var httpProvider = provider.GetRequiredService<IHttpClientProvider>();
+        httpProvider.ShouldBe(DefaultHttpClientProvider.Instance);
+    }
+
+    private sealed class FakeHttpClientFactory : IHttpClientFactory
+    {
+        public string? LastName { get; private set; }
+
+        public HttpClient CreateClient(string name)
+        {
+            LastName = name;
+            return new HttpClient();
+        }
+    }
+
     private sealed class TestHttpClientProvider : IHttpClientProvider
     {
         public HttpClient GetClient() => new();

@@ -8,7 +8,7 @@ using SimpleSign.Core.Validation;
 using SimpleSign.PAdES.Validation;
 using SimpleSign.TestHelpers;
 using Xunit;
-namespace SimpleSign.PAdES.Tests.Core;
+namespace SimpleSign.PAdES.Tests.Signing;
 
 /// <summary>
 /// Edge-case tests for SignerBuilder and external signer scenarios.

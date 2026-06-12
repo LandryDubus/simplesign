@@ -2,7 +2,7 @@ using Shouldly;
 using SimpleSign.Core.Signing;
 using SimpleSign.TestHelpers;
 using Xunit;
-namespace SimpleSign.PAdES.Tests.Core;
+namespace SimpleSign.PAdES.Tests.Signing;
 
 /// <summary>
 /// Unit tests for the SimpleSigner fluent API.

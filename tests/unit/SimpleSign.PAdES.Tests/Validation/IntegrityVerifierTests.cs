@@ -1,7 +1,8 @@
 using System.Security.Cryptography;
 using Shouldly;
 using SimpleSign.Core.Constants;
-using SimpleSign.Core.Validation;
+using SimpleSign.Core.Crypto;
+using SimpleSign.PAdES.Validation;
 using Xunit;
 
 namespace SimpleSign.PAdES.Tests.Validation;

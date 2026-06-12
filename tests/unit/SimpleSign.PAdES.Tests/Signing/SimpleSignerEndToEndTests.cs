@@ -7,7 +7,7 @@ using SimpleSign.PAdES.Validation;
 using SimpleSign.Pdf;
 using SimpleSign.TestHelpers;
 using Xunit;
-namespace SimpleSign.PAdES.Tests.Core;
+namespace SimpleSign.PAdES.Tests.Signing;
 
 /// <summary>
 /// End-to-end tests: sign → validate → detect tampering.

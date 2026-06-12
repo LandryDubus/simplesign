@@ -7,7 +7,7 @@ using SimpleSign.Core.Validation;
 using SimpleSign.PAdES.Signing;
 using SimpleSign.PAdES.Validation;
 using Xunit;
-namespace SimpleSign.PAdES.Tests.Core;
+namespace SimpleSign.PAdES.Tests.Signing;
 
 /// <summary>
 /// End-to-end tests for signature appearance, metadata, and SubFilter.

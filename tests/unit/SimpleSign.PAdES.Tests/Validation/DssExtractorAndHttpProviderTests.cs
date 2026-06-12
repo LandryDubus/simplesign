@@ -7,7 +7,6 @@ using SimpleSign.Core.Http;
 using SimpleSign.Core.Revocation;
 using SimpleSign.Core.Validation;
 using SimpleSign.PAdES.Validation;
-using SimpleSign.Pdf;
 using Xunit;
 
 namespace SimpleSign.PAdES.Tests.Validation;

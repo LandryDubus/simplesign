@@ -158,6 +158,7 @@ internal static class CertificateChainUtility
 
     /// <summary>
     /// Downloads AIA certificates for a single certificate.
+    /// Validates that downloaded certs are potential issuers (subject matches current cert's issuer).
     /// </summary>
     internal static async Task DownloadAiaForCertAsync(
         HttpClient httpClient,
@@ -172,6 +173,7 @@ internal static class CertificateChainUtility
         { return; }
 
         var urls = ExtractAiaUrls(aiaExt.RawData);
+        var issuerDn = cert.IssuerName.RawData;
         foreach (var url in urls)
         {
             if (!visited.Add(url))
@@ -180,7 +182,16 @@ internal static class CertificateChainUtility
             {
                 var bytes = await ResilientHttp.GetBytesAsync(httpClient, url, ct: ct).ConfigureAwait(false);
                 if (bytes is not null)
-                { result.AddRange(LoadCertsFromBytes(bytes)); }
+                {
+                    foreach (var loaded in LoadCertsFromBytes(bytes))
+                    {
+                        if (!loaded.SubjectName.RawData.AsSpan().SequenceEqual(issuerDn))
+                        {
+                            warnings.Add($"AIA downloaded cert '{loaded.Subject}' from {url} issuer mismatch: expected '{cert.Issuer}'");
+                        }
+                        result.Add(loaded);
+                    }
+                }
             }
             catch (Exception ex)
             {

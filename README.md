@@ -39,7 +39,7 @@ SimpleSign is a .NET library for creating and validating **PAdES** digital signa
 
 ## What's New in v0.5.0
 
-`IHttpClientFactory` integration, `WithHttpClient(HttpClient)`, lazy `IHttpClientProvider` resolution, and per-operation HTTP client slots (TSA vs revocation). See the [full changelog](CHANGELOG.md) for details.
+SHA-3 hash + signature algorithms, EdDSA (Ed25519) external signer, QR code on visible signatures, DocMDP certification enforcement, client-side SHA-3/EdDSA compatibility with graceful fallback, `HttpClientFactoryProvider` + per-operation HTTP client slots, and CLI validate command. See the [full changelog](CHANGELOG.md) for details.
 
 ---
 
@@ -142,6 +142,7 @@ var signed = await SimpleSigner
 | PDF/A preservation | `.WithPdfAPreservation()` |
 | Visible signature with QR code | `.WithAppearance(appearance)` |
 | External signer (HSM, KMS) | `.WithExternalSigner(cert, signerFunc)` |
+| Custom HTTP client | `.WithHttpClient(client)` / `.WithTimestamp(url, client)` |
 | Existing field | `.WithExistingField("SignHere")` |
 | Deferred (2-phase) | `DeferredSigner.PrepareAsync()` → `CompleteAsync()` |
 | Batch (parallel) | `BatchSigner.Create(cert).Build()` |

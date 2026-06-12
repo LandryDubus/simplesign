@@ -28,7 +28,7 @@ All three return a `new SignerBuilder(...)` wrapping the PDF in a `MemoryStream`
 
 ### 2. Immutable builder pattern
 
-`SignerBuilder` holds 23 private readonly fields capturing all configuration. Every `With*` method returns a **new instance** via a private copy constructor.
+`SignerBuilder` holds 21 private readonly fields capturing all configuration. Every `With*` method returns a **new instance** via a private copy constructor.
 
 **Copy constructor pattern:**
 
@@ -147,7 +147,7 @@ Before any PDF modification, `SignCoreAsync` validates:
 - Immutable pattern prevents stale-read bugs: each `With*` starts from the previous state
 - AOT compatible: callbacks use `Func<>` delegates, no dynamic invocation, no `Expression` trees
 - Single obvious way to create a signer: `SimpleSigner.Document()` → `SignerBuilder` → terminal method
-- Allocation overhead per `With*` call (23-field copy per operation) — negligible for typical usage (<10 calls)
+- Allocation overhead per `With*` call (21-field copy per operation) — negligible for typical usage (<10 calls)
 - Validation upfront prevents late failures after PDF modification
 - `DeferredSigner` requires session state management; opaque blob approach avoids server-side storage but blobs can be large (~100 KB)
 - `BatchSigner` uses a mutable inner builder (`BatchSignerBuilder` returning `this`) — optimised for performance, not thread-safety

@@ -4,6 +4,7 @@ using SimpleSign.PAdES;
 using SimpleSign.PAdES.Validation;
 using SimpleSign.Pdf;
 using SimpleSign.TestHelpers;
+using Xunit;
 using Xunit.Abstractions;
 
 namespace SimpleSign.Integration.Tests;

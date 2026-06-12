@@ -467,11 +467,14 @@ public sealed class SignerBuilder
                 "This PDF has a certification signature (DocMDP) that prohibits further changes. Signing is not allowed.");
         }
 
+        // Detect PDF/A level for annotation flags and preservation check
+        _inputPdf.Seek(0, SeekOrigin.Begin);
+        var pdfALevel = await PdfStructureReader.DetectPdfALevelAsync(_inputPdf, cancellationToken: cancellationToken).ConfigureAwait(false);
+
         // PDF/A preservation check
         if (_enforcePdfA)
         {
-            _inputPdf.Seek(0, SeekOrigin.Begin);
-            var pdfAIssues = await PdfAPreservationValidator.ValidateAsync(_inputPdf, _fieldOptions, cancellationToken).ConfigureAwait(false);
+            var pdfAIssues = PdfAPreservationValidator.Validate(pdfALevel, _fieldOptions);
             var errors = pdfAIssues.Where(i => i.Severity == PdfAIssueSeverity.Error).ToList();
             if (errors.Count > 0)
             {
@@ -482,7 +485,7 @@ public sealed class SignerBuilder
 
         // 1. Prepares the PDF (reserves space for the CMS)
         var prepareResult = await PdfSignatureWriter.PrepareAsync(
-            _inputPdf, outputStream, _fieldOptions, _logger, cancellationToken).ConfigureAwait(false);
+            _inputPdf, outputStream, _fieldOptions, _logger, pdfALevel: pdfALevel, cancellationToken: cancellationToken).ConfigureAwait(false);
 
         // 2. Reads the bytes to be signed (ByteRange 1 + 2)
         byte[] signedBytes = await PdfStructureReader.ReadSignedBytesAsync(
@@ -589,7 +592,7 @@ public sealed class SignerBuilder
                 _logger.ArchivalTimestampAppending(opId, _archivalTsaUrl);
                 ltvPdf = await DocTimeStampWriter.AppendDocTimeStampAsync(
                     ltvPdf, _archivalTsaUrl, _tsaHttpClient ?? _httpClient ?? _httpClientProvider.GetClient(),
-                    effectiveHash, cancellationToken).ConfigureAwait(false);
+                    effectiveHash, pdfALevel: pdfALevel, cancellationToken: cancellationToken).ConfigureAwait(false);
                 _logger.ArchivalTimestampComplete(opId);
             }
             else

@@ -225,13 +225,13 @@ public sealed class LtvEmbedder
 
         _logger.LtvDataCollected(crlData.Count, ocspData.Count, allCerts.Count);
 
-        // Extract signature /Contents hashes for VRI
-        var signatureHashes = ExtractSignatureContentHashes(signedPdf);
+        // Extract signature /Contents hashes for VRI (SHA-1 as PAdES key, SHA-256 for collision resilience)
+        var signatureHashPairs = ExtractSignatureContentHashPairs(signedPdf);
 
         // Parse existing DSS for merge (multi-signature support)
         var existingDss = Validation.DssExtractor.ParseExistingDss(signedPdf);
 
-        return AppendDssDictionary(signedPdf, crlData, ocspData, allCerts, signatureHashes, existingDss, timestampTokenBytes);
+        return AppendDssDictionary(signedPdf, crlData, ocspData, allCerts, signatureHashPairs, existingDss, timestampTokenBytes);
     }
 
     /// <summary>
@@ -242,6 +242,20 @@ public sealed class LtvEmbedder
     internal static List<string> ExtractSignatureContentHashes(byte[] pdf)
     {
         var hashes = new List<string>();
+        foreach (var (sha1, _) in ExtractSignatureContentHashPairs(pdf))
+        {
+            hashes.Add(sha1);
+        }
+        return hashes;
+    }
+
+    /// <summary>
+    /// Computes both SHA-1 and SHA-256 hashes of each signature's /Contents for VRI keys.
+    /// SHA-1 is the PAdES-mandated VRI key; SHA-256 provides collision-resilient cross-reference.
+    /// </summary>
+    internal static List<(string Sha1, string Sha256)> ExtractSignatureContentHashPairs(byte[] pdf)
+    {
+        var pairs = new List<(string, string)>();
         var span = pdf.AsSpan();
         ReadOnlySpan<byte> contentsToken = "/Contents <"u8;
         int searchPos = 0;
@@ -257,7 +271,6 @@ public sealed class LtvEmbedder
             matchPos += searchPos;
             int hexStart = matchPos + contentsToken.Length;
 
-            // Find closing '>'
             int hexEnd = span[hexStart..].IndexOf((byte)'>');
             if (hexEnd < 0)
             {
@@ -266,15 +279,12 @@ public sealed class LtvEmbedder
 
             hexEnd += hexStart;
 
-            // Check this looks like a signature /Contents (long hex string, >1000 chars)
             int hexLen = hexEnd - hexStart;
             if (hexLen > 1000)
             {
-                // Decode the hex to bytes and compute SHA-1 over actual DER content only
                 try
                 {
                     string hexString = System.Text.Encoding.Latin1.GetString(span.Slice(hexStart, hexLen));
-                    // Pad with leading zero if odd length (hex encoding requires even length)
                     if (hexString.Length % 2 != 0)
                     {
                         hexString = "0" + hexString;
@@ -285,21 +295,21 @@ public sealed class LtvEmbedder
                         byte[] sigBytes = Convert.FromHexString(hexString);
                         int derLength = ComputeDerTotalLength(sigBytes);
 #pragma warning disable CA5350 // VRI key is defined as SHA-1 by PAdES spec
-                        byte[] hash = SHA1.HashData(sigBytes.AsSpan(0, derLength));
+                        byte[] sha1 = SHA1.HashData(sigBytes.AsSpan(0, derLength));
 #pragma warning restore CA5350
-                        hashes.Add(Convert.ToHexString(hash));
+                        byte[] sha256 = SHA256.HashData(sigBytes.AsSpan(0, derLength));
+                        pairs.Add((Convert.ToHexString(sha1), Convert.ToHexString(sha256)));
                     }
                 }
                 catch (FormatException)
                 {
-                    // Not valid hex — skip
                 }
             }
 
             searchPos = hexEnd + 1;
         }
 
-        return hashes;
+        return pairs;
     }
 
     /// <summary>
@@ -357,7 +367,7 @@ public sealed class LtvEmbedder
         List<byte[]> crls,
         List<byte[]> ocsps,
         IReadOnlyList<X509Certificate2> certs,
-        List<string> signatureHashes,
+        List<(string Sha1, string Sha256)> signatureHashPairs,
         ExistingDssData existingDss,
         byte[]? timestampTokenBytes = null)
     {
@@ -432,7 +442,7 @@ public sealed class LtvEmbedder
 
         // Build VRI dictionaries (one per signature)
         var vriEntries = new List<(string Hash, int ObjNum)>();
-        foreach (var sigHash in signatureHashes)
+        foreach (var (sha1Hash, sha256Hash) in signatureHashPairs)
         {
             int vriObjNum = nextObjNum++;
             long vriOffset = result.Position;
@@ -461,13 +471,15 @@ public sealed class LtvEmbedder
                 vriSb.Append($"   /TS {tsRef}\n");
             }
 
+            vriSb.Append($"   /SHA256 <{sha256Hash.ToLowerInvariant()}>\n");
+
             // ISO 32000-2 §12.8.4.4: /TU is the time at which the VRI was created
             vriSb.Append($"   /TU (D:{DateTime.UtcNow:yyyyMMddHHmmss}+00'00')\n");
 
             vriSb.Append(">>\nendobj\n");
             result.Write(System.Text.Encoding.Latin1.GetBytes(vriSb.ToString()));
 
-            vriEntries.Add((sigHash, vriObjNum));
+            vriEntries.Add((sha1Hash, vriObjNum));
         }
 
         // Write DSS dictionary — merge existing refs with new refs

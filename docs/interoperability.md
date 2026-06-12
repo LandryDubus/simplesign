@@ -93,6 +93,8 @@ SimpleSign is built to survive the real world — legacy PDFs from Adobe, iText,
 | **xmlsec1** | xmlsec1 → SimpleSign validation | ✅ |
 | **veraPDF** | SimpleSign → veraPDF PDF/A conformance | ✅ |
 
+> **SHA-3 and EdDSA interop:** Interop tests with SHA-3 digests and EdDSA signatures against external validators (EU DSS, iText, PDFBox, pyHanko) are pending. Coverage will be added as upstream support is confirmed.
+
 ## Docker-Based CI Tests
 
 All interop tests run in Docker containers in CI (EU DSS, iText validator, PDFBox, veraPDF, OpenSSL, pyHanko, xmlsec1) — see [`interop/`](../interop/) for details.

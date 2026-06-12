@@ -1,5 +1,7 @@
 using System.Security.Cryptography.X509Certificates;
+using SimpleSign.Core.Validation;
 using SimpleSign.PAdES.Inspection;
+using SimpleSign.PAdES.Validation;
 using SimpleSign.TestHelpers;
 using Shouldly;
 using Spectre.Console;
@@ -263,6 +265,73 @@ public sealed class CommandPipelineTests : IDisposable
         var info = await PdfSignatureInspector.InspectAsync(stream);
         info.Signatures.ShouldNotBeEmpty();
         info.Signatures[0].SubFilter.ShouldBe("adbe.pkcs7.detached");
+    }
+
+    [Fact]
+    public async Task Validate_UnsignedPdf_ReturnsZero()
+    {
+        var pdfPath = Path.Combine(_tempDir, "unsigned.pdf");
+        File.WriteAllBytes(pdfPath, CreateMinimalPdf());
+
+        using var capture = new ConsoleCapture();
+        var app = new CommandApp();
+        Program.ConfigureApp(app);
+        var result = await Program.RunWithAsync(app, ["validate", pdfPath]);
+
+        result.ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task Validate_SignedPdf_ReturnsZero()
+    {
+        var pdfPath = Path.Combine(_tempDir, "input.pdf");
+        File.WriteAllBytes(pdfPath, CreateMinimalPdf());
+
+        var certPath = Path.Combine(_tempDir, "cert.pfx");
+        using var trustedCert = TestCertificateFactory.CreateSelfSignedCert();
+        File.WriteAllBytes(certPath, trustedCert.Export(X509ContentType.Pfx, "test"));
+
+        var signedPath = Path.Combine(_tempDir, "signed.pdf");
+
+        var app = new CommandApp();
+        Program.ConfigureApp(app);
+
+        using (new ConsoleCapture())
+        {
+            var signResult = await Program.RunWithAsync(app, [
+                "sign", pdfPath,
+                "--cert", certPath,
+                "--password", "test",
+                "--output", signedPath
+            ]);
+            signResult.ShouldBe(0);
+        }
+
+        // Validate programmatically with the test cert trusted.
+        // CLI validate uses ICP-Brasil trust anchors and cannot trust self-signed certs.
+        var validator = new PdfSignatureValidator(new ValidationOptions
+        {
+            CheckRevocation = false,
+            TrustedRoots = [trustedCert]
+        });
+        using var stream = File.OpenRead(signedPath);
+        var results = await validator.ValidateAsync(stream);
+        results.Count.ShouldBe(1);
+        results[0].IsIntegrityValid.ShouldBeTrue();
+        results[0].IsSignatureValid.ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task Validate_NonExistentFile_ReturnsError()
+    {
+        var missingPath = Path.Combine(_tempDir, "nonexistent.pdf");
+
+        using var capture = new ConsoleCapture();
+        var app = new CommandApp();
+        Program.ConfigureApp(app);
+        var result = await Program.RunWithAsync(app, ["validate", missingPath]);
+
+        result.ShouldNotBe(0);
     }
 
     private static byte[] CreateMinimalPdf() =>

@@ -1,18 +1,43 @@
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
+using SimpleSign.Core.Validation;
 using SimpleSign.PAdES;
+using SimpleSign.PAdES.Inspection;
+using SimpleSign.PAdES.Validation;
+using SimpleSign.Pdf;
 
 // AOT/Trimming smoke test — verifies the library works after native AOT publishing.
 // Run: dotnet publish -c Release && ./bin/Release/net10.0/<rid>/publish/SimpleSign.AotSmokeTest
 
 var cert = CreateSelfSignedCert();
+string[] results = [];
 
 try
 {
-    // PAdES
+    // PAdES sign
     var pdf = CreateMinimalPdf();
     var signedPdf = await SimpleSigner.Document(pdf).WithCertificate(cert).SignAsync();
     Console.WriteLine($"[PASS] PAdES: signed {pdf.Length}B → {signedPdf.Length}B");
+
+    // Inspect
+    await using var inspectStream = new MemoryStream(signedPdf);
+    var info = await PdfSignatureInspector.InspectAsync(inspectStream);
+    Console.WriteLine($"[PASS] Inspect: {info.Signatures.Count} sig(s) found");
+
+    // Validate
+    await using var validateStream = new MemoryStream(signedPdf);
+    var validator = new PdfSignatureValidator(new ValidationOptions
+    {
+        CheckRevocation = false,
+        TrustedRoots = [cert]
+    });
+    var validationResults = await validator.ValidateAsync(validateStream);
+    Console.WriteLine($"[PASS] Validate: {validationResults.Count} result(s), valid={validationResults[0].IsValid}");
+
+    // Structure reader
+    await using var readerStream = new MemoryStream(signedPdf);
+    var fields = await PdfStructureReader.ReadSignatureFieldsAsync(readerStream);
+    Console.WriteLine($"[PASS] StructureReader: {fields.Count} field(s)");
 
     Console.WriteLine("\n✅ All AOT smoke tests passed.");
     return 0;

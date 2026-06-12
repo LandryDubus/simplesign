@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-06-12
+
+### Added
+
+- **`SignerBuilder.WithHttpClient(HttpClient)`** — new fluent API for setting the default HTTP client for revocation (OCSP/CRL/AIA) and TSA fallback when no TSA-specific client is configured.
+- **`HttpClientFactoryProvider`** — built-in `IHttpClientFactory` adapter that implements `IHttpClientProvider`. Ships in `SimpleSign.Core.Http`. Each call to `GetClient()` delegates to `IHttpClientFactory.CreateClient(name)`.
+- **Auto-detection of `IHttpClientFactory` in DI** — `AddSimpleSign()` now checks for `IHttpClientFactory` in the DI container. When present, it wires `HttpClientFactoryProvider` automatically using `SimpleSignOptions.HttpClientName` as the named-client key. No manual adapter implementation needed.
+- **`SimpleSignOptions.HttpClientName` is now consumed** — previously documented but silently ignored. Now used by the `IHttpClientFactory`-backed provider fallback in `AddSimpleSign()`.
+- **Per-operation HTTP client slots in `SignerBuilder`** — TSA (signature timestamp + archival DocTimeStamp) and revocation (OCSP/CRL/AIA) now use independent `HttpClient` instances, enabling per-operation authentication (e.g., bearer token for TSA, anonymous for revocation).
+
+### Fixed
+
+- **`SignerBuilder.WithHttpClientProvider` now resolves lazily** — `IHttpClientProvider.GetClient()` is called at signing time, not at builder-configuration time. Previously the provider was eagerly resolved and discarded, making factory-style providers impossible.
+- **`IHttpClientProvider` preserved through all builder methods** — `WithLtv()`, `WithMetadata()`, `WithOperationId()`, `WithPdfAPreservation()`, `WithLegacyCms()`, `WithSubFilter()`, and `WithArchivalTimestamp()` no longer silently replace the custom provider with the static default. The provider now survives every builder clone.
+- **`SimpleSignOptions.HttpClientName` is now consumed** — previously documented but silently ignored. Now used by the `IHttpClientFactory`-backed provider fallback.
+
+### Changed (Breaking)
+
+- **`SignerBuilder.WithTimestamp(url, httpClient)` scope narrowed** — the injected `HttpClient` now applies only to TSA calls (signature timestamp + archival DocTimeStamp), not to revocation (OCSP/CRL/AIA). Use the new `WithHttpClient(HttpClient)` for the default/revocation client. This only affects callers relying on the undocumented side-effect of the TSA client leaking to revocation.
+- **`SignerBuilder.WithTimestamp(url, httpClient)` corrects archival timestamp client** — archival DocTimeStamp (B-LTA) now uses the TSA client instead of the revocation client, fixing an inconsistency where the step 7 timestamp reused the step 6 revocation `HttpClient`.
+
 ## [0.4.0] - 2026-06-11
 
 ### Added

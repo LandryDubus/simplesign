@@ -37,9 +37,9 @@ SimpleSign is a .NET library for creating and validating **PAdES** digital signa
 
 ---
 
-## What's New in v0.4.0
+## What's New in v0.5.0
 
-PDF/A-4 detection, EdDSA verification, SHA-3 hash support, CAdES-XL validation references, Stryker mutation testing, and 1,519 unit tests passing. See the [full changelog](CHANGELOG.md) for details.
+`IHttpClientFactory` integration, `WithHttpClient(HttpClient)`, lazy `IHttpClientProvider` resolution, and per-operation HTTP client slots (TSA vs revocation). See the [full changelog](CHANGELOG.md) for details.
 
 ---
 
@@ -431,10 +431,7 @@ contract-signed.pdf  1/1 valid
 | [ICP-Brasil](docs/articles/icp-brasil.md) | Brazilian PKI integration |
 | [Interoperability](docs/interoperability.md) | PDF generators tested, cross-validation matrix, ETSI corpus |
 | [Conformance](docs/conformance.md) | ISO 32000, PAdES ETSI EN 319 142, RFC 5652 compliance |
-| [Performance](docs/performance.md) | Benchmarks: signing, validation, concurrency, vs competitors |
 | [Benchmark Results](docs/benchmarks.md) | Comprehensive 14-suite benchmark report with 67 metrics |
-| [Architecture](docs/architecture.md) | Package structure, design principles, quality metrics |
-| [Testing](docs/testing.md) | Test structure, execution, and coverage overview |
 | [HostSigner](src/SimpleSign.HostSigner/README.md) | Local signing tray app — API docs & install |
 | [Web Signing Sample](samples/WebSigningSample/README.md) | Browser-based PDF signing demo |
 | [Web Inspect Sample](samples/WebInspectSample/README.md) | Browser-based PDF inspector & validator |

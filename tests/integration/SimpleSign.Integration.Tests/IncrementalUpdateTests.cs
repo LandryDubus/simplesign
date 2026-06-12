@@ -6,6 +6,7 @@ using Xunit.Abstractions;
 
 namespace SimpleSign.Integration.Tests;
 
+[Trait("Category", "Integration")]
 public sealed class IncrementalUpdateTests(ITestOutputHelper output)
 {
     [SkippableFact(DisplayName = "PDF with incremental multi-sign should have at least 2 signatures")]

@@ -7,6 +7,7 @@ using Xunit.Abstractions;
 
 namespace SimpleSign.Integration.Tests;
 
+[Trait("Category", "Integration")]
 public sealed class PdfParsingTests(ITestOutputHelper output)
 {
     [SkippableFact(DisplayName = "Unsigned PDF should return no fields")]

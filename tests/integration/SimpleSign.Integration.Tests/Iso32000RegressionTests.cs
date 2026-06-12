@@ -14,6 +14,7 @@ namespace SimpleSign.Integration.Tests;
 /// These tests verify that specific bug fixes continue to work correctly
 /// against real-world PDF fixtures.
 /// </summary>
+[Trait("Category", "Integration")]
 public sealed class Iso32000RegressionTests(ITestOutputHelper output)
 {
     private static PdfSignatureValidator CreateValidator() =>

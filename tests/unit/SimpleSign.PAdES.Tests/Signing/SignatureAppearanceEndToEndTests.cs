@@ -199,4 +199,101 @@ public sealed class SignatureAppearanceEndToEndTests
         readOnlyList[0].IsIntegrityValid.ShouldBeTrue("");
         readOnlyList[0].IsSignatureValid.ShouldBeTrue("");
     }
+
+    [Fact(DisplayName = "Signature with QR code URL remains valid")]
+    public async Task SignAsync_WithQrCode_ValidatesCorrectly()
+    {
+        using X509Certificate2 cert = CreateRsaCert();
+        byte[] pdfBytes = BuildPdfWithPage();
+        using MemoryStream stream = new MemoryStream(await SimpleSigner.Document(pdfBytes).WithCertificate(cert)
+            .WithAppearance(new SignatureAppearance
+            {
+                X = 20f,
+                Y = 20f,
+                VerificationUrl = "https://verify.example.com/doc-123"
+            })
+            .SignAsync());
+        IReadOnlyList<SignatureValidationResult> results = await ValidatorTrusting(cert).ValidateAsync(stream);
+        results.Count.ShouldBe(1, "");
+        results[0].IsIntegrityValid.ShouldBeTrue("QR code URL should not affect integrity");
+        results[0].IsSignatureValid.ShouldBeTrue("");
+    }
+
+    [Fact(DisplayName = "Signature with QR code is larger than without (QR adds image data)")]
+    public async Task SignAsync_WithQrCode_PdfIsLarger()
+    {
+        using X509Certificate2 cert = CreateRsaCert();
+        byte[] pdfBytes = BuildPdfWithPage();
+        byte[] withQr = await SimpleSigner.Document(pdfBytes).WithCertificate(cert)
+            .WithAppearance(new SignatureAppearance
+            {
+                X = 20f,
+                Y = 20f,
+                VerificationUrl = "https://verify.example.com/doc-123"
+            })
+            .SignAsync();
+        byte[] withoutQr = await SimpleSigner.Document(pdfBytes).WithCertificate(cert)
+            .WithAppearance(new SignatureAppearance
+            {
+                X = 20f,
+                Y = 20f
+            })
+            .SignAsync();
+        withQr.Length.ShouldBeGreaterThan(withoutQr.Length, "QR code should add image data");
+    }
+
+    [Fact(DisplayName = "Signature with QR code contains QR white background rect")]
+    public async Task SignAsync_WithQrCode_PdfContainsQrContent()
+    {
+        using X509Certificate2 cert = CreateRsaCert();
+        byte[] pdfBytes = BuildPdfWithPage();
+        byte[] signed = await SimpleSigner.Document(pdfBytes).WithCertificate(cert)
+            .WithAppearance(new SignatureAppearance
+            {
+                X = 20f,
+                Y = 60f,
+                VerificationUrl = "https://verify.example.com/doc-123"
+            })
+            .SignAsync();
+        string pdf = Encoding.Latin1.GetString(signed);
+        pdf.ShouldContain("1 1 1 rg");
+    }
+
+    [Fact(DisplayName = "Signature without VerificationUrl has no QR background rect")]
+    public async Task SignAsync_WithoutQrCode_NoQrContent()
+    {
+        using X509Certificate2 cert = CreateRsaCert();
+        byte[] pdfBytes = BuildPdfWithPage();
+        byte[] signed = await SimpleSigner.Document(pdfBytes).WithCertificate(cert)
+            .WithAppearance(new SignatureAppearance
+            {
+                X = 20f,
+                Y = 60f,
+                VerificationUrl = null
+            })
+            .SignAsync();
+        string pdf = Encoding.Latin1.GetString(signed);
+        pdf.ShouldNotContain("1 1 1 rg");
+    }
+
+    [Fact(DisplayName = "Two signers with QR code both remain valid")]
+    public async Task SignAsync_WithQrCode_TwoSigners_BothValid()
+    {
+        using X509Certificate2 cert1 = CreateRsaCert("CN=QR First");
+        using X509Certificate2 cert2 = CreateRsaCert("CN=QR Second");
+        byte[] pdf = BuildPdfWithPage();
+        using MemoryStream stream = new MemoryStream(await SimpleSigner.Document(await SimpleSigner.Document(pdf)
+            .WithCertificate(cert1).WithFieldName("Sig1")
+            .WithAppearance(new SignatureAppearance { X = 10f, Y = 10f, VerificationUrl = "https://verify.example.com/1" })
+            .SignAsync()).WithCertificate(cert2).WithFieldName("Sig2")
+            .WithAppearance(new SignatureAppearance { X = 10f, Y = 60f, VerificationUrl = "https://verify.example.com/2" })
+            .SignAsync());
+        IReadOnlyList<SignatureValidationResult> results = await ValidatorTrusting(cert1, cert2).ValidateAsync(stream);
+        results.Count.ShouldBe(2, "");
+        foreach (var r in results)
+        {
+            r.IsIntegrityValid.ShouldBeTrue();
+            r.IsSignatureValid.ShouldBeTrue();
+        }
+    }
 }

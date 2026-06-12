@@ -5,12 +5,14 @@
 <h1 align="center">SimpleSign</h1>
 
 <p align="center">
-  <strong>Digital signatures for .NET — PAdES.</strong><br/>
-  Sign, validate, and inspect PDF documents with a clean, modern API.
+  <strong>PAdES digital signatures for .NET</strong><br/>
+  Sign, validate, and inspect PDFs — no BouncyCastle required.
 </p>
 
 <p align="center">
   <img src="https://img.shields.io/badge/.NET-8%20%7C%2010-512BD4?style=flat-square&logo=dotnet" alt=".NET 8 | 10" />
+  <img src="https://img.shields.io/nuget/v/SimpleSign?style=flat-square&logo=nuget" alt="NuGet" />
+  <img src="https://img.shields.io/github/actions/workflow/status/eupassarin/simplesign/ci.yml?style=flat-square&logo=github" alt="CI" />
   <img src="https://img.shields.io/badge/License-MIT-green?style=flat-square" alt="MIT License" />
   <img src="https://img.shields.io/badge/AOT-Compatible-blueviolet?style=flat-square" alt="Native AOT" />
   <img src="https://img.shields.io/badge/Tests-1%2C500%2B-brightgreen?style=flat-square" alt="1,500+ tests" />
@@ -21,59 +23,51 @@
 
 ## What is SimpleSign?
 
-SimpleSign is a .NET library for creating and validating **digitally signed PDF documents** according to European (ETSI) and Brazilian (ICP-Brasil) standards, implementing PAdES (ETSI EN 319 142).
+SimpleSign is a .NET library for creating and validating **PAdES** digital signatures (ETSI EN 319 142) in PDF documents. All cryptography uses `System.Security.Cryptography` — no BouncyCastle, no third-party crypto dependencies.
 
-All cryptography is handled by `System.Security.Cryptography` — **no third-party crypto libraries** are used. Runtime dependencies are limited to Polly (resilience), RecyclableMemoryStream (pooling), QRCoder (appearance QR codes), and Microsoft.Extensions abstractions — **nothing** touches your keys but the BCL.
+---
+
+## Why SimpleSign?
+
+- **Zero third-party crypto** — all operations via BCL `System.Security.Cryptography`
+- **Native AOT compatible** — no reflection, no `dynamic`, no `Assembly.Load`
+- **MIT licensed** — use anywhere, for anything, with no restrictions
+- **1,500+ tests** — comprehensive coverage, 0 warnings, CI-enforced quality gates
+- **Multi-target** — .NET 8 and .NET 10 on Windows, macOS, and Linux
 
 ---
 
 ## What's New in v0.4.0
 
-**CI infrastructure:**
-- 🧪 **Weekly fuzz testing** — 7 targets (pdf, dss, cms, timestamp, ocsp, validator, xref) via SharpFuzz, non-blocking
-- 🧪 **Stryker mutation testing** — Advanced level, thresholds high=80/low=60/break=50
-- 🧪 **Stress tests in CI** — 1,000 sequential, 500 concurrent, 100 incremental (non-blocking job)
-- 🧪 **NU1903 suppression removed** — `dotnet list package --vulnerable` confirms zero vulnerable packages
+PDF/A-4 detection, EdDSA verification, SHA-3 hash support, CAdES-XL validation references, Stryker mutation testing, and 1,519 unit tests passing. See the [full changelog](CHANGELOG.md) for details.
 
-**PDF/A-4 (ISO 19005-4:2020):**
-- 📄 Detection via XMP metadata (`pdfaid:part=4`), CLI formatting, HostSigner display
-- 📄 New enum values: `A4a`, `A4b`, `A4u`, `A4e` (plus previously missing `A2u`, `A3u`)
-- 📄 Preservation validation allows PNG/transparency (relaxed in ISO 19005-4 vs -1)
+---
 
-**EdDSA verification:**
-- `CryptoVerifier.VerifySignature` no longer throws for Ed25519/Ed448 — falls through to ECDSA path on .NET 9+
-- Direct signing remains external-signer pipeline only; `CmsSignatureBuilder` provides clear guidance
+## Installation
 
-**CAdES-XL validation references (AD-RV/RC/RA):**
-- New `CmsAttribute` factory methods: `CertificateRefs()`, `RevocationRefs()`, `CertValues()`, `RevocationValues()`
-- Enables ICP-Brasil AD-RV/AD-RC/AD-RA signing via attribute injection
+Packages are split by concern — install only what you need:
 
-**SHA-3 hash support (NET 9+):**
-- SHA3-256/384/512 across hashing, CMS digest OIDs, timestamping, verification, XMLDSig URIs
+```bash
+# Full PAdES stack (most common)
+dotnet add package SimpleSign
 
-**Documentation:**
-- 📚 **4 Architecture Decision Records** — no BouncyCastle, incremental PDF, result-object validation, AOT
-- 📚 **Migration guides** — v0.2→v0.3 and v0.3→v0.4 with breaking changes
-- 📚 **Issue templates** — bug report, feature request, standards request
+# Brazilian PKI (ICP-Brasil + Gov.br)
+dotnet add package SimpleSign.Brasil
 
-**Algorithm inference + signature algorithm override (from v0.3.3):**
-- **PSS cert hash inference** — `RSASSA-PSS-params` (RFC 4055 §3.1) honoured when selecting digest algorithm
-- **RSA key-size-based hash** — PKCS#1 keys >= 3072 bits default to SHA-384 per NIST SP 800-57
-- **`.WithSignatureAlgorithm(oid)`** — force RSASSA-PSS on plain `rsaEncryption` certificates
-- **Compatibility validation** — incompatible OIDs throw `ArgumentException` at signing time
+# CLI tool
+dotnet tool install -g SimpleSign.Cli
+```
 
-**Bug fixes (from v0.3.3):**
-- PDF/A-3b `spacingCompliesPDFA` — residual EOL failures fixed via shared `EnsureTrailingEol` helper
-- Deferred timestamp hash, external signer inference, PSS logging, hex extraction fixes
-- Empty stub projects removed (DocxToPdf, Europa, App)
-- 📄 **LTV early-return EOL guard** — even when no CRL/OCSP data is collected, the source PDF is now passed through `EnsureTrailingEol` so any follow-up incremental update remains LF-preceded.
+### Package Map
 
-**Test coverage:**
-- 26 new tests across 4 test files: algorithm inference on all 3 signing paths, compatibility validation (RSA, ECDSA, EdDSA), and deferred PSS end-to-end.
-- **EdDSA test support** — `TryCreateEdDsaCert` helper on .NET 9+ (auto-skip on unsupported platforms).
-- **1,519 unit tests** — all passing, 0 warnings, 0 errors.
-
-See the [full changelog](CHANGELOG.md) for details.
+- **SimpleSign** (meta-package) — full PAdES stack
+  - **SimpleSign.PAdES** — PDF signing & validation (PAdES B-B/T/LT/LTA)
+    - **SimpleSign.Pdf** — PDF structure parser (xref, objects, fields)
+    - **SimpleSign.Core** — Crypto primitives, CMS, TSA, revocation, HTTP
+- **SimpleSign.Brasil** — ICP-Brasil + Gov.br + Lei 14.063 (depends on PAdES)
+- **SimpleSign.HtmlToPdf** — Pure-.NET HTML→PDF (independent)
+- **SimpleSign.Cli** — CLI tool (install as dotnet tool)
+- **SimpleSign.HostSigner** — Windows tray app for local signing API
 
 ---
 
@@ -116,37 +110,6 @@ foreach (var r in results)
     Console.WriteLine($"  Timestamp={r.HasValidTimestamp}");
     Console.WriteLine($"  Signer: {r.SignerName} at {r.SigningTime}");
 }
-```
-
----
-
-## Installation
-
-Packages are split by concern — install only what you need:
-
-```bash
-# Full PAdES stack (most common)
-dotnet add package SimpleSign
-
-# Brazilian PKI (ICP-Brasil + Gov.br)
-dotnet add package SimpleSign.Brasil
-
-# CLI tool
-dotnet tool install -g SimpleSign.Cli
-```
-
-### Package Map
-
-```
-SimpleSign (meta-package)
-├── SimpleSign.PAdES        PDF signing & validation (PAdES B-B/T/LT/LTA)
-│   ├── SimpleSign.Pdf      PDF structure parser (xref, objects, fields)
-│   └── SimpleSign.Core     Crypto primitives, CMS, TSA, revocation, HTTP
-│
-SimpleSign.Brasil           ICP-Brasil + Gov.br + Lei 14.063  → depends on PAdES
-SimpleSign.HtmlToPdf        Pure-.NET HTML→PDF (independent)
-SimpleSign.Cli              CLI tool (install as dotnet tool)
-SimpleSign.HostSigner       Windows tray app — local signing API
 ```
 
 ---
@@ -459,7 +422,7 @@ contract-signed.pdf  1/1 valid
 ## Documentation
 
 | Document | Description |
-|---|---|---|
+|---|---|
 | [API Reference](https://eupassarin.github.io/simplesign/) | Full API documentation (Docfx) |
 | [Documentation Home](docs/index.md) | Docfx documentation entry point |
 | [Getting Started](docs/articles/getting-started.md) | Installation, first signature, validation |
@@ -471,6 +434,7 @@ contract-signed.pdf  1/1 valid
 | [Performance](docs/performance.md) | Benchmarks: signing, validation, concurrency, vs competitors |
 | [Benchmark Results](docs/benchmarks.md) | Comprehensive 14-suite benchmark report with 67 metrics |
 | [Architecture](docs/architecture.md) | Package structure, design principles, quality metrics |
+| [Testing](docs/testing.md) | Test structure, execution, and coverage overview |
 | [HostSigner](src/SimpleSign.HostSigner/README.md) | Local signing tray app — API docs & install |
 | [Web Signing Sample](samples/WebSigningSample/README.md) | Browser-based PDF signing demo |
 | [Web Inspect Sample](samples/WebInspectSample/README.md) | Browser-based PDF inspector & validator |

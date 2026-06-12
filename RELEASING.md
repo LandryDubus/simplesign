@@ -110,6 +110,13 @@ If this release introduced **significant architectural decisions**:
 If benchmarks were re-run for this release:
 - [ ] Update `docs/benchmarks.md` with new results
 
+### llms.txt / llms-full.txt
+
+These files provide LLM/agent context following the [llmstxt.org](https://llmstxt.org) standard:
+
+- [ ] `llms.txt` — update if packages, docs links, or key constraints changed
+- [ ] `llms-full.txt` — update code examples if any public API changed (new/removed/changed methods or properties)
+
 ## Build & Test
 
 ```bash

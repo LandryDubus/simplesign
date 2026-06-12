@@ -57,10 +57,10 @@ SimpleSign (meta-package)
 ## Docs
 
 - [API Reference](docs/api/): Full XML-documented public API
-- [Architecture](docs/architecture.md): Internal design
 - [Conformance](docs/conformance.md): ETSI standards compliance
 - [Interoperability](docs/interoperability.md): Cross-platform testing
-- [Performance](docs/performance.md): Benchmarks and optimization
+- [Benchmarks](docs/benchmarks.md): BenchmarkDotNet results
+- [ADRs](docs/adr/): Architecture Decision Records
 
 ## Key Constraints
 

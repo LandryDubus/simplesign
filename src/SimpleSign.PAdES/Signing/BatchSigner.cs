@@ -264,95 +264,134 @@ public sealed class BatchSigner : IAsyncDisposable
     /// <summary>Builder for configuring a <see cref="BatchSigner"/>.</summary>
     public sealed class BatchSignerBuilder
     {
-        internal X509Certificate2? Certificate { get; private set; }
-        internal IReadOnlyList<X509Certificate2>? Chain { get; private set; }
-        internal Func<byte[], Task<byte[]>>? ExternalSigner { get; private set; }
-        internal string? ExternalSignerOid { get; private set; }
-        internal string? TsaUrl { get; private set; }
-        internal IHttpClientProvider? HttpClientProvider { get; private set; }
-        internal ILogger? Logger { get; private set; }
-        internal HashAlgorithmName HashAlgorithm { get; private set; } = HashAlgorithmName.SHA256;
-        internal string? SignerName { get; private set; }
-        internal string? Reason { get; private set; }
-        internal string? Location { get; private set; }
-        internal SignatureAppearance? Appearance { get; private set; }
-        internal bool EnableLtv { get; private set; }
-        internal string? ArchivalTsaUrl { get; private set; }
-        internal int MaxConcurrency { get; private set; } = 4;
+        internal X509Certificate2? Certificate { get; }
+        internal IReadOnlyList<X509Certificate2>? Chain { get; }
+        internal Func<byte[], Task<byte[]>>? ExternalSigner { get; }
+        internal string? ExternalSignerOid { get; }
+        internal string? TsaUrl { get; }
+        internal IHttpClientProvider? HttpClientProvider { get; }
+        internal ILogger? Logger { get; }
+        internal HashAlgorithmName HashAlgorithm { get; }
+        internal string? SignerName { get; }
+        internal string? Reason { get; }
+        internal string? Location { get; }
+        internal SignatureAppearance? Appearance { get; }
+        internal bool EnableLtv { get; }
+        internal string? ArchivalTsaUrl { get; }
+        internal int MaxConcurrency { get; }
 
         internal BatchSignerBuilder(X509Certificate2 certificate)
         {
             Certificate = certificate;
+            HashAlgorithm = HashAlgorithmName.SHA256;
+            MaxConcurrency = 4;
         }
 
-        /// <summary>Sets the certificate chain for LTV embedding.</summary>
-        public BatchSignerBuilder WithChain(IReadOnlyList<X509Certificate2> chain)
+        private BatchSignerBuilder(
+            X509Certificate2? certificate,
+            IReadOnlyList<X509Certificate2>? chain,
+            Func<byte[], Task<byte[]>>? externalSigner,
+            string? externalSignerOid,
+            string? tsaUrl,
+            IHttpClientProvider? httpClientProvider,
+            ILogger? logger,
+            HashAlgorithmName hashAlgorithm,
+            string? signerName,
+            string? reason,
+            string? location,
+            SignatureAppearance? appearance,
+            bool enableLtv,
+            string? archivalTsaUrl,
+            int maxConcurrency)
         {
+            Certificate = certificate;
             Chain = chain;
-            return this;
-        }
-
-        /// <summary>Uses an external signer (A3 token, HSM, cloud KMS).</summary>
-        public BatchSignerBuilder WithExternalSigner(Func<byte[], Task<byte[]>> signer, string? signatureAlgorithmOid = null)
-        {
-            ExternalSigner = signer;
-            ExternalSignerOid = signatureAlgorithmOid;
-            return this;
-        }
-
-        /// <summary>Configures TSA URL for timestamping.</summary>
-        public BatchSignerBuilder WithTimestamp(string tsaUrl)
-        {
+            ExternalSigner = externalSigner;
+            ExternalSignerOid = externalSignerOid;
             TsaUrl = tsaUrl;
-            return this;
-        }
-
-        /// <summary>Configures the HTTP client provider.</summary>
-        public BatchSignerBuilder WithHttpClientProvider(IHttpClientProvider provider)
-        {
-            HttpClientProvider = provider;
-            return this;
-        }
-
-        /// <summary>Configures the hash algorithm. Default: SHA-256.</summary>
-        public BatchSignerBuilder WithHashAlgorithm(HashAlgorithmName algorithm)
-        {
-            HashAlgorithm = algorithm;
-            return this;
-        }
-
-        /// <summary>Configures signer metadata.</summary>
-        public BatchSignerBuilder WithMetadata(string? signerName = null, string? reason = null, string? location = null)
-        {
+            HttpClientProvider = httpClientProvider;
+            Logger = logger;
+            HashAlgorithm = hashAlgorithm;
             SignerName = signerName;
             Reason = reason;
             Location = location;
-            return this;
+            Appearance = appearance;
+            EnableLtv = enableLtv;
+            ArchivalTsaUrl = archivalTsaUrl;
+            MaxConcurrency = maxConcurrency;
         }
+
+        private BatchSignerBuilder With(
+            X509Certificate2? certificate = null,
+            IReadOnlyList<X509Certificate2>? chain = null,
+            Func<byte[], Task<byte[]>>? externalSigner = null,
+            string? externalSignerOid = null,
+            string? tsaUrl = null,
+            IHttpClientProvider? httpClientProvider = null,
+            ILogger? logger = null,
+            HashAlgorithmName? hashAlgorithm = null,
+            string? signerName = null,
+            string? reason = null,
+            string? location = null,
+            SignatureAppearance? appearance = null,
+            bool? enableLtv = null,
+            string? archivalTsaUrl = null,
+            int? maxConcurrency = null) =>
+            new(
+                certificate ?? Certificate,
+                chain ?? Chain,
+                externalSigner ?? ExternalSigner,
+                externalSignerOid ?? ExternalSignerOid,
+                tsaUrl ?? TsaUrl,
+                httpClientProvider ?? HttpClientProvider,
+                logger ?? Logger,
+                hashAlgorithm ?? HashAlgorithm,
+                signerName ?? SignerName,
+                reason ?? Reason,
+                location ?? Location,
+                appearance ?? Appearance,
+                enableLtv ?? EnableLtv,
+                archivalTsaUrl ?? ArchivalTsaUrl,
+                maxConcurrency ?? MaxConcurrency);
+
+        /// <summary>Sets the certificate chain for LTV embedding.</summary>
+        public BatchSignerBuilder WithChain(IReadOnlyList<X509Certificate2> chain) =>
+            With(chain: chain);
+
+        /// <summary>Uses an external signer (A3 token, HSM, cloud KMS).</summary>
+        public BatchSignerBuilder WithExternalSigner(Func<byte[], Task<byte[]>> signer, string? signatureAlgorithmOid = null) =>
+            With(externalSigner: signer, externalSignerOid: signatureAlgorithmOid);
+
+        /// <summary>Configures TSA URL for timestamping.</summary>
+        public BatchSignerBuilder WithTimestamp(string tsaUrl) =>
+            With(tsaUrl: tsaUrl);
+
+        /// <summary>Configures the HTTP client provider.</summary>
+        public BatchSignerBuilder WithHttpClientProvider(IHttpClientProvider provider) =>
+            With(httpClientProvider: provider);
+
+        /// <summary>Configures the hash algorithm. Default: SHA-256.</summary>
+        public BatchSignerBuilder WithHashAlgorithm(HashAlgorithmName algorithm) =>
+            With(hashAlgorithm: algorithm);
+
+        /// <summary>Configures signer metadata.</summary>
+        public BatchSignerBuilder WithMetadata(string? signerName = null, string? reason = null, string? location = null) =>
+            With(signerName: signerName, reason: reason, location: location);
 
         /// <summary>Configures visual signature appearance.</summary>
-        public BatchSignerBuilder WithAppearance(SignatureAppearance appearance)
-        {
-            Appearance = appearance;
-            return this;
-        }
+        public BatchSignerBuilder WithAppearance(SignatureAppearance appearance) =>
+            With(appearance: appearance);
 
         /// <summary>Enables LTV (Long-Term Validation) with DSS embedding.</summary>
-        public BatchSignerBuilder WithLtv()
-        {
-            EnableLtv = true;
-            return this;
-        }
+        public BatchSignerBuilder WithLtv() =>
+            With(enableLtv: true);
 
         /// <summary>
         /// Enables archival timestamp (PAdES-B-LTA).
         /// Requires <see cref="WithLtv"/> to be called first.
         /// </summary>
-        public BatchSignerBuilder WithArchivalTimestamp(string tsaUrl)
-        {
-            ArchivalTsaUrl = tsaUrl;
-            return this;
-        }
+        public BatchSignerBuilder WithArchivalTimestamp(string tsaUrl) =>
+            With(archivalTsaUrl: tsaUrl);
 
         /// <summary>Sets maximum concurrent signing operations. Default: 4.</summary>
         public BatchSignerBuilder WithMaxConcurrency(int maxConcurrency)
@@ -362,16 +401,12 @@ public sealed class BatchSigner : IAsyncDisposable
                 throw new ArgumentOutOfRangeException(nameof(maxConcurrency), "Must be at least 1.");
             }
 
-            MaxConcurrency = maxConcurrency;
-            return this;
+            return With(maxConcurrency: maxConcurrency);
         }
 
         /// <summary>Sets the logger for diagnostic output.</summary>
-        public BatchSignerBuilder WithLogger(ILogger logger)
-        {
-            Logger = logger;
-            return this;
-        }
+        public BatchSignerBuilder WithLogger(ILogger logger) =>
+            With(logger: logger);
 
         /// <summary>Builds the <see cref="BatchSigner"/> instance.</summary>
         public BatchSigner Build()

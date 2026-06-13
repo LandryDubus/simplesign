@@ -54,7 +54,7 @@ services.AddSingleton<ITrustAnchorProvider, IcpBrasilTrustAnchorProvider>();
 services.AddSingleton<ITrustAnchorProvider, GovBrTrustAnchorProvider>();
 ```
 
-**Non-DI path** (planned but not yet implemented):
+**Non-DI path:**
 ```csharp
 SimpleSigner.Document(pdf)
     .WithCountryExtension<BrasilExtension>()
@@ -67,15 +67,14 @@ SimpleSigner.Document(pdf)
 | Layer | Extension point consumed | Mechanism |
 |---|---|---|
 | **Validation** | `ITrustAnchorProvider` | DI collection injected into `PdfSignatureValidator` constructor; roots loaded into `X509Chain.CustomTrustStore` |
-| **Validation** | `IChainValidationProvider` | NOT consumed during built-in validation — region-specific validators are invoked separately by consumers (CLI, HostSigner, apps) |
+| **Validation** | `IChainValidationProvider` | Construction injection into `PdfSignatureValidator` (or via `SignerBuilder.CountryExtensions`); first matching provider enriches `SignatureValidationResult` with `PolicyLevel`, `SignerId`, `SignerIdType`, `ChainValidationRegion`, and `ChainValidationMetadata` |
 | **Signing** | Brazil-specific metadata | `WithAdvancedSignature()` extension maps `AdvancedSignatureInfo` → `SignatureMetadata` → CMS signed attributes (no provider indirection) |
 | **Inspection** | None (OID hard-coded) | `CmsParser` recognises manifest OID directly; no provider needed |
 
 **Consequences:**
 - Adding a new country requires implementing 2 interfaces and registering the composite
 - Trust anchors can be offline (embedded resources) or online (AIA chasing or downloaded lists)
-- `IChainValidationProvider` is currently a standalone API — not yet wired into the built-in validation pipeline. Consumers call it independently (e.g., CLI commands, HostSigner validation service).
-- `WithCountryExtension<T>()` on `SignerBuilder` is documented but not implemented. Currently, the only registration path is through DI (`AddSimpleSignBrasil()`).
+- `IChainValidationProvider` is wired into `PdfSignatureValidator`'s built-in validation pipeline. After standard `X509Chain.Build()`, the first matching provider (via `CanValidate`) enriches the result. If the standard chain fails but a country provider trusts it, chain errors are demoted to warnings (`IsChainTrustWarning = true`).
 - `SignatureMetadata` is the canonical signer metadata type; `AdvancedSignatureInfo` is the Brazil-specific DTO that maps to it.
 - The manifest OID (`2.16.76.1.12.1.1`) is hard-coded in the CMS parser; manifest format is not extensible at runtime.
 
@@ -84,8 +83,8 @@ SimpleSigner.Document(pdf)
 | Approach | Pros | Cons | Verdict |
 |---|---|---|---|
 | **Single flat interface** (one big API per country) | Simple | No separation of concerns, hard to test | Rejected |
-| **Three-interface composite (chosen)** | Clear separation, easy to test each concern, flexible | More files, consumer must know where to inject | **Chosen** |
+| **Two-interface composite (chosen)** | Clear separation, easy to test each concern, flexible | More files, consumer must know where to inject | **Chosen** |
 | **No plug-in (hard-coded per country)** | Fast to implement first country | Impossible to extend, violates OCP | Rejected |
 | **Attribute-based discovery** | Zero-config for new assemblies | Reflection, AOT incompatible | Rejected |
 
-**Status:** Accepted. The three-interface composite is the canonical extension mechanism. `WithCountryExtension<T>()` on `SignerBuilder` is planned but not yet prioritised.
+**Status:** Accepted. The two-interface composite is the canonical extension mechanism. `WithCountryExtension<T>()` on `SignerBuilder` provides both DI and builder-based registration paths. `PdfSignatureValidator` consumes both `ITrustAnchorProvider` and `IChainValidationProvider` via constructor injection or `ICountryExtension` aggregator.

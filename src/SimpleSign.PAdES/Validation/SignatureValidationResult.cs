@@ -1,5 +1,6 @@
 using System.Security.Cryptography.X509Certificates;
 using SimpleSign.Core.Constants;
+using SimpleSign.Core.Extensions;
 using SimpleSign.Core.Validation;
 
 namespace SimpleSign.PAdES.Validation;
@@ -71,8 +72,44 @@ public sealed class SignatureValidationResult
     /// but whose cryptographic integrity and signature are valid.
     /// In this case the archive timestamp is still considered cryptographically sound — the chain
     /// issue is advisory (the TSA root is simply not present in the local trust store).
+    /// Also used for regular signatures when a country-specific <see cref="IChainValidationProvider"/>
+    /// overrides the standard PKI chain result.
     /// </summary>
     public bool IsChainTrustWarning { get; init; }
+
+    /// <summary>
+    /// The region code of the <see cref="IChainValidationProvider"/> that validated this signature.
+    /// For example, "BR" for ICP-Brasil, "EU" for eIDAS.
+    /// Null if no country-specific provider matched.
+    /// </summary>
+    public string? ChainValidationRegion { get; init; }
+
+    /// <summary>
+    /// The policy / assurance level determined by the country-specific chain validation provider.
+    /// For example, "A3" (ICP-Brasil), "Gold" (Gov.br), "QCP-w" (eIDAS).
+    /// Null if no country-specific provider matched.
+    /// </summary>
+    public string? PolicyLevel { get; init; }
+
+    /// <summary>
+    /// The signer's national identifier extracted from the certificate by the country-specific provider.
+    /// For example, a CPF or CNPJ number (Brazil), codice fiscale (Italy), NIF (Portugal).
+    /// Null if no provider extracted an ID or no country-specific provider matched.
+    /// </summary>
+    public string? SignerId { get; init; }
+
+    /// <summary>
+    /// The type of national identifier extracted (<see cref="SignerId"/>).
+    /// For example, "CPF", "CNPJ", "NIF", "CF".
+    /// Null if no identifier was extracted.
+    /// </summary>
+    public string? SignerIdType { get; init; }
+
+    /// <summary>
+    /// Additional metadata extracted during country-specific chain validation.
+    /// Keys and values are provider-defined. Null if no provider matched.
+    /// </summary>
+    public IReadOnlyDictionary<string, string>? ChainValidationMetadata { get; init; }
 
     /// <summary>Indicates whether the signature is considered valid as a whole.</summary>
     public bool IsValid =>

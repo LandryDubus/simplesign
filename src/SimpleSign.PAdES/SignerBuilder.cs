@@ -48,6 +48,7 @@ public sealed class SignerBuilder
         _httpClientProvider = DefaultHttpClientProvider.Instance;
         _logger = logger ?? NullLogger.Instance;
         _padesAttributes = true;
+        CountryExtensions = [];
     }
 
     private SignerBuilder(
@@ -69,7 +70,8 @@ public sealed class SignerBuilder
         string? operationId = null,
         bool enforcePdfA = false,
         SignatureMetadata? metadata = null,
-        bool padesAttributes = true)
+        bool padesAttributes = true,
+        IReadOnlyList<ICountryExtension>? countryExtensions = null)
     {
         _inputPdf = inputPdf;
         _certificate = certificate;
@@ -90,6 +92,7 @@ public sealed class SignerBuilder
         _enforcePdfA = enforcePdfA;
         _metadata = metadata;
         _padesAttributes = padesAttributes;
+        CountryExtensions = countryExtensions ?? [];
     }
 
     #region Fluent configuration
@@ -140,7 +143,7 @@ public sealed class SignerBuilder
             httpClientProvider: provider,
             _logger, _externalSigner,
             _signatureAlgorithmOid, _enableLtv, _archivalTsaUrl, _operationId,
-            _enforcePdfA, _metadata, _padesAttributes);
+            _enforcePdfA, _metadata, _padesAttributes, CountryExtensions);
     }
 
     /// <summary>
@@ -236,7 +239,7 @@ public sealed class SignerBuilder
             _inputPdf, _certificate, _chain, _tsaUrl, _hashAlgorithm,
             _hashAlgorithmExplicitlySet, updatedOptions, _httpClient, _tsaHttpClient, _httpClientProvider, _logger, _externalSigner,
             _signatureAlgorithmOid, _enableLtv, _archivalTsaUrl, _operationId, _enforcePdfA,
-            metadata: metadata, padesAttributes: _padesAttributes);
+            metadata: metadata, padesAttributes: _padesAttributes, countryExtensions: CountryExtensions);
     }
 
     /// <summary>Sets visible metadata on the signature.</summary>
@@ -378,7 +381,7 @@ public sealed class SignerBuilder
             _inputPdf, _certificate, _chain, _tsaUrl, _hashAlgorithm,
             _hashAlgorithmExplicitlySet, _fieldOptions, _httpClient, _tsaHttpClient, _httpClientProvider, _logger, _externalSigner,
             _signatureAlgorithmOid, _enableLtv, _archivalTsaUrl, operationId, _enforcePdfA,
-            _metadata, _padesAttributes);
+            _metadata, _padesAttributes, CountryExtensions);
     }
 
     /// <summary>
@@ -392,7 +395,7 @@ public sealed class SignerBuilder
             _inputPdf, _certificate, _chain, _tsaUrl, _hashAlgorithm,
             _hashAlgorithmExplicitlySet, _fieldOptions, _httpClient, _tsaHttpClient, _httpClientProvider, _logger, _externalSigner,
             _signatureAlgorithmOid, _enableLtv, _archivalTsaUrl, _operationId, enforcePdfA: true,
-            metadata: _metadata, padesAttributes: _padesAttributes);
+            metadata: _metadata, padesAttributes: _padesAttributes, countryExtensions: CountryExtensions);
     }
 
     #endregion
@@ -684,7 +687,7 @@ public sealed class SignerBuilder
             _inputPdf, _certificate, _chain, _tsaUrl, _hashAlgorithm,
             _hashAlgorithmExplicitlySet, legacyOptions, _httpClient, _tsaHttpClient, _httpClientProvider, _logger, _externalSigner,
             _signatureAlgorithmOid, _enableLtv, _archivalTsaUrl, _operationId, _enforcePdfA,
-            _metadata, padesAttributes: false);
+            _metadata, padesAttributes: false, countryExtensions: CountryExtensions);
     }
 
     /// <summary>
@@ -717,8 +720,52 @@ public sealed class SignerBuilder
             _inputPdf, _certificate, _chain, _tsaUrl, _hashAlgorithm,
             _hashAlgorithmExplicitlySet, newOptions, _httpClient, _tsaHttpClient, _httpClientProvider, _logger, _externalSigner,
             _signatureAlgorithmOid, _enableLtv, _archivalTsaUrl, _operationId, _enforcePdfA,
-            _metadata, _padesAttributes);
+            _metadata, _padesAttributes, CountryExtensions);
     }
+
+    /// <summary>
+    /// Registers a country/region-specific extension package (e.g., ICP-Brasil, eIDAS).
+    /// Extensions provide trust anchors for validation and chain validation providers
+    /// that enrich <see cref="Validation.SignatureValidationResult"/> with country-specific
+    /// metadata (policy level, signer national ID, etc.).
+    /// </summary>
+    /// <typeparam name="T">A concrete <see cref="ICountryExtension"/> with a parameterless constructor.</typeparam>
+    public SignerBuilder WithCountryExtension<T>()
+        where T : ICountryExtension, new()
+    {
+        var extension = new T();
+        var newExtensions = new List<ICountryExtension>(CountryExtensions.Count + 1);
+        newExtensions.AddRange(CountryExtensions);
+        newExtensions.Add(extension);
+        return new(
+            _inputPdf, _certificate, _chain, _tsaUrl, _hashAlgorithm,
+            _hashAlgorithmExplicitlySet, _fieldOptions, _httpClient, _tsaHttpClient, _httpClientProvider, _logger, _externalSigner,
+            _signatureAlgorithmOid, _enableLtv, _archivalTsaUrl, _operationId, _enforcePdfA,
+            _metadata, _padesAttributes, newExtensions.AsReadOnly());
+    }
+
+    /// <summary>
+    /// Registers a pre-configured country extension instance for DI scenarios
+    /// where the extension needs constructor-injected dependencies (HttpClient, ILogger).
+    /// </summary>
+    public SignerBuilder WithCountryExtension(ICountryExtension extension)
+    {
+        ArgumentNullException.ThrowIfNull(extension);
+        var newExtensions = new List<ICountryExtension>(CountryExtensions.Count + 1);
+        newExtensions.AddRange(CountryExtensions);
+        newExtensions.Add(extension);
+        return new(
+            _inputPdf, _certificate, _chain, _tsaUrl, _hashAlgorithm,
+            _hashAlgorithmExplicitlySet, _fieldOptions, _httpClient, _tsaHttpClient, _httpClientProvider, _logger, _externalSigner,
+            _signatureAlgorithmOid, _enableLtv, _archivalTsaUrl, _operationId, _enforcePdfA,
+            _metadata, _padesAttributes, newExtensions.AsReadOnly());
+    }
+
+    /// <summary>
+    /// The registered country extensions.
+    /// Consumed by <see cref="Validation.PdfSignatureValidator"/> during validation.
+    /// </summary>
+    public IReadOnlyList<ICountryExtension> CountryExtensions { get; }
 
     /// <summary>
     /// Enables LTV (Long-Term Validation) by embedding DSS with CRLs, OCSP responses, and VRI
@@ -738,7 +785,7 @@ public sealed class SignerBuilder
             _inputPdf, _certificate, _chain, _tsaUrl, _hashAlgorithm,
             _hashAlgorithmExplicitlySet, _fieldOptions, _httpClient, _tsaHttpClient, _httpClientProvider, _logger, _externalSigner,
             _signatureAlgorithmOid, enableLtv: true, archivalTsaUrl: _archivalTsaUrl, operationId: _operationId,
-            metadata: _metadata, padesAttributes: _padesAttributes);
+            metadata: _metadata, padesAttributes: _padesAttributes, countryExtensions: CountryExtensions);
     }
 
     /// <summary>
@@ -760,7 +807,7 @@ public sealed class SignerBuilder
             _inputPdf, _certificate, _chain, _tsaUrl, _hashAlgorithm,
             _hashAlgorithmExplicitlySet, _fieldOptions, _httpClient, _tsaHttpClient, _httpClientProvider, _logger, _externalSigner,
             _signatureAlgorithmOid, enableLtv: true, archivalTsaUrl: tsaUrl ?? _tsaUrl, operationId: _operationId,
-            metadata: _metadata, padesAttributes: _padesAttributes);
+            metadata: _metadata, padesAttributes: _padesAttributes, countryExtensions: CountryExtensions);
     }
 
     private SignerBuilder With(
@@ -794,7 +841,8 @@ public sealed class SignerBuilder
             _operationId,
             _enforcePdfA,
             _metadata,
-            _padesAttributes);
+            _padesAttributes,
+            CountryExtensions);
 
     private static string DetectSignatureAlgorithmOid(X509Certificate2 cert, HashAlgorithmName hashAlg)
     {

@@ -415,7 +415,7 @@ public sealed class ValidationEdgeCaseTests
         try
         {
             RevocationChecker checker = new RevocationChecker(new OcspClient(new HttpClient()), new CrlClient(new HttpClient()));
-            Func<Task<(bool, SimpleSign.Core.Validation.RevocationSource)>> action = () => checker.CheckRevocationAsync(cert, [cert], [], CancellationToken.None);
+            Func<Task<(bool, RevocationSource)>> action = () => checker.CheckRevocationAsync(cert, [cert], [], CancellationToken.None);
             var ex = await Should.ThrowAsync<ValidationException>(async () => await action());
             ex.Message.ShouldContain("no OCSP or CRL URL");
         }

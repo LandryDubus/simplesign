@@ -3,8 +3,10 @@ using System.Reflection;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
+using Moq;
 using Shouldly;
 using SimpleSign.Core.Crypto;
+using SimpleSign.Core.Extensions;
 using SimpleSign.Core.Revocation;
 using SimpleSign.Core.Validation;
 using SimpleSign.PAdES.Validation;
@@ -70,6 +72,65 @@ public sealed class PdfSignatureValidatorTests
             FieldName = "Sig1"
         };
         signatureValidationResult.ToString().ShouldContain("Sig1");
+    }
+
+    [Fact(DisplayName = "New enrichment properties default to null")]
+    public void SignatureValidationResult_NewProperties_DefaultToNull()
+    {
+        SignatureValidationResult result = new SignatureValidationResult();
+        result.PolicyLevel.ShouldBeNull();
+        result.SignerId.ShouldBeNull();
+        result.SignerIdType.ShouldBeNull();
+        result.ChainValidationRegion.ShouldBeNull();
+        result.ChainValidationMetadata.ShouldBeNull();
+    }
+
+    [Fact(DisplayName = "New enrichment properties can be set via init")]
+    public void SignatureValidationResult_NewProperties_CanBeSet()
+    {
+        var metadata = new Dictionary<string, string> { ["key"] = "value" };
+        SignatureValidationResult result = new SignatureValidationResult
+        {
+            PolicyLevel = "A3",
+            SignerId = "123456789",
+            SignerIdType = "CPF",
+            ChainValidationRegion = "BR",
+            ChainValidationMetadata = metadata
+        };
+
+        result.PolicyLevel.ShouldBe("A3");
+        result.SignerId.ShouldBe("123456789");
+        result.SignerIdType.ShouldBe("CPF");
+        result.ChainValidationRegion.ShouldBe("BR");
+        result.ChainValidationMetadata.ShouldBe(metadata);
+    }
+
+    [Fact(DisplayName = "IsValid is true when chain trust warning set (country provider override)")]
+    public void SignatureValidationResult_IsValid_ChainTrustWarning_WithIntegrity()
+    {
+        SignatureValidationResult result = new SignatureValidationResult
+        {
+            IsIntegrityValid = true,
+            IsSignatureValid = true,
+            IsCertificateChainValid = false,
+            IsChainTrustWarning = true,
+            IsNotRevoked = true
+        };
+        result.IsValid.ShouldBeTrue("chain trust warning from country provider override makes the signature valid");
+    }
+
+    [Fact(DisplayName = "IsValid is false when chain invalid and no trust warning")]
+    public void SignatureValidationResult_IsValid_ChainInvalid_WithoutTrustWarning()
+    {
+        SignatureValidationResult result = new SignatureValidationResult
+        {
+            IsIntegrityValid = true,
+            IsSignatureValid = true,
+            IsCertificateChainValid = false,
+            IsChainTrustWarning = false,
+            IsNotRevoked = true
+        };
+        result.IsValid.ShouldBeFalse();
     }
 
     [Fact(DisplayName = "Null stream throws ArgumentNullException")]
@@ -278,6 +339,178 @@ public sealed class PdfSignatureValidatorTests
         PdfSignatureValidator pdfSignatureValidator = new PdfSignatureValidator();
         (await pdfSignatureValidator.ValidateAsync(pdfStream)).ShouldBeEmpty("minimal PDF without signatures has no fields to validate");
     }
+
+    // ── Chain Validation Provider Integration ─────────────────────────────────
+
+    [Fact(DisplayName = "Constructor with chain validation providers stores them")]
+    public void Constructor_WithChainValidationProviders_StoresProviders()
+    {
+        var mockProvider = new Mock<IChainValidationProvider>();
+        mockProvider.Setup(p => p.RegionCode).Returns("XX");
+
+        var validator = new PdfSignatureValidator(
+            new ValidationOptions { CheckRevocation = false },
+            httpClient: null,
+            logger: null,
+            trustAnchorProviders: null,
+            chainValidationProviders: [mockProvider.Object]);
+
+        validator.ShouldNotBeNull();
+    }
+
+    [Fact(DisplayName = "Constructor with country extensions extracts trust anchors and chain validators")]
+    public void Constructor_WithCountryExtensions_ExtractsProviders()
+    {
+        var mockProvider = new Mock<IChainValidationProvider>();
+        mockProvider.Setup(p => p.RegionCode).Returns("XX");
+        var mockAnchor = new Mock<ITrustAnchorProvider>();
+
+        var mockExtension = new Mock<ICountryExtension>();
+        mockExtension.Setup(e => e.RegionCode).Returns("XX");
+        mockExtension.Setup(e => e.DisplayName).Returns("Test Extension");
+        mockExtension.Setup(e => e.TrustAnchorProviders).Returns([mockAnchor.Object]);
+        mockExtension.Setup(e => e.ChainValidationProviders).Returns([mockProvider.Object]);
+
+        var validator = new PdfSignatureValidator(
+            new ValidationOptions { CheckRevocation = false },
+            httpClient: null,
+            logger: null,
+            countryExtensions: [mockExtension.Object]);
+
+        validator.ShouldNotBeNull();
+    }
+
+    [Fact(DisplayName = "Validation with matching provider enriches result with PolicyLevel")]
+    public async Task ValidateAsync_WithMatchingProvider_EnrichesResult()
+    {
+        using X509Certificate2 cert = CreateRsaCertWithKey();
+        byte[] pdfBytes = BuildMinimalPdfForSigning();
+        using MemoryStream outputStream = new MemoryStream();
+        await SimpleSigner.Document(pdfBytes).WithCertificate(cert).SignAsync(outputStream);
+
+        var mockProvider = new Mock<IChainValidationProvider>();
+        mockProvider.Setup(p => p.RegionCode).Returns("XX");
+        mockProvider.Setup(p => p.CanValidate(It.IsAny<X509Certificate2>())).Returns(true);
+        mockProvider.Setup(p => p.ValidateAsync(It.IsAny<X509Certificate2>(), It.IsAny<IReadOnlyList<X509Certificate2>>()))
+            .ReturnsAsync(new ChainValidationResult
+            {
+                IsTrusted = true,
+                RegionCode = "XX",
+                PolicyLevel = "A3",
+                SignerId = "123456",
+                SignerIdType = "CPF"
+            });
+
+        var validator = new PdfSignatureValidator(
+            new ValidationOptions { CheckRevocation = false, TrustedRoots = [cert] },
+            httpClient: null,
+            logger: null,
+            trustAnchorProviders: null,
+            chainValidationProviders: [mockProvider.Object]);
+
+        using MemoryStream signedStream = new MemoryStream(outputStream.ToArray());
+        IReadOnlyList<SignatureValidationResult> results = await validator.ValidateAsync(signedStream);
+        results.ShouldHaveSingleItem();
+        results[0].PolicyLevel.ShouldBe("A3");
+        results[0].SignerId.ShouldBe("123456");
+        results[0].SignerIdType.ShouldBe("CPF");
+        results[0].ChainValidationRegion.ShouldBe("XX");
+    }
+
+    [Fact(DisplayName = "Validation with non-matching provider is ignored")]
+    public async Task ValidateAsync_WithNonMatchingProvider_Ignored()
+    {
+        using X509Certificate2 cert = CreateRsaCertWithKey();
+        byte[] pdfBytes = BuildMinimalPdfForSigning();
+        using MemoryStream outputStream = new MemoryStream();
+        await SimpleSigner.Document(pdfBytes).WithCertificate(cert).SignAsync(outputStream);
+
+        var mockProvider = new Mock<IChainValidationProvider>();
+        mockProvider.Setup(p => p.RegionCode).Returns("XX");
+        mockProvider.Setup(p => p.CanValidate(It.IsAny<X509Certificate2>())).Returns(false);
+        mockProvider.Setup(p => p.ValidateAsync(It.IsAny<X509Certificate2>(), It.IsAny<IReadOnlyList<X509Certificate2>>()))
+            .ReturnsAsync(new ChainValidationResult
+            {
+                IsTrusted = true,
+                RegionCode = "XX",
+                PolicyLevel = "ShouldNotAppear"
+            });
+
+        var validator = new PdfSignatureValidator(
+            new ValidationOptions { CheckRevocation = false, TrustedRoots = [cert] },
+            httpClient: null,
+            logger: null,
+            trustAnchorProviders: null,
+            chainValidationProviders: [mockProvider.Object]);
+
+        using MemoryStream signedStream = new MemoryStream(outputStream.ToArray());
+        IReadOnlyList<SignatureValidationResult> results = await validator.ValidateAsync(signedStream);
+        results[0].PolicyLevel.ShouldBeNull("non-matching provider must be ignored");
+        results[0].ChainValidationRegion.ShouldBeNull();
+    }
+
+    [Fact(DisplayName = "Validation with untrusted provider adds errors to result")]
+    public async Task ValidateAsync_ProviderNotTrusted_AddsErrorsToResult()
+    {
+        using X509Certificate2 cert = CreateRsaCertWithKey();
+        byte[] pdfBytes = BuildMinimalPdfForSigning();
+        using MemoryStream outputStream = new MemoryStream();
+        await SimpleSigner.Document(pdfBytes).WithCertificate(cert).SignAsync(outputStream);
+
+        var mockProvider = new Mock<IChainValidationProvider>();
+        mockProvider.Setup(p => p.RegionCode).Returns("XX");
+        mockProvider.Setup(p => p.CanValidate(It.IsAny<X509Certificate2>())).Returns(true);
+        mockProvider.Setup(p => p.ValidateAsync(It.IsAny<X509Certificate2>(), It.IsAny<IReadOnlyList<X509Certificate2>>()))
+            .ReturnsAsync(new ChainValidationResult
+            {
+                IsTrusted = false,
+                RegionCode = "XX",
+                Errors = ["Policy not recognised"]
+            });
+
+        var validator = new PdfSignatureValidator(
+            new ValidationOptions { CheckRevocation = false, TrustedRoots = [cert] },
+            httpClient: null,
+            logger: null,
+            trustAnchorProviders: null,
+            chainValidationProviders: [mockProvider.Object]);
+
+        using MemoryStream signedStream = new MemoryStream(outputStream.ToArray());
+        IReadOnlyList<SignatureValidationResult> results = await validator.ValidateAsync(signedStream);
+        results[0].Errors.ShouldContain(e => e.Contains("Policy not recognised"));
+    }
+
+    [Fact(DisplayName = "Provider throwing exception logs warning and continues")]
+    public async Task ValidateAsync_ProviderThrows_LogsWarningAndContinues()
+    {
+        using X509Certificate2 cert = CreateRsaCertWithKey();
+        byte[] pdfBytes = BuildMinimalPdfForSigning();
+        using MemoryStream outputStream = new MemoryStream();
+        await SimpleSigner.Document(pdfBytes).WithCertificate(cert).SignAsync(outputStream);
+
+        var mockProvider = new Mock<IChainValidationProvider>();
+        mockProvider.Setup(p => p.RegionCode).Returns("XX");
+        mockProvider.Setup(p => p.CanValidate(It.IsAny<X509Certificate2>())).Returns(true);
+        mockProvider.Setup(p => p.ValidateAsync(It.IsAny<X509Certificate2>(), It.IsAny<IReadOnlyList<X509Certificate2>>()))
+            .ThrowsAsync(new InvalidOperationException("Simulated provider failure"));
+
+        var validator = new PdfSignatureValidator(
+            new ValidationOptions { CheckRevocation = false, TrustedRoots = [cert] },
+            httpClient: null,
+            logger: null,
+            trustAnchorProviders: null,
+            chainValidationProviders: [mockProvider.Object]);
+
+        using MemoryStream signedStream = new MemoryStream(outputStream.ToArray());
+        IReadOnlyList<SignatureValidationResult> results = await validator.ValidateAsync(signedStream);
+
+        // Validation should complete without throwing
+        results.ShouldHaveSingleItem();
+        results[0].Warnings.ShouldContain(w => w.Contains("Simulated provider failure"));
+        results[0].PolicyLevel.ShouldBeNull("failed provider should not set policy level");
+    }
+
+    // ── CRL ──────────────────────────────────────────────────────────────────
 
     [Fact(DisplayName = "CmsParser identifies signer cert when serial has leading-zero DER encoding (high-bit first byte)")]
     public void CmsParser_SignerCertWithHighBitSerial_IdentifiesCorrectly()

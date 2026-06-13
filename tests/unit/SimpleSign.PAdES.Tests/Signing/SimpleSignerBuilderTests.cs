@@ -1,4 +1,6 @@
+using Moq;
 using Shouldly;
+using SimpleSign.Core.Extensions;
 using SimpleSign.Core.Signing;
 using SimpleSign.TestHelpers;
 using Xunit;
@@ -171,6 +173,96 @@ public sealed class SimpleSignerBuilderTests
             .WithLtv();
         var builder2 = builder.WithArchivalTimestamp();
         builder2.ShouldNotBeNull();
+    }
+
+    // ── WithCountryExtension ──────────────────────────────────────────────────
+
+    [Fact(DisplayName = "WithCountryExtension generic adds extension to CountryExtensions")]
+    public void WithCountryExtension_Generic_AddsExtension()
+    {
+        var mockExtension = new Mock<ICountryExtension>();
+        mockExtension.Setup(e => e.RegionCode).Returns("XX");
+        mockExtension.Setup(e => e.DisplayName).Returns("Test");
+        mockExtension.Setup(e => e.TrustAnchorProviders).Returns([]);
+        mockExtension.Setup(e => e.ChainValidationProviders).Returns([]);
+
+        var builder = SimpleSigner.Document([0x25]);
+        var builder2 = builder.WithCountryExtension(mockExtension.Object);
+
+        builder2.CountryExtensions.ShouldHaveSingleItem();
+        builder2.CountryExtensions[0].ShouldBe(mockExtension.Object);
+    }
+
+    [Fact(DisplayName = "WithCountryExtension returns new instance (immutable)")]
+    public void WithCountryExtension_Immutability_ReturnsNewInstance()
+    {
+        var mockExtension = new Mock<ICountryExtension>();
+        mockExtension.Setup(e => e.RegionCode).Returns("XX");
+        mockExtension.Setup(e => e.DisplayName).Returns("Test");
+        mockExtension.Setup(e => e.TrustAnchorProviders).Returns([]);
+        mockExtension.Setup(e => e.ChainValidationProviders).Returns([]);
+
+        var builder = SimpleSigner.Document([0x25]);
+        var builder2 = builder.WithCountryExtension(mockExtension.Object);
+
+        builder.ShouldNotBeSameAs(builder2);
+        builder.CountryExtensions.ShouldBeEmpty("original builder must not be affected");
+    }
+
+    [Fact(DisplayName = "WithCountryExtension carries forward through other With calls")]
+    public void WithCountryExtension_CarriesForward_ThroughOtherWith()
+    {
+        var mockExtension = new Mock<ICountryExtension>();
+        mockExtension.Setup(e => e.RegionCode).Returns("XX");
+        mockExtension.Setup(e => e.DisplayName).Returns("Test");
+        mockExtension.Setup(e => e.TrustAnchorProviders).Returns([]);
+        mockExtension.Setup(e => e.ChainValidationProviders).Returns([]);
+
+        var builder = SimpleSigner.Document([0x25])
+            .WithCountryExtension(mockExtension.Object)
+            .WithTimestamp("http://tsa.example.com")
+            .WithFieldName("MySig");
+
+        builder.CountryExtensions.ShouldHaveSingleItem();
+        builder.CountryExtensions[0].ShouldBe(mockExtension.Object);
+    }
+
+    [Fact(DisplayName = "Multiple WithCountryExtension calls accumulate")]
+    public void WithCountryExtension_MultipleExtensions_Accumulates()
+    {
+        var mock1 = new Mock<ICountryExtension>();
+        mock1.Setup(e => e.RegionCode).Returns("XX");
+        mock1.Setup(e => e.DisplayName).Returns("First");
+        mock1.Setup(e => e.TrustAnchorProviders).Returns([]);
+        mock1.Setup(e => e.ChainValidationProviders).Returns([]);
+
+        var mock2 = new Mock<ICountryExtension>();
+        mock2.Setup(e => e.RegionCode).Returns("YY");
+        mock2.Setup(e => e.DisplayName).Returns("Second");
+        mock2.Setup(e => e.TrustAnchorProviders).Returns([]);
+        mock2.Setup(e => e.ChainValidationProviders).Returns([]);
+
+        var builder = SimpleSigner.Document([0x25])
+            .WithCountryExtension(mock1.Object)
+            .WithCountryExtension(mock2.Object);
+
+        builder.CountryExtensions.Count.ShouldBe(2);
+        builder.CountryExtensions[0].ShouldBe(mock1.Object);
+        builder.CountryExtensions[1].ShouldBe(mock2.Object);
+    }
+
+    [Fact(DisplayName = "WithCountryExtension with null argument throws")]
+    public void WithCountryExtension_NullArgument_Throws()
+    {
+        var builder = SimpleSigner.Document([0x25]);
+        Assert.Throws<ArgumentNullException>(() => builder.WithCountryExtension(null!));
+    }
+
+    [Fact(DisplayName = "CountryExtensions is empty by default")]
+    public void CountryExtensions_Default_Empty()
+    {
+        var builder = SimpleSigner.Document([0x25]);
+        builder.CountryExtensions.ShouldBeEmpty();
     }
 }
 

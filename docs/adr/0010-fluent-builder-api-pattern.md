@@ -28,36 +28,53 @@ All three return a `new SignerBuilder(...)` wrapping the PDF in a `MemoryStream`
 
 ### 2. Immutable builder pattern
 
-`SignerBuilder` holds 21 private readonly fields capturing all configuration. Every `With*` method returns a **new instance** via a private copy constructor.
+`SignerBuilder` holds 20 configuration items (19 private readonly fields + 1 public auto-property `CountryExtensions`). Every `With*` method returns a **new instance** via a private copy constructor.
 
 **Copy constructor pattern:**
 
 ```csharp
-private sealed class SignerBuilder
+public sealed class SignerBuilder
 {
-    private readonly MemoryStream _inputPdf;
+    private readonly Stream _inputPdf;
     private readonly X509Certificate2? _certificate;
+    private readonly IReadOnlyList<X509Certificate2>? _chain;
     private readonly string? _tsaUrl;
-    // ... 20 more fields
+    private readonly HashAlgorithmName _hashAlgorithm;
+    private readonly bool _hashAlgorithmExplicitlySet;
+    private readonly SignatureFieldOptions _fieldOptions;
+    private readonly HttpClient? _httpClient;
+    private readonly HttpClient? _tsaHttpClient;
+    private readonly IHttpClientProvider _httpClientProvider;
+    private readonly ILogger _logger;
+    private readonly Func<byte[], Task<byte[]>>? _externalSigner;
+    private readonly string? _signatureAlgorithmOid;
+    private readonly bool _enableLtv;
+    private readonly string? _archivalTsaUrl;
+    private readonly string? _operationId;
+    private readonly bool _enforcePdfA;
+    private readonly SignatureMetadata? _metadata;
+    private readonly bool _padesAttributes;
+    public IReadOnlyList<ICountryExtension> CountryExtensions { get; }
 
-    // Public constructor — only called by SimpleSigner.Document()
-    public SignerBuilder(Stream inputPdf, ILogger? logger) { ... }
+    // Public constructor — called by SimpleSigner.Document()
+    internal SignerBuilder(Stream inputPdf, ILogger? logger) { ... }
 
     // Private copy constructor — called by With(...)
     private SignerBuilder(
-        MemoryStream inputPdf, X509Certificate2? certificate,
-        string? tsaUrl, /* ... all 23 fields */) { ... }
+        Stream inputPdf, X509Certificate2? certificate,
+        IReadOnlyList<X509Certificate2>? chain, string? tsaUrl,
+        HashAlgorithmName hashAlgorithm, bool hashAlgorithmExplicitlySet,
+        SignatureFieldOptions fieldOptions, HttpClient? httpClient,
+        HttpClient? tsaHttpClient, IHttpClientProvider? httpClientProvider,
+        ILogger logger, Func<byte[], Task<byte[]>>? externalSigner,
+        string? signatureAlgorithmOid, bool enableLtv, string? archivalTsaUrl,
+        string? operationId, bool enforcePdfA, SignatureMetadata? metadata,
+        bool padesAttributes, IReadOnlyList<ICountryExtension>? countryExtensions) { ... }
 
     // Private helper — creates new instance carrying forward unchanged fields
     private SignerBuilder With(
-        MemoryStream? inputPdf = null,
-        X509Certificate2? certificate = null,
-        string? tsaUrl = null,
-        /* ... all 23 fields as optionals */) =>
-        new(inputPdf ?? new MemoryStream(_inputPdf.ToArray()),
-            certificate ?? _certificate,
-            tsaUrl ?? _tsaUrl,
-            /* ... carry-forward ?? for each */);
+        X509Certificate2? certificate = null, ...) =>
+        new(_inputPdf, ...);
 }
 ```
 
@@ -147,7 +164,7 @@ Before any PDF modification, `SignCoreAsync` validates:
 - Immutable pattern prevents stale-read bugs: each `With*` starts from the previous state
 - AOT compatible: callbacks use `Func<>` delegates, no dynamic invocation, no `Expression` trees
 - Single obvious way to create a signer: `SimpleSigner.Document()` → `SignerBuilder` → terminal method
-- Allocation overhead per `With*` call (21-field copy per operation) — negligible for typical usage (<10 calls)
+- Allocation overhead per `With*` call (20-item copy per operation) — negligible for typical usage (<10 calls)
 - Validation upfront prevents late failures after PDF modification
 - `DeferredSigner` requires session state management; opaque blob approach avoids server-side storage but blobs can be large (~100 KB)
 - `BatchSigner` uses a mutable inner builder (`BatchSignerBuilder` returning `this`) — optimised for performance, not thread-safety

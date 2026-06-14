@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.5.0] - 2026-06-12
+## [0.5.0] - 2026-06-14
 
 ### Added
 
@@ -14,17 +14,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Auto-detection of `IHttpClientFactory` in DI** — `AddSimpleSign()` now checks for `IHttpClientFactory` in the DI container. When present, it wires `HttpClientFactoryProvider` automatically using `SimpleSignOptions.HttpClientName` as the named-client key. No manual adapter implementation needed.
 - **`SimpleSignOptions.HttpClientName` is now consumed** — previously documented but silently ignored. Now used by the `IHttpClientFactory`-backed provider fallback in `AddSimpleSign()`.
 - **Per-operation HTTP client slots in `SignerBuilder`** — TSA (signature timestamp + archival DocTimeStamp) and revocation (OCSP/CRL/AIA) now use independent `HttpClient` instances, enabling per-operation authentication (e.g., bearer token for TSA, anonymous for revocation).
+- **`SignerBuilder.WithCountryExtension<T>()` / `.WithCountryExtension(extension)`** — fluent API to register country-specific trust anchors and chain validation providers (e.g., ICP-Brasil, eIDAS). Extensions enrich `SignatureValidationResult` with policy level, signer national ID, and region metadata. Both generic (`new T()`) and instance overloads supported.
+- **`IChainValidationProvider` integration into `PdfSignatureValidator`** — after standard `X509Chain.Build()`, the first matching provider runs its `ValidateAsync`. If it trusts the chain (but the standard PKI path failed), chain errors are demoted to warnings (`IsChainTrustWarning = true`). `SignatureValidationResult` gains 5 new properties: `ChainValidationRegion`, `PolicyLevel`, `SignerId`, `SignerIdType`, `ChainValidationMetadata`.
+- **LTV loop parallelisation** — `LtvEmbedder.EmbedLtvDataAsync` now uses `Parallel.ForEachAsync` with `ConcurrentDictionary` for thumbprint deduplication and `ConcurrentBag` for result collection. Snapshot isolation (`allCerts.ToList()`) prevents concurrent modification. `MaxDegreeOfParallelism = CPU × 2`.
+- **PDF/A-aware annotation flags** — `/F 4` (Print) for PDF/A-1 signatures, `/F 132` (Print + Locked) for PDF/A-2+ and non-PDF/A. Detected from XMP metadata in `SignerBuilder.SignCoreAsync`, passed via `pdfALevel` to `PdfSignatureWriter.PrepareAsync` and `DocTimeStampWriter.AppendDocTimeStampAsync`.
+- **SHA-256 VRI hash alongside SHA-1** — `ExtractSignatureContentHashPairs` now returns tuples; `/SHA256 {hex}` is added to each VRI object alongside the existing SHA-1 key (PAdES Part 4 requirement). Collision-resilient cross-reference without breaking existing verifiers.
+- **AIA issuer-subject validation** — `DownloadAiaForCertAsync` compares downloaded cert's `SubjectName` with expected `IssuerName`. Warning logged on mismatch, but cert is still added to result for chain engine fallback.
+- **PDF/A detection for compressed XMP** — `ScanCompressedObjStmsForPdfAIdTags` decompresses ObjStm streams and searches for `pdfaid:part`/`pdfaid:conformance` tags when raw byte scan returns `None`. Two-pass detection: fast raw scan (~99% of PDFs) → decompression fallback (PDF 1.5+).
+- **`BatchSignerBuilder` immutable** — converted from mutable (`return this`) to immutable (copy constructor with 15 fields, `With()` carry-forward pattern), consistent with `SignerBuilder`.
+- **SHA-3/EdDSA OID mappings** — end-to-end CMS compliance tests for SHA3-256/384/512 and Ed25519/Ed448 (RFC 8702, 8933, 8032, 8410). Wire-level attribute validation.
+- **`SignatureValidationResult` moved to `SimpleSign.Core.Validation`** — extracted from `SimpleSign.PAdES.Validation` for cross-format reuse (PAdES, CAdES, XAdES). All 675 unit tests updated.
+- **Competitor benchmarks (iText 9 + BouncyCastle)** — new `CompetitorBenchmarks` suite at `bench/SimpleSign.Benchmarks/`. MediumRun results: SimpleSign 13.700 ms (498 KB) vs iText 9 4.940 ms (766 KB) — SimpleSign 2.8× slower but 35% less memory.
+- **6 ADRs (0009–0014)** — documenting: Country Extension plug-in, Fluent Builder pattern, Validation Pipeline, LTV Architecture, Certificate Chain Validation, PDF/A Conformance Strategy.
+- **`BrasilManifestProvider` and `ISignatureManifestProvider` removed** — dead code elimination. Manifest construction uses `SignatureMetadata` directly without interface indirection.
 
 ### Fixed
 
 - **`SignerBuilder.WithHttpClientProvider` now resolves lazily** — `IHttpClientProvider.GetClient()` is called at signing time, not at builder-configuration time. Previously the provider was eagerly resolved and discarded, making factory-style providers impossible.
 - **`IHttpClientProvider` preserved through all builder methods** — `WithLtv()`, `WithMetadata()`, `WithOperationId()`, `WithPdfAPreservation()`, `WithLegacyCms()`, `WithSubFilter()`, and `WithArchivalTimestamp()` no longer silently replace the custom provider with the static default. The provider now survives every builder clone.
 - **`SimpleSignOptions.HttpClientName` is now consumed** — previously documented but silently ignored. Now used by the `IHttpClientFactory`-backed provider fallback.
+- **LTV loop `&&` → `||` logic fix** — responder certs already processed were incorrectly double-checked with `&&` instead of `||`.
+- **`PdfSignatureValidator` field count** — `PdfStructureReader` exception handlers narrowed from `catch(Exception)` to specific exception types in 4 locations.
 
 ### Changed (Breaking)
 
 - **`SignerBuilder.WithTimestamp(url, httpClient)` scope narrowed** — the injected `HttpClient` now applies only to TSA calls (signature timestamp + archival DocTimeStamp), not to revocation (OCSP/CRL/AIA). Use the new `WithHttpClient(HttpClient)` for the default/revocation client. This only affects callers relying on the undocumented side-effect of the TSA client leaking to revocation.
 - **`SignerBuilder.WithTimestamp(url, httpClient)` corrects archival timestamp client** — archival DocTimeStamp (B-LTA) now uses the TSA client instead of the revocation client, fixing an inconsistency where the step 7 timestamp reused the step 6 revocation `HttpClient`.
+- **`BatchSignerBuilder` immutable** — `With*` methods now return new instances instead of `this`. Code relying on reference identity after `With*` calls will break.
+- **`SignatureValidationResult` namespace** — changed from `SimpleSign.PAdES.Validation` to `SimpleSign.Core.Validation`. Add `using SimpleSign.Core.Validation;` to existing code.
+- **`ISignatureManifestProvider` removed** — implementors of this interface will no longer compile. Use `SignatureMetadata` directly.
+
+### Improved
+
+- **21 new unit tests** — LTV parallelism (3), chain validation integration (6), `SignatureValidationResult` new properties (5), `WithCountryExtension` (7).
+- **`IChainValidationProvider` async** — `Validate` changed to `ValidateAsync`, fixing sync-over-async deadlock.
+- **`BuildXrefTableAndTrailer` extracted as `internal static`** — removed duplicate `BuildDssXrefAndTrailer` from `LtvEmbedder`.
+- **`PdfKeys` constants class** — 12 PDF dictionary key constants, 17+ substitutions removing magic strings.
+- **`LtvEmbedder` HashSet O(1) dedup** — replaces linear scan for certificate deduplication.
+- **`BuildFieldAnnotation` reduced 11→2 params** — `FieldAnnotationParams` record encapsulates remaining options.
+- **`TestPdfFactory` shared** — `CreateMinimalPdf()` in `SimpleSign.TestHelpers`, migrated 15+ test files.
+- **`MockHttpHandler` consolidated** — single shared `HttpMessageHandler` mock replaces 4 copies.
+- **`[Trait("Category", "Unit")]`** — added to 93 test classes for CI filtering.
+- **Benchmarks.md** — updated to 15 suites / 69 benchmarks with CompetitorBenchmarks (MediumRun) results.
 
 ## [0.4.0] - 2026-06-11
 

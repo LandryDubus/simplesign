@@ -1,3 +1,5 @@
+using SimpleSign.Core.Validation;
+
 namespace SimpleSign.PAdES.Validation;
 
 /// <summary>

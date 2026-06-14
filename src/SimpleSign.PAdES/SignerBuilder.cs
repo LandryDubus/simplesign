@@ -726,7 +726,7 @@ public sealed class SignerBuilder
     /// <summary>
     /// Registers a country/region-specific extension package (e.g., ICP-Brasil, eIDAS).
     /// Extensions provide trust anchors for validation and chain validation providers
-    /// that enrich <see cref="Validation.SignatureValidationResult"/> with country-specific
+    /// that enrich <see cref="Core.Validation.SignatureValidationResult"/> with country-specific
     /// metadata (policy level, signer national ID, etc.).
     /// </summary>
     /// <typeparam name="T">A concrete <see cref="ICountryExtension"/> with a parameterless constructor.</typeparam>

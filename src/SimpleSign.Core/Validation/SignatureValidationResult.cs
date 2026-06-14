@@ -1,9 +1,8 @@
 using System.Security.Cryptography.X509Certificates;
 using SimpleSign.Core.Constants;
 using SimpleSign.Core.Extensions;
-using SimpleSign.Core.Validation;
 
-namespace SimpleSign.PAdES.Validation;
+namespace SimpleSign.Core.Validation;
 
 /// <summary>Complete result of a PDF signature validation.</summary>
 public sealed class SignatureValidationResult

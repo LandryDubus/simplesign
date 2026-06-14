@@ -1,6 +1,6 @@
 using SimpleSign.Brasil.Signing;
+using SimpleSign.Core.Validation;
 using SimpleSign.PAdES.Inspection;
-using SimpleSign.PAdES.Validation;
 
 namespace SimpleSign.Cli.Json;
 

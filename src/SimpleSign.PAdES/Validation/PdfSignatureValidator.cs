@@ -504,12 +504,13 @@ public sealed class PdfSignatureValidator
         PdfSignatureField field,
         DssValidationData dssData)
     {
-        // Compute SHA-1 hash of the signature /Contents for VRI lookup
+        // Compute SHA-1 hash of the full /Contents byte string for VRI lookup.
+        // Per ISO 32000-2 §12.8.4.4 the VRI key is SHA-1 of the complete decoded byte
+        // string value — including any trailing zero padding — not of the DER structure alone.
         if (field.ContentsBytes is { Length: > 0 } contentsBytes && dssData.VriEntries.Count > 0)
         {
-            int derLength = Signing.LtvEmbedder.ComputeDerTotalLength(contentsBytes);
 #pragma warning disable CA5350 // VRI key is defined as SHA-1 by PAdES spec
-            byte[] hash = SHA1.HashData(contentsBytes.AsSpan(0, derLength));
+            byte[] hash = SHA1.HashData(contentsBytes);
 #pragma warning restore CA5350
             string hashHex = Convert.ToHexString(hash);
 

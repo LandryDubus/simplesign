@@ -10,8 +10,8 @@ namespace SimpleSign.PAdES.Signing;
 /// Shared algorithm-inference logic for all signing paths (local, external, deferred).
 /// Resolves the effective hash algorithm from the certificate when the user has not
 /// explicitly set one, implementing:
-///   - Gap 1: PSS cert's <c>RSASSA-PSS-params</c> (RFC 4055 §3.1) honoured.
-///   - Gap 3: RSA key-size-based hash selection per NIST SP 800-57 Part 1 Rev. 5.
+///   - PSS cert's <c>RSASSA-PSS-params</c> (RFC 4055 §3.1) honoured.
+///   - RSA key-size-based hash selection per NIST SP 800-57 Part 1 Rev. 5.
 /// </summary>
 internal static class AlgorithmInference
 {
@@ -24,18 +24,36 @@ internal static class AlgorithmInference
     /// <see langword="true"/> if the user explicitly called <c>WithHashAlgorithm()</c>;
     /// <see langword="false"/> if the hash is still the library default.
     /// </param>
+    /// <param name="signatureAlgorithmOid">
+    /// Optional explicit signature algorithm OID (e.g. from <c>WithExternalSigner</c>).
+    /// When provided and <paramref name="hashAlgorithmExplicitlySet"/> is <see langword="false"/>,
+    /// the hash is inferred from the OID before falling back to certificate-based inference.
+    /// </param>
     /// <returns>The effective hash algorithm to use for signing.</returns>
     internal static HashAlgorithmName ResolveEffectiveHashAlgorithm(
         X509Certificate2 cert,
         HashAlgorithmName hashAlgorithm,
-        bool hashAlgorithmExplicitlySet)
+        bool hashAlgorithmExplicitlySet,
+        string? signatureAlgorithmOid = null)
     {
         if (hashAlgorithmExplicitlySet)
         {
             return hashAlgorithm;
         }
 
-        // Gap 1: PSS cert — read hash from RSASSA-PSS-params.
+        // If the caller provided an explicit signature algorithm OID (e.g. via WithExternalSigner),
+        // infer the hash from it. This ensures the CMS digestAlgorithm matches what the
+        // external signer uses (e.g. RS512 → SHA512, not SHA256 from key-size heuristic).
+        if (signatureAlgorithmOid is not null)
+        {
+            var hashFromOid = TryInferHashFromSignatureOid(signatureAlgorithmOid);
+            if (hashFromOid is not null)
+            {
+                return hashFromOid.Value;
+            }
+        }
+
+        // PSS cert — read hash from RSASSA-PSS-params.
         // Check SubjectPublicKeyInfo OID first (RFC 4055 §4), fall back to signature
         // algorithm for self-signed PSS certs.
         if (cert.PublicKey.Oid.Value == Oids.RsaPss || cert.SignatureAlgorithm.Value == Oids.RsaPss)
@@ -46,7 +64,7 @@ internal static class AlgorithmInference
             return CryptoUtility.ParsePssHashAlgorithm(pssParams);
         }
 
-        // Gap 3: RSA PKCS#1 cert — select hash based on key size.
+        // RSA PKCS#1 cert — select hash based on key size.
         string keyOid = cert.PublicKey.Oid.Value ?? string.Empty;
         if (keyOid == Oids.RsaEncryption)
         {
@@ -56,6 +74,22 @@ internal static class AlgorithmInference
         // ECDSA, EdDSA, or unknown — keep the default (SHA-256).
         return hashAlgorithm;
     }
+
+    /// <summary>
+    /// Infers the hash algorithm from a signature algorithm OID when the hash is unambiguously
+    /// encoded in the OID (RSA PKCS#1 and ECDSA combined-hash OIDs).
+    /// Returns <see langword="null"/> for OIDs that do not encode a specific hash
+    /// (e.g. <c>id-RSASSA-PSS</c> 1.2.840.113549.1.1.10), since those require
+    /// out-of-band parameters.
+    /// </summary>
+    internal static HashAlgorithmName? TryInferHashFromSignatureOid(string sigOid) => sigOid switch
+    {
+        Oids.RsaSha256 or Oids.EcdsaSha256 => HashAlgorithmName.SHA256,
+        Oids.RsaSha384 or Oids.EcdsaSha384 => HashAlgorithmName.SHA384,
+        Oids.RsaSha512 or Oids.EcdsaSha512 => HashAlgorithmName.SHA512,
+        Oids.RsaSha1 => HashAlgorithmName.SHA1,
+        _ => null,
+    };
 
     /// <summary>
     /// Selects the appropriate hash algorithm based on the RSA key size,

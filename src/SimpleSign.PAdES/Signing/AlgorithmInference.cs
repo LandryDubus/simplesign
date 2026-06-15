@@ -71,7 +71,13 @@ internal static class AlgorithmInference
             return SelectHashForRsaKeySize(cert);
         }
 
-        // ECDSA, EdDSA, or unknown — keep the default (SHA-256).
+        // ECDSA — select hash based on curve size per NIST SP 800-57 Part 1 Rev. 5, Table 2.
+        if (keyOid == Oids.EcPublicKey)
+        {
+            return SelectHashForEcKeySize(cert);
+        }
+
+        // EdDSA or unknown — keep the default (SHA-256).
         return hashAlgorithm;
     }
 
@@ -103,6 +109,34 @@ internal static class AlgorithmInference
             if (rsa is not null && rsa.KeySize >= 3072)
             {
                 return HashAlgorithmName.SHA384;
+            }
+        }
+        catch (CryptographicException)
+        {
+            // Fall back to SHA-256 — a safe, conservative choice.
+        }
+
+        return HashAlgorithmName.SHA256;
+    }
+
+    /// <summary>
+    /// Selects the appropriate hash algorithm based on the EC curve size,
+    /// per NIST SP 800-57 Part 1 Rev. 5, Table 2:
+    /// P-256 → SHA-256, P-384 → SHA-384, P-521 → SHA-512.
+    /// </summary>
+    private static HashAlgorithmName SelectHashForEcKeySize(X509Certificate2 cert)
+    {
+        try
+        {
+            using var ecdsa = cert.GetECDsaPublicKey();
+            if (ecdsa is not null)
+            {
+                return ecdsa.KeySize switch
+                {
+                    >= 521 => HashAlgorithmName.SHA512,
+                    >= 384 => HashAlgorithmName.SHA384,
+                    _ => HashAlgorithmName.SHA256,
+                };
             }
         }
         catch (CryptographicException)

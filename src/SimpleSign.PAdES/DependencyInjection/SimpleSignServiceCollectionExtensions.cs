@@ -66,14 +66,25 @@ public static class SimpleSignServiceCollectionExtensions
             NetworkTimeout = options.NetworkTimeout
         });
 
-        // IHttpClientProvider — custom, or default shared-static
+        // IHttpClientProvider — custom, or IHttpClientFactory-backed if available, or default shared-static
         if (httpClientProvider is not null)
         {
             services.TryAddSingleton(httpClientProvider);
         }
         else
         {
-            services.TryAddSingleton<IHttpClientProvider>(DefaultHttpClientProvider.Instance);
+            // Prefer IHttpClientFactory when registered in the container (e.g., ASP.NET Core).
+            // This enables the named-client pattern: services.AddHttpClient(options.HttpClientName, …)
+            services.TryAddSingleton<IHttpClientProvider>(sp =>
+            {
+                var factory = sp.GetService<IHttpClientFactory>();
+                if (factory is not null)
+                {
+                    return new HttpClientFactoryProvider(factory, options.HttpClientName);
+                }
+
+                return DefaultHttpClientProvider.Instance;
+            });
         }
 
         // Validator — collects any registered ITrustAnchorProvider instances

@@ -90,6 +90,7 @@ var signedPdf = await SimpleSigner
     .WithCertificate(certificate)
     .WithTimestamp("http://timestamp.digicert.com")
     .WithLtv()
+    .WithArchivalTimestamp()
     .SignAsync();
 
 File.WriteAllBytes("contract-signed.pdf", signedPdf);
@@ -171,7 +172,7 @@ var signed = await SimpleSigner
 
 | Capability | API |
 |---|---|
-| Basic signature (B-B) | `.WithCertificate(cert).SignAsync()` |
+| Basic signature (B-B) | `.WithCertificate(cert)` / `.WithCertificate(cert, chain)` |
 | Timestamp (B-T) | `.WithTimestamp(tsaUrl)` |
 | Long-term validation (B-LT) | `.WithLtv()` |
 | Archival (B-LTA) | `.WithArchivalTimestamp()` |
@@ -180,8 +181,94 @@ var signed = await SimpleSigner
 | Visible signature with QR code | `.WithAppearance(appearance)` |
 | External signer (HSM, KMS) | `.WithExternalSigner(cert, signerFunc)` |
 | Existing field | `.WithExistingField("SignHere")` |
+| Force signature algorithm | `.WithSignatureAlgorithm(Oids.RsaPss)` |
+| Custom HTTP transport | `.WithHttpClient(httpClient)` / `.WithHttpClientProvider(provider)` |
 | Deferred (2-phase) | `DeferredSigner.PrepareAsync()` → `CompleteAsync()` |
 | Batch (parallel) | `BatchSigner.Create(cert).Build()` |
+
+#### Explicit Certificate Chain
+
+Pass the full intermediate chain when the signing certificate's AIA extension is unavailable or
+you want to guarantee the chain is embedded in the signature without any network fetch:
+
+```csharp
+var signed = await SimpleSigner
+    .Document(pdfBytes)
+    .WithCertificate(cert, [intermediateCert, rootCert])
+    .WithLtv()
+    .SignAsync();
+```
+
+#### Signature Algorithm Override
+
+Force RSASSA-PSS on a plain `rsaEncryption` certificate (useful for higher-assurance profiles):
+
+```csharp
+using SimpleSign.Core;
+
+var signed = await SimpleSigner
+    .Document(pdfBytes)
+    .WithCertificate(cert)
+    .WithSignatureAlgorithm(Oids.RsaPss)  // force PSS instead of PKCS#1 v1.5
+    .WithTimestamp("http://timestamp.digicert.com")
+    .SignAsync();
+```
+
+Compatibility with the certificate's key type is validated at signing time — an
+`ArgumentException` is thrown for incompatible combinations (e.g. PSS on an ECDSA key).
+
+#### HTTP Client Management
+
+By default, SimpleSign creates its own `HttpClient` for TSA, OCSP, and CRL traffic. In
+production you should integrate with `IHttpClientFactory` to avoid socket exhaustion:
+
+```csharp
+// ASP.NET Core — named-client pattern (recommended)
+services.AddHttpClient("SimpleSign", client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(15);
+});
+services.AddSimpleSign(opts => opts.HttpClientName = "SimpleSign");
+// AddSimpleSign auto-detects IHttpClientFactory and uses HttpClientFactoryProvider.
+```
+
+For scenarios where TSA requires authentication but OCSP/CRL does not, configure the two slots
+independently via the builder:
+
+```csharp
+// Named clients in DI:
+services.AddHttpClient("SimpleSign.Tsa", client =>
+    client.DefaultRequestHeaders.Authorization =
+        new AuthenticationHeaderValue("Bearer", myToken));
+services.AddHttpClient("SimpleSign.Revocation"); // no auth
+
+// Usage:
+var tsaClient        = httpClientFactory.CreateClient("SimpleSign.Tsa");
+var revocationClient = httpClientFactory.CreateClient("SimpleSign.Revocation");
+
+var signed = await SimpleSigner
+    .Document(pdfBytes)
+    .WithCertificate(cert)
+    .WithTimestamp(tsaUrl, tsaClient)       // TSA calls only
+    .WithLtv()
+    .WithHttpClient(revocationClient)       // OCSP/CRL calls + TSA fallback
+    .SignAsync();
+```
+
+If you have a custom `IHttpClientProvider` implementation (e.g. wrapping a pooled client or
+adding telemetry), use `WithHttpClientProvider`:
+
+```csharp
+var signed = await SimpleSigner
+    .Document(pdfBytes)
+    .WithCertificate(cert)
+    .WithTimestamp(tsaUrl)
+    .WithHttpClientProvider(myProvider) // called lazily at signing time
+    .SignAsync();
+```
+
+The provider is resolved lazily — `GetClient()` is called once per signing operation, not at
+builder-construction time.
 
 #### Signature Appearance
 

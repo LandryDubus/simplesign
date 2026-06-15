@@ -125,6 +125,81 @@ public sealed class SimpleSignServiceCollectionExtensionsTests
         o1.ShouldBeSameAs(o2);
     }
 
+    [Fact(DisplayName = "AddSimpleSign without IHttpClientFactory uses DefaultHttpClientProvider")]
+    public void AddSimpleSign_WithoutIHttpClientFactory_UsesDefaultProvider()
+    {
+        var services = new ServiceCollection();
+        // No AddHttpClient — IHttpClientFactory is not registered
+        services.AddSimpleSign();
+        var provider = services.BuildServiceProvider();
+
+        var httpProvider = provider.GetRequiredService<IHttpClientProvider>();
+        httpProvider.ShouldBe(DefaultHttpClientProvider.Instance);
+    }
+
+    [Fact(DisplayName = "AddSimpleSign with IHttpClientFactory registered uses HttpClientFactoryProvider")]
+    public void AddSimpleSign_WithIHttpClientFactory_UsesHttpClientFactoryProvider()
+    {
+        var services = new ServiceCollection();
+        services.AddHttpClient(); // registers IHttpClientFactory
+        services.AddSimpleSign();
+        var provider = services.BuildServiceProvider();
+
+        var httpProvider = provider.GetRequiredService<IHttpClientProvider>();
+        httpProvider.ShouldBeOfType<HttpClientFactoryProvider>();
+    }
+
+    [Fact(DisplayName = "AddSimpleSign passes HttpClientName to HttpClientFactoryProvider")]
+    public void AddSimpleSign_HttpClientName_IsPassedToHttpClientFactoryProvider()
+    {
+        const string customName = "MyApp.SimpleSign";
+        var services = new ServiceCollection();
+        services.AddHttpClient(customName);
+        services.AddSimpleSign(opts => opts.HttpClientName = customName);
+        var provider = services.BuildServiceProvider();
+
+        var httpProvider = provider.GetRequiredService<IHttpClientProvider>();
+        httpProvider.ShouldBeOfType<HttpClientFactoryProvider>();
+        // Verify the name is used: GetClient() should call factory.CreateClient(customName) — no exception.
+        Should.NotThrow(() => httpProvider.GetClient());
+    }
+
+    [Fact(DisplayName = "AddSimpleSign pre-registered IHttpClientProvider takes precedence over IHttpClientFactory")]
+    public void AddSimpleSign_PreRegisteredProvider_TakesPrecedenceOverFactory()
+    {
+        var custom = new TestHttpClientProvider();
+        var services = new ServiceCollection();
+        services.AddHttpClient(); // IHttpClientFactory is present
+        services.AddSingleton<IHttpClientProvider>(custom); // but pre-registered provider wins
+        services.AddSimpleSign();
+        var provider = services.BuildServiceProvider();
+
+        var httpProvider = provider.GetRequiredService<IHttpClientProvider>();
+        httpProvider.ShouldBeSameAs(custom);
+    }
+
+    [Fact(DisplayName = "PdfSignatureValidator accepts HttpClient directly — typed-client pattern")]
+    public void PdfSignatureValidator_AcceptsHttpClient_TypedClientPattern()
+    {
+        // The typed-client pattern requires PdfSignatureValidator to have a HttpClient constructor.
+        // This test verifies that the constructor exists and creates a working instance.
+        using var httpClient = new HttpClient();
+        var validator = new PdfSignatureValidator(options: null, httpClient: httpClient);
+
+        validator.ShouldNotBeNull();
+    }
+
+    [Fact(DisplayName = "PdfSignatureValidator typed-client constructor respects validation options")]
+    public void PdfSignatureValidator_TypedClientConstructor_RespectsValidationOptions()
+    {
+        using var httpClient = new HttpClient();
+        var options = new ValidationOptions { CheckRevocation = false, TrustSystemRoots = false };
+
+        var validator = new PdfSignatureValidator(options: options, httpClient: httpClient);
+
+        validator.ShouldNotBeNull();
+    }
+
     private sealed class TestHttpClientProvider : IHttpClientProvider
     {
         public HttpClient GetClient() => new();

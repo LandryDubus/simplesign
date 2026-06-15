@@ -28,6 +28,7 @@ public sealed class SignerBuilder
     private readonly bool _hashAlgorithmExplicitlySet;
     private readonly SignatureFieldOptions _fieldOptions;
     private readonly HttpClient? _httpClient;
+    private readonly HttpClient? _tsaHttpClient;
     private readonly IHttpClientProvider _httpClientProvider;
     private readonly ILogger _logger;
     private readonly Func<byte[], Task<byte[]>>? _externalSigner;
@@ -66,7 +67,9 @@ public sealed class SignerBuilder
         string? operationId = null,
         bool enforcePdfA = false,
         SignatureMetadata? metadata = null,
-        bool padesAttributes = true)
+        bool padesAttributes = true,
+        HttpClient? tsaHttpClient = null,
+        IHttpClientProvider? httpClientProvider = null)
     {
         _inputPdf = inputPdf;
         _certificate = certificate;
@@ -76,7 +79,8 @@ public sealed class SignerBuilder
         _hashAlgorithmExplicitlySet = hashAlgorithmExplicitlySet;
         _fieldOptions = fieldOptions;
         _httpClient = httpClient;
-        _httpClientProvider = DefaultHttpClientProvider.Instance;
+        _tsaHttpClient = tsaHttpClient;
+        _httpClientProvider = httpClientProvider ?? DefaultHttpClientProvider.Instance;
         _logger = logger;
         _externalSigner = externalSigner;
         _signatureAlgorithmOid = signatureAlgorithmOid;
@@ -117,7 +121,19 @@ public sealed class SignerBuilder
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(tsaUrl);
         ArgumentNullException.ThrowIfNull(httpClient);
-        return With(tsaUrl: tsaUrl, httpClient: httpClient);
+        return With(tsaUrl: tsaUrl, tsaHttpClient: httpClient);
+    }
+
+    /// <summary>
+    /// Sets the default <see cref="HttpClient"/> for all outbound HTTP operations
+    /// (OCSP, CRL, AIA, and TSA when no TSA-specific client is configured via
+    /// <see cref="WithTimestamp(string, HttpClient)"/>).
+    /// </summary>
+    /// <param name="httpClient">The <see cref="HttpClient"/> to use.</param>
+    public SignerBuilder WithHttpClient(HttpClient httpClient)
+    {
+        ArgumentNullException.ThrowIfNull(httpClient);
+        return With(httpClient: httpClient);
     }
 
     /// <summary>
@@ -127,12 +143,7 @@ public sealed class SignerBuilder
     public SignerBuilder WithHttpClientProvider(IHttpClientProvider provider)
     {
         ArgumentNullException.ThrowIfNull(provider);
-        var clone = With();
-        return new(
-            _inputPdf, _certificate, _chain, _tsaUrl, _hashAlgorithm,
-            _hashAlgorithmExplicitlySet, _fieldOptions, provider.GetClient(), _logger, _externalSigner,
-            _signatureAlgorithmOid, _enableLtv, _archivalTsaUrl, _operationId,
-            _enforcePdfA, _metadata, _padesAttributes);
+        return With(httpClientProvider: provider);
     }
 
     /// <summary>Sets the hash algorithm. Default: SHA-256 (recommended by ICP-Brasil).</summary>
@@ -217,7 +228,8 @@ public sealed class SignerBuilder
             _inputPdf, _certificate, _chain, _tsaUrl, _hashAlgorithm,
             _hashAlgorithmExplicitlySet, updatedOptions, _httpClient, _logger, _externalSigner,
             _signatureAlgorithmOid, _enableLtv, _archivalTsaUrl, _operationId, _enforcePdfA,
-            metadata: metadata, padesAttributes: _padesAttributes);
+            metadata: metadata, padesAttributes: _padesAttributes,
+            tsaHttpClient: _tsaHttpClient, httpClientProvider: _httpClientProvider);
     }
 
     /// <summary>Sets visible metadata on the signature.</summary>
@@ -359,7 +371,8 @@ public sealed class SignerBuilder
             _inputPdf, _certificate, _chain, _tsaUrl, _hashAlgorithm,
             _hashAlgorithmExplicitlySet, _fieldOptions, _httpClient, _logger, _externalSigner,
             _signatureAlgorithmOid, _enableLtv, _archivalTsaUrl, operationId, _enforcePdfA,
-            _metadata, _padesAttributes);
+            _metadata, _padesAttributes,
+            tsaHttpClient: _tsaHttpClient, httpClientProvider: _httpClientProvider);
     }
 
     /// <summary>
@@ -373,7 +386,8 @@ public sealed class SignerBuilder
             _inputPdf, _certificate, _chain, _tsaUrl, _hashAlgorithm,
             _hashAlgorithmExplicitlySet, _fieldOptions, _httpClient, _logger, _externalSigner,
             _signatureAlgorithmOid, _enableLtv, _archivalTsaUrl, _operationId, enforcePdfA: true,
-            metadata: _metadata, padesAttributes: _padesAttributes);
+            metadata: _metadata, padesAttributes: _padesAttributes,
+            tsaHttpClient: _tsaHttpClient, httpClientProvider: _httpClientProvider);
     }
 
     #endregion
@@ -520,11 +534,12 @@ public sealed class SignerBuilder
 
         // 4. Applies timestamp, if configured
         byte[]? timestampTokenBytes = null;
+        // TSA client: prefer TSA-specific client, fall back to default client, then provider.
+        HttpClient tsaHttpClient = _tsaHttpClient ?? _httpClient ?? _httpClientProvider.GetClient();
         if (_tsaUrl is not null)
         {
             _logger.TimestampRequested(opId, _tsaUrl);
-            var httpClient = _httpClient ?? _httpClientProvider.GetClient();
-            var tsaClient = new TimestampClient(httpClient, _tsaUrl, _logger);
+            var tsaClient = new TimestampClient(tsaHttpClient, _tsaUrl, _logger);
             timestampTokenBytes = await tsaClient.GetTimestampAsync(
                 TimestampClient.ExtractSignatureValue(cms), effectiveHash, cancellationToken).ConfigureAwait(false);
             cms = TimestampClient.EmbedTimestampInCms(cms, timestampTokenBytes);
@@ -569,7 +584,7 @@ public sealed class SignerBuilder
             {
                 _logger.ArchivalTimestampAppending(opId, _archivalTsaUrl);
                 ltvPdf = await DocTimeStampWriter.AppendDocTimeStampAsync(
-                    ltvPdf, _archivalTsaUrl, httpClient, effectiveHash, cancellationToken).ConfigureAwait(false);
+                    ltvPdf, _archivalTsaUrl, tsaHttpClient, effectiveHash, cancellationToken).ConfigureAwait(false);
                 _logger.ArchivalTimestampComplete(opId);
             }
             else
@@ -661,7 +676,8 @@ public sealed class SignerBuilder
             _inputPdf, _certificate, _chain, _tsaUrl, _hashAlgorithm,
             _hashAlgorithmExplicitlySet, legacyOptions, _httpClient, _logger, _externalSigner,
             _signatureAlgorithmOid, _enableLtv, _archivalTsaUrl, _operationId, _enforcePdfA,
-            _metadata, padesAttributes: false);
+            _metadata, padesAttributes: false,
+            tsaHttpClient: _tsaHttpClient, httpClientProvider: _httpClientProvider);
     }
 
     /// <summary>
@@ -694,7 +710,8 @@ public sealed class SignerBuilder
             _inputPdf, _certificate, _chain, _tsaUrl, _hashAlgorithm,
             _hashAlgorithmExplicitlySet, newOptions, _httpClient, _logger, _externalSigner,
             _signatureAlgorithmOid, _enableLtv, _archivalTsaUrl, _operationId, _enforcePdfA,
-            _metadata, _padesAttributes);
+            _metadata, _padesAttributes,
+            tsaHttpClient: _tsaHttpClient, httpClientProvider: _httpClientProvider);
     }
 
     /// <summary>
@@ -715,7 +732,8 @@ public sealed class SignerBuilder
             _inputPdf, _certificate, _chain, _tsaUrl, _hashAlgorithm,
             _hashAlgorithmExplicitlySet, _fieldOptions, _httpClient, _logger, _externalSigner,
             _signatureAlgorithmOid, enableLtv: true, archivalTsaUrl: _archivalTsaUrl, operationId: _operationId,
-            metadata: _metadata, padesAttributes: _padesAttributes);
+            metadata: _metadata, padesAttributes: _padesAttributes,
+            tsaHttpClient: _tsaHttpClient, httpClientProvider: _httpClientProvider);
     }
 
     /// <summary>
@@ -737,7 +755,8 @@ public sealed class SignerBuilder
             _inputPdf, _certificate, _chain, _tsaUrl, _hashAlgorithm,
             _hashAlgorithmExplicitlySet, _fieldOptions, _httpClient, _logger, _externalSigner,
             _signatureAlgorithmOid, enableLtv: true, archivalTsaUrl: tsaUrl ?? _tsaUrl, operationId: _operationId,
-            metadata: _metadata, padesAttributes: _padesAttributes);
+            metadata: _metadata, padesAttributes: _padesAttributes,
+            tsaHttpClient: _tsaHttpClient, httpClientProvider: _httpClientProvider);
     }
 
     private SignerBuilder With(
@@ -748,6 +767,8 @@ public sealed class SignerBuilder
         bool? hashAlgorithmExplicitlySet = null,
         SignatureFieldOptions? fieldOptions = null,
         HttpClient? httpClient = null,
+        HttpClient? tsaHttpClient = null,
+        IHttpClientProvider? httpClientProvider = null,
         Func<byte[], Task<byte[]>>? externalSigner = null,
         string? signatureAlgorithmOid = null) =>
         new(
@@ -767,7 +788,9 @@ public sealed class SignerBuilder
             _operationId,
             _enforcePdfA,
             _metadata,
-            _padesAttributes);
+            _padesAttributes,
+            tsaHttpClient: tsaHttpClient ?? _tsaHttpClient,
+            httpClientProvider: httpClientProvider ?? _httpClientProvider);
 
     private static string DetectSignatureAlgorithmOid(X509Certificate2 cert, HashAlgorithmName hashAlg)
     {

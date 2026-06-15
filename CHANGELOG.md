@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **`HttpClientFactoryProvider`** — new `IHttpClientProvider` implementation backed by `IHttpClientFactory`, with named-client support via `SimpleSignOptions.HttpClientName`.
+- **`SignerBuilder.WithHttpClient(HttpClient)`** — new fluent API to set the default HTTP client for revocation (OCSP/CRL/AIA) and TSA fallback when no TSA-specific client is configured.
+
+### Changed
+
+- **`AddSimpleSign` DI integration** — when `IHttpClientFactory` is registered, `AddSimpleSign` now automatically wires `HttpClientFactoryProvider` and honors `SimpleSignOptions.HttpClientName`.
+- **`SignerBuilder.WithHttpClientProvider(...)`** — now stores the provider and resolves clients lazily at signing time, instead of eagerly resolving a single client at builder-configuration time.
+- **SignerBuilder HTTP client scoping** — TSA and revocation now support independent client slots. `WithTimestamp(tsaUrl, httpClient)` applies to TSA calls only, while revocation uses `WithHttpClient(...)` or provider/default fallback.
+
 ## [0.4.0] - 2026-06-11
 
 ### Added

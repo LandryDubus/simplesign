@@ -120,6 +120,94 @@ foreach (var r in results)
 }
 ```
 
+## Certificate Chain
+
+Pass the full intermediate chain explicitly when AIA is unavailable or you want to guarantee
+the chain is embedded without network fetches at signing time:
+
+```csharp
+var signed = await SimpleSigner
+    .Document(pdfBytes)
+    .WithCertificate(cert, [intermediateCert, rootCert])
+    .WithLtv()
+    .SignAsync();
+```
+
+## Signature Algorithm Override
+
+Force RSASSA-PSS on a plain `rsaEncryption` certificate:
+
+```csharp
+using SimpleSign.Core;
+
+var signed = await SimpleSigner
+    .Document(pdfBytes)
+    .WithCertificate(cert)
+    .WithSignatureAlgorithm(Oids.RsaPss)
+    .WithTimestamp("http://timestamp.digicert.com")
+    .SignAsync();
+```
+
+Compatibility is validated at signing time — an `ArgumentException` is thrown for incompatible
+combinations (e.g. PSS on an ECDSA key).
+
+## HTTP Client Management
+
+By default, SimpleSign creates its own `HttpClient`. In ASP.NET Core use the named-client
+pattern to let `IHttpClientFactory` manage the lifetime:
+
+```csharp
+// In Program.cs / Startup.cs:
+services.AddHttpClient("SimpleSign", client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(15);
+});
+services.AddSimpleSign(opts => opts.HttpClientName = "SimpleSign");
+// AddSimpleSign auto-detects IHttpClientFactory in the container.
+```
+
+For independent per-operation clients (e.g. bearer token on TSA only):
+
+```csharp
+services.AddHttpClient("SimpleSign.Tsa", client =>
+    client.DefaultRequestHeaders.Authorization =
+        new AuthenticationHeaderValue("Bearer", myToken));
+services.AddHttpClient("SimpleSign.Revocation");
+
+var tsaClient        = httpClientFactory.CreateClient("SimpleSign.Tsa");
+var revocationClient = httpClientFactory.CreateClient("SimpleSign.Revocation");
+
+var signed = await SimpleSigner
+    .Document(pdfBytes)
+    .WithCertificate(cert)
+    .WithTimestamp(tsaUrl, tsaClient)     // TSA calls only
+    .WithLtv()
+    .WithHttpClient(revocationClient)     // OCSP/CRL + TSA fallback
+    .SignAsync();
+```
+
+For a typed `PdfSignatureValidator` client:
+
+```csharp
+services.AddHttpClient<PdfSignatureValidator>(client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(10);
+});
+// Resolves PdfSignatureValidator with the managed HttpClient injected automatically.
+```
+
+If you have a custom `IHttpClientProvider`, use `WithHttpClientProvider` — the provider is
+called lazily at signing time, not at builder-construction time:
+
+```csharp
+var signed = await SimpleSigner
+    .Document(pdfBytes)
+    .WithCertificate(cert)
+    .WithTimestamp(tsaUrl)
+    .WithHttpClientProvider(myProvider)
+    .SignAsync();
+```
+
 ## Dependency Injection
 
 Register SimpleSign in your DI container:
@@ -129,7 +217,7 @@ using SimpleSign.PAdES;
 
 services.AddSimpleSign(options =>
 {
-    options.DefaultTsaUrl = "http://timestamp.digicert.com";
+    options.TsaUrl = "http://timestamp.digicert.com";
 });
 
 // For ICP-Brasil support

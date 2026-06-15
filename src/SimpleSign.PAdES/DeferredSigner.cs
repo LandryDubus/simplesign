@@ -52,10 +52,12 @@ public static class DeferredSigner
 
         options ??= new DeferredSigningOptions();
 
-        // Resolve the effective hash: explicit user choice wins; otherwise infer from the cert
-        // (PSS params for PSS certs, key size for RSA PKCS#1; default SHA-256 for ECDSA/EdDSA).
+        // Resolve the effective hash: explicit user choice wins; if an explicit signature OID
+        // was provided, infer hash from it (RS512 → SHA512, etc.); otherwise infer from the
+        // cert (PSS params for PSS certs, key size for RSA PKCS#1; default SHA-256 for ECDSA).
         HashAlgorithmName effectiveHash = AlgorithmInference.ResolveEffectiveHashAlgorithm(
-            certificate, options.HashAlgorithm, options.HashAlgorithmExplicitlySet);
+            certificate, options.HashAlgorithm, options.HashAlgorithmExplicitlySet,
+            options.SignatureAlgorithmOid);
 
         (logger ?? NullLogger.Instance).DeferredPrepareStarted(certificate.Subject, effectiveHash.Name!);
 

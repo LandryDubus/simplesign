@@ -42,6 +42,17 @@ jobs:
       - name: Build
         run: dotnet build --no-restore --configuration Release
 
+      - name: Check for vulnerable packages
+        continue-on-error: true
+        run: dotnet list package --vulnerable --include-transitive 2>&1 | tee vulnerability-report.txt
+
+      - name: Upload vulnerability report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: vulnerability-report-${{ matrix.os }}
+          path: vulnerability-report.txt
+
       - name: Test
         if: matrix.os != 'ubuntu-latest'
         shell: bash
@@ -231,4 +242,35 @@ jobs:
 
       - name: Run AOT smoke test
         run: ./tests/smoke/SimpleSign.AotSmokeTest/bin/Release/net10.0/linux-x64/publish/SimpleSign.AotSmokeTest
+
+  hostsigner-tests:
+    name: HostSigner Tests
+    runs-on: windows-latest
+    needs: build-and-test
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: |
+            8.0.x
+            10.0.x
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v5
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj', '**/Directory.Build.props') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-
+
+      - name: Restore
+        run: dotnet restore
+
+      - name: Build HostSigner tests
+        run: dotnet build tests/unit/SimpleSign.HostSigner.Tests --no-restore --configuration Release
+
+      - name: Test HostSigner
+        run: dotnet test tests/unit/SimpleSign.HostSigner.Tests --no-build --configuration Release --logger "console;verbosity=normal"
 

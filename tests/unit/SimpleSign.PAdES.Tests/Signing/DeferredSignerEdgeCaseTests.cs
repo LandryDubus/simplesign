@@ -231,7 +231,7 @@ public sealed class DeferredSignerEdgeCaseTests
         var cert = req.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddYears(1));
         // Round-trip through PFX so the private key persists across handles.
         // CertificateLoader works on both net8.0 and net10.0 (X509CertificateLoader is net9+ only).
-        return SimpleSign.Core.Crypto.CertificateLoader.LoadPkcs12(
+        return Core.Crypto.CertificateLoader.LoadPkcs12(
             cert.Export(X509ContentType.Pfx, "test"), "test");
     }
 

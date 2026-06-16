@@ -5,7 +5,7 @@
     <RootNamespace>SimpleSign.Core</RootNamespace>
     <PackageId>SimpleSign.Core</PackageId>
     <Description>Core cryptographic primitives, certificate management, timestamping, and revocation checking for the SimpleSign digital signature framework.</Description>
-    <Version>0.4.0</Version>
+    <Version>0.5.0</Version>
     <IsAotCompatible Condition="$([MSBuild]::IsTargetFrameworkCompatible('$(TargetFramework)', 'net9.0'))">true</IsAotCompatible>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
   </PropertyGroup>
@@ -21,15 +21,18 @@
     <InternalsVisibleTo Include="SimpleSign.Brasil.Tests" />
     <InternalsVisibleTo Include="simplesign" />
     <InternalsVisibleTo Include="SimpleSign.Fuzz" />
+    <InternalsVisibleTo Include="SimpleSign.CAdES" />
   </ItemGroup>
 
   <ItemGroup Condition="$([MSBuild]::IsTargetFrameworkCompatible('$(TargetFramework)', 'net10.0'))">
     <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.*" />
+    <PackageReference Include="Microsoft.Extensions.Http" Version="10.*" />
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.*" />
   </ItemGroup>
 
   <ItemGroup Condition="!$([MSBuild]::IsTargetFrameworkCompatible('$(TargetFramework)', 'net10.0'))">
     <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.8" />
+    <PackageReference Include="Microsoft.Extensions.Http" Version="10.0.8" />
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.8" />
   </ItemGroup>
 

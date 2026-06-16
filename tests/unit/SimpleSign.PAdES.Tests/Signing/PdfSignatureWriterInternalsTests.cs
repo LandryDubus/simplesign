@@ -163,9 +163,9 @@ public sealed class PdfSignatureWriterInternalsTests
         compressedData[0].ShouldBe((byte)0x78);
 
         // Decompress and verify entries (4 objects × 6 bytes each = 24 bytes)
-        using var ms = new System.IO.MemoryStream(compressedData);
+        using var ms = new MemoryStream(compressedData);
         using var zlib = new System.IO.Compression.ZLibStream(ms, System.IO.Compression.CompressionMode.Decompress);
-        using var output = new System.IO.MemoryStream();
+        using var output = new MemoryStream();
         zlib.CopyTo(output);
         byte[] rawEntries = output.ToArray();
         rawEntries.Count().ShouldBe(24); // 4 entries × 6 bytes (includes self-entry)

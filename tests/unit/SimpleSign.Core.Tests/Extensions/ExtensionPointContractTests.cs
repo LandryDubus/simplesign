@@ -104,55 +104,6 @@ public sealed class ChainValidationProviderContractTests
 }
 
 [Trait("Category", "Contract")]
-public sealed class SignatureManifestProviderContractTests
-{
-    private sealed class StubManifestProvider : ISignatureManifestProvider
-    {
-        public string ManifestOid => "1.2.3.4.5";
-
-        public byte[] BuildManifest(SignerContext context) =>
-            [0x30, 0x0A, 0x01];
-
-        public object? ParseManifest(ReadOnlySpan<byte> data) =>
-            data.Length > 2 ? new { Oid = ManifestOid } : null;
-    }
-
-    [Fact(DisplayName = "ISignatureManifestProvider: BuildManifest returns valid bytes")]
-    public void BuildManifest_ReturnsValidBytes()
-    {
-        var context = new SignerContext
-        {
-            SignerName = "Test User",
-            SignerId = "12345678900",
-            SignerIdType = "CPF",
-        };
-
-        var provider = new StubManifestProvider();
-
-        provider.ManifestOid.ShouldNotBeNullOrEmpty();
-        provider.BuildManifest(context).ShouldNotBeEmpty();
-    }
-
-    [Fact(DisplayName = "ISignatureManifestProvider: ParseManifest with valid data returns object")]
-    public void ParseManifest_ValidData_ReturnsObject()
-    {
-        var provider = new StubManifestProvider();
-        var data = new byte[] { 0x30, 0x0A, 0x01, 0x02 };
-
-        provider.ParseManifest(data).ShouldNotBeNull();
-    }
-
-    [Fact(DisplayName = "ISignatureManifestProvider: ParseManifest with invalid data returns null")]
-    public void ParseManifest_InvalidData_ReturnsNull()
-    {
-        var provider = new StubManifestProvider();
-        var data = new byte[] { 0xFF, 0xFF };
-
-        provider.ParseManifest(data).ShouldBeNull();
-    }
-}
-
-[Trait("Category", "Contract")]
 public sealed class CountryExtensionContractTests
 {
     [Fact(DisplayName = "ICountryExtension: Composite wires providers together")]
@@ -168,14 +119,10 @@ public sealed class CountryExtensionContractTests
         var chainValidator = new Mock<IChainValidationProvider>();
         chainValidator.Setup(x => x.RegionCode).Returns("TS");
 
-        var manifest = new Mock<ISignatureManifestProvider>();
-        manifest.Setup(x => x.ManifestOid).Returns("1.2.3.4");
-
         var extension = new Mock<ICountryExtension>();
         extension.Setup(x => x.RegionCode).Returns("TS");
         extension.Setup(x => x.DisplayName).Returns("Test Country");
         extension.Setup(x => x.TrustAnchorProviders).Returns(new List<ITrustAnchorProvider> { trustAnchor.Object });
-        extension.Setup(x => x.ManifestProvider).Returns(manifest.Object);
         extension.Setup(x => x.ChainValidationProviders).Returns(new List<IChainValidationProvider> { chainValidator.Object });
 
         var ext = extension.Object;
@@ -184,7 +131,6 @@ public sealed class CountryExtensionContractTests
         ext.DisplayName.ShouldBe("Test Country");
         ext.TrustAnchorProviders.Count().ShouldBe(1);
         ext.ChainValidationProviders.Count().ShouldBe(1);
-        ext.ManifestProvider.ShouldNotBeNull();
         ext.TrustAnchorProviders[0].GetTrustAnchors().ShouldNotBeEmpty();
     }
 }

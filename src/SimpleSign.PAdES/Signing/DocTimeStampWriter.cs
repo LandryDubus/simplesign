@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using SimpleSign.Core.Crypto;
 using SimpleSign.Pdf;
+using SimpleSign.Pdf.Enums;
 
 namespace SimpleSign.PAdES.Signing;
 
@@ -28,6 +29,7 @@ public static class DocTimeStampWriter
     /// <param name="tsaUrl">The TSA (Timestamp Authority) URL.</param>
     /// <param name="httpClient">HttpClient for TSA communication.</param>
     /// <param name="hashAlgorithm">Hash algorithm (default: SHA-256).</param>
+    /// <param name="pdfALevel">Detected PDF/A level for annotation flag selection.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The PDF bytes with the DocTimeStamp appended.</returns>
     public static async Task<byte[]> AppendDocTimeStampAsync(
@@ -35,6 +37,7 @@ public static class DocTimeStampWriter
         string tsaUrl,
         HttpClient httpClient,
         HashAlgorithmName? hashAlgorithm = null,
+        PdfALevel? pdfALevel = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(signedPdf);
@@ -85,7 +88,8 @@ public static class DocTimeStampWriter
         {
             fieldDict.Append($"   /P {pageObjNum} 0 R\n");
         }
-        fieldDict.Append("   /F 132\n");
+        bool isPdfA1 = pdfALevel is PdfALevel.A1a or PdfALevel.A1b;
+        fieldDict.Append(isPdfA1 ? "   /F 4\n" : "   /F 132\n");
         fieldDict.Append("   /Rect [0 0 0 0]\n");
         fieldDict.Append(">>\nendobj\n");
 

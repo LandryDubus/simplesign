@@ -16,15 +16,6 @@ public sealed class BrasilExtensionContractTests
         extension.TrustAnchorProviders[0].GetTrustAnchors().ShouldNotBeEmpty();
     }
 
-    [Fact(DisplayName = "BrasilExtension.ManifestProvider is not null")]
-    public void ManifestProvider_IsNotNull()
-    {
-        var extension = new BrasilExtension();
-
-        extension.ManifestProvider.ShouldNotBeNull();
-        extension.ManifestProvider!.ManifestOid.ShouldNotBeNullOrEmpty();
-    }
-
     [Fact(DisplayName = "BrasilExtension.ChainValidationProviders returns non-empty list")]
     public void ChainValidationProviders_ReturnsNonEmptyList()
     {

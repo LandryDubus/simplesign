@@ -39,7 +39,7 @@ using SimpleSign.Brasil.Extensions;  // IcpBrasilValidationResult extensions
 using SimpleSign.PAdES;
 using System.Security.Cryptography.X509Certificates;
 
-var cert = new X509Certificate2("cert.pfx", "password");
+var cert = X509CertificateLoader.LoadPkcs12FromFile("cert.pfx", "password");
 var pdf = File.ReadAllBytes("document.pdf");
 
 byte[] signedPdf = await SimpleSigner
@@ -56,8 +56,6 @@ File.WriteAllBytes("signed.pdf", signedPdf);
 byte[] signedPdf = await SimpleSigner
     .Document(pdf)
     .WithCertificate(cert)
-    // Conformance level (default: B-B)
-    .WithLevel(PAdESLevel.B_LTA)          // B-B | B-T | B-LT | B-LTA
     // Timestamp authority
     .WithTimestamp("http://timestamp.digicert.com")
     // Long-term validation (embeds OCSP + CRL)
@@ -170,8 +168,7 @@ var validator = new PdfSignatureValidator(new ValidationOptions
 {
     CheckRevocation = true,          // OCSP + CRL
     TrustSystemRoots = true,         // Use OS certificate store
-    AllowExpiredSigningCert = false,  // Reject expired certs
-    RequireTimestamp = false,         // Don't require TSA timestamp
+    NetworkTimeout = TimeSpan.FromSeconds(15),
 });
 
 var results = await validator.ValidateAsync(File.OpenRead("signed.pdf"));
@@ -185,7 +182,7 @@ foreach (var r in results)
     Console.WriteLine($"  Timestamp: {r.HasValidTimestamp}");
     Console.WriteLine($"  Signer: {r.SignerName}");
     Console.WriteLine($"  Time: {r.SigningTime}");
-    Console.WriteLine($"  Level: {r.ConformanceLevel}");  // B-B, B-T, etc.
+    Console.WriteLine($"  Algorithm: {r.DigestAlgorithmName}");
 }
 ```
 
@@ -194,7 +191,7 @@ foreach (var r in results)
 ```csharp
 var validator = new PdfSignatureValidator(new ValidationOptions
 {
-    TrustAnchors = new[] { rootCaCert, intermediateCaCert },
+    TrustedRoots = new[] { rootCaCert, intermediateCaCert },
     CheckRevocation = true,
 });
 ```
@@ -362,7 +359,7 @@ app.MapPost("/sign", async (IFormFile file, [FromServices] X509Certificate2 cert
 builder.Services.AddSingleton(sp =>
 {
     var config = sp.GetRequiredService<IConfiguration>();
-    return new X509Certificate2(config["Cert:Path"]!, config["Cert:Password"]!);
+    return X509CertificateLoader.LoadPkcs12FromFile(config["Cert:Path"]!, config["Cert:Password"]!);
 });
 
 // Register validator

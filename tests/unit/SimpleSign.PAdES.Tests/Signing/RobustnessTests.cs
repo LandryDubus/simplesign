@@ -8,7 +8,7 @@ using SimpleSign.PAdES.Signing;
 using SimpleSign.PAdES.Validation;
 using SimpleSign.Pdf;
 using Xunit;
-namespace SimpleSign.PAdES.Tests;
+namespace SimpleSign.PAdES.Tests.Signing;
 
 /// <summary>
 /// Robustness and stress tests: reentrancy, CMS edge cases,

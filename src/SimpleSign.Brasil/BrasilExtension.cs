@@ -42,9 +42,6 @@ public sealed class BrasilExtension : ICountryExtension
     public IReadOnlyList<ITrustAnchorProvider> TrustAnchorProviders => _trustAnchors.Value;
 
     /// <inheritdoc />
-    public ISignatureManifestProvider? ManifestProvider => BrasilManifestProvider.Instance;
-
-    /// <inheritdoc />
     public IReadOnlyList<IChainValidationProvider> ChainValidationProviders => _chainValidators.Value;
 }
 
@@ -132,37 +129,4 @@ internal sealed class GovBrChainValidationProvider : IChainValidationProvider
             Errors = result.Errors,
         };
     }
-}
-
-// ─── Manifest provider ──────────────────────────────────────────────────────
-
-internal sealed class BrasilManifestProvider : ISignatureManifestProvider
-{
-    public static readonly BrasilManifestProvider Instance = new();
-
-    /// <summary>OID for the Lei 14.063 signature manifest.</summary>
-    public string ManifestOid => "2.16.76.1.12.1.1";
-
-    public byte[] BuildManifest(SignerContext context)
-    {
-        ArgumentNullException.ThrowIfNull(context);
-
-        var info = new Signing.AdvancedSignatureInfo
-        {
-            SignerName = context.SignerName,
-            Cpf = context.SignerId ?? throw new ArgumentException("SignerId (CPF) is required for Brasil manifest.", nameof(context)),
-            Email = context.Email,
-            IpAddress = context.IpAddress,
-            AuthMethod = Enum.TryParse<Signing.AuthenticationMethod>(context.AuthenticationMethod, true, out var am)
-                ? am
-                : Signing.AuthenticationMethod.InstitutionalLogin,
-            InstitutionName = context.InstitutionName,
-            InstitutionCnpj = context.InstitutionId,
-        };
-
-        var manifest = Signing.SignatureManifest.FromInfo(info);
-        return manifest.ToJsonUtf8();
-    }
-
-    public object? ParseManifest(ReadOnlySpan<byte> data) => Signing.SignatureManifest.FromJsonUtf8(data);
 }

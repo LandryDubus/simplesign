@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
@@ -91,60 +92,69 @@ public sealed class LtvEmbedder
             }
         }
 
-        // Iterative stabilisation loop: process certificates until no new ones are discovered
-        var processedThumbprints = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        // Iterative stabilisation loop: process certificates in parallel until no new ones are discovered.
+        // Each iteration snapshots the current cert list for issuer lookups and runs all
+        // OCSP/CRL/AIA fetches concurrently. Newly discovered certs are merged after the
+        // iteration completes so reads within the iteration are lock-free.
+        var processedThumbprints = new ConcurrentDictionary<string, byte>(StringComparer.OrdinalIgnoreCase);
         var workingSet = new Queue<X509Certificate2>(allCerts);
+        var parallelOptions = new ParallelOptions
+        {
+            MaxDegreeOfParallelism = Environment.ProcessorCount * 2,
+            CancellationToken = cancellationToken,
+        };
         int iteration = 0;
 
         while (workingSet.Count > 0 && iteration < MaxIterations)
         {
             iteration++;
-            var nextRound = new List<X509Certificate2>();
 
+            var allCertsSnapshot = allCerts.ToList();
+
+            var certs = new List<X509Certificate2>(workingSet.Count);
             while (workingSet.Count > 0)
             {
-                var cert = workingSet.Dequeue();
+                certs.Add(workingSet.Dequeue());
+            }
 
-                if (!processedThumbprints.Add(cert.Thumbprint))
+            var ocspBag = new ConcurrentBag<byte[]>();
+            var crlBag = new ConcurrentBag<byte[]>();
+            var nextRoundCerts = new ConcurrentDictionary<string, X509Certificate2>(StringComparer.OrdinalIgnoreCase);
+
+            await Parallel.ForEachAsync(certs, parallelOptions, async (cert, ct) =>
+            {
+                if (!processedThumbprints.TryAdd(cert.Thumbprint, 0))
                 {
-                    continue; // Already processed
+                    return;
                 }
 
-                // Check for id-pkix-ocsp-nocheck — skip revocation check for this cert
                 if (HasOcspNoCheckExtension(cert))
                 {
                     _logger.LtvProcessingCert($"{cert.Subject} (OcspNoCheck — skipping revocation)");
-                    continue;
+                    return;
                 }
 
                 _logger.LtvProcessingCert(cert.Subject);
 
-                // Try OCSP first (smaller, faster, more current)
                 var ocspUrl = OcspClient.GetOcspUrl(cert);
                 if (ocspUrl is not null)
                 {
                     try
                     {
-                        var issuerCert = allCerts.FirstOrDefault(c => c.SubjectName.RawData.AsSpan().SequenceEqual(cert.IssuerName.RawData));
-                        var ocspResult = await ocspClient.FetchOcspResponseAsync(cert, issuerCert, ocspUrl, cancellationToken).ConfigureAwait(false);
-                        ocspData.Add(ocspResult.ResponseBytes);
+                        var issuerCert = allCertsSnapshot.FirstOrDefault(c => c.SubjectName.RawData.AsSpan().SequenceEqual(cert.IssuerName.RawData));
+                        var ocspResult = await ocspClient.FetchOcspResponseAsync(cert, issuerCert, ocspUrl, ct).ConfigureAwait(false);
+                        ocspBag.Add(ocspResult.ResponseBytes);
 
-                        // Queue responder certificates for next round
                         foreach (var respCert in ocspResult.ResponderCertificates)
                         {
-                            if (!processedThumbprints.Contains(respCert.Thumbprint) &&
-                                !allCerts.Any(c => c.Thumbprint.Equals(respCert.Thumbprint, StringComparison.OrdinalIgnoreCase)))
-                            {
-                                allCerts.Add(respCert);
-                                nextRound.Add(respCert);
-                            }
-                            else
+                            if (processedThumbprints.ContainsKey(respCert.Thumbprint) ||
+                                !nextRoundCerts.TryAdd(respCert.Thumbprint, respCert))
                             {
                                 respCert.Dispose();
                             }
                         }
 
-                        continue; // OCSP succeeded, skip CRL for this cert
+                        return;
                     }
                     catch (Exception ex) when (ex is HttpRequestException or InvalidOperationException or InvalidDataException)
                     {
@@ -152,40 +162,36 @@ public sealed class LtvEmbedder
                     }
                 }
 
-                // Fallback to CRL
                 var crlUrl = CrlClient.GetCrlUrl(cert, _logger);
                 if (crlUrl is not null)
                 {
                     try
                     {
-                        var crl = await ResilientHttp.GetBytesAsync(_httpClient, crlUrl, logger: _logger, ct: cancellationToken).ConfigureAwait(false);
+                        var crl = await ResilientHttp.GetBytesAsync(_httpClient, crlUrl, logger: _logger, ct: ct).ConfigureAwait(false);
                         if (crl is not null)
                         {
-                            crlData.Add(crl);
+                            crlBag.Add(crl);
 
-                            // Chase CRL issuer certificate if it differs from the cert's issuer (indirect CRL)
                             var crlIssuerDn = CrlClient.ExtractCrlIssuerDn(crl, _logger);
                             if (crlIssuerDn is not null)
                             {
-                                // Check if any cert in the working set has this DN as subject
-                                bool crlIssuerFound = allCerts.Any(c =>
+                                bool crlIssuerFound = allCertsSnapshot.Any(c =>
                                     c.SubjectName.RawData.AsSpan().SequenceEqual(crlIssuerDn));
 
                                 if (!crlIssuerFound)
                                 {
-                                    // Try to fetch the CRL issuer cert via AIA caIssuers
-                                    var crlIssuerCert = await TryFetchCrlIssuerCertAsync(crlIssuerDn, cert, cancellationToken).ConfigureAwait(false);
-                                    if (crlIssuerCert is not null &&
-                                        !processedThumbprints.Contains(crlIssuerCert.Thumbprint) &&
-                                        !allCerts.Any(c => c.Thumbprint.Equals(crlIssuerCert.Thumbprint, StringComparison.OrdinalIgnoreCase)))
+                                    var crlIssuerCert = await TryFetchCrlIssuerCertAsync(crlIssuerDn, cert, ct).ConfigureAwait(false);
+                                    if (crlIssuerCert is not null)
                                     {
-                                        allCerts.Add(crlIssuerCert);
-                                        nextRound.Add(crlIssuerCert);
-                                        _logger.LtvProcessingCert($"CRL issuer discovered: {crlIssuerCert.Subject}");
-                                    }
-                                    else
-                                    {
-                                        crlIssuerCert?.Dispose();
+                                        if (processedThumbprints.ContainsKey(crlIssuerCert.Thumbprint) ||
+                                            !nextRoundCerts.TryAdd(crlIssuerCert.Thumbprint, crlIssuerCert))
+                                        {
+                                            crlIssuerCert.Dispose();
+                                        }
+                                        else
+                                        {
+                                            _logger.LtvProcessingCert($"CRL issuer discovered: {crlIssuerCert.Subject}");
+                                        }
                                     }
                                 }
                             }
@@ -196,12 +202,31 @@ public sealed class LtvEmbedder
                         _logger.CrlDownloadFailed(ex.Message);
                     }
                 }
+            });
+
+            foreach (var ocsp in ocspBag)
+            {
+                ocspData.Add(ocsp);
             }
 
-            // Enqueue newly discovered certificates for next iteration
-            foreach (var cert in nextRound)
+            foreach (var crl in crlBag)
             {
-                workingSet.Enqueue(cert);
+                crlData.Add(crl);
+            }
+
+            var allCertsThumbprints = new HashSet<string>(allCerts.Count + nextRoundCerts.Count, StringComparer.OrdinalIgnoreCase);
+            foreach (var c in allCerts)
+            {
+                allCertsThumbprints.Add(c.Thumbprint);
+            }
+
+            foreach (var (thumbprint, cert) in nextRoundCerts)
+            {
+                if (allCertsThumbprints.Add(thumbprint))
+                {
+                    allCerts.Add(cert);
+                    workingSet.Enqueue(cert);
+                }
             }
         }
 
@@ -227,8 +252,8 @@ public sealed class LtvEmbedder
 
         _logger.LtvDataCollected(crlData.Count, ocspData.Count, allCerts.Count);
 
-        // Extract signature /Contents hashes for VRI
-        var signatureHashes = ExtractSignatureContentHashes(signedPdf);
+        // Extract signature /Contents hashes for VRI (SHA-1 as PAdES key, SHA-256 for collision resilience)
+        var signatureHashPairs = ExtractSignatureContentHashPairs(signedPdf);
 
         if (crlData is [] && ocspData is [])
         {
@@ -237,7 +262,7 @@ public sealed class LtvEmbedder
             // actual signatures to key VRI entries against (e.g. self-signed cert scenario).
             // Without signatures there is nothing to reference; return early and preserve
             // the EOL invariant the same way the "no data at all" path does.
-            if (signatureHashes.Count == 0)
+            if (signatureHashPairs.Count == 0)
             {
                 if (signedPdf.Length > 0 && signedPdf[^1] != (byte)'\n' && signedPdf[^1] != (byte)'\r')
                 {
@@ -254,7 +279,7 @@ public sealed class LtvEmbedder
         // Parse existing DSS for merge (multi-signature support)
         var existingDss = Validation.DssExtractor.ParseExistingDss(signedPdf);
 
-        return AppendDssDictionary(signedPdf, crlData, ocspData, allCerts, signatureHashes, existingDss, timestampTokenBytes);
+        return AppendDssDictionary(signedPdf, crlData, ocspData, allCerts, signatureHashPairs, existingDss, timestampTokenBytes);
     }
 
     /// <summary>
@@ -268,6 +293,20 @@ public sealed class LtvEmbedder
     internal static List<string> ExtractSignatureContentHashes(byte[] pdf)
     {
         var hashes = new List<string>();
+        foreach (var (sha1, _) in ExtractSignatureContentHashPairs(pdf))
+        {
+            hashes.Add(sha1);
+        }
+        return hashes;
+    }
+
+    /// <summary>
+    /// Computes both SHA-1 and SHA-256 hashes of each signature's /Contents for VRI keys.
+    /// SHA-1 is the PAdES-mandated VRI key; SHA-256 provides collision-resilient cross-reference.
+    /// </summary>
+    internal static List<(string Sha1, string Sha256)> ExtractSignatureContentHashPairs(byte[] pdf)
+    {
+        var pairs = new List<(string, string)>();
         var span = pdf.AsSpan();
         ReadOnlySpan<byte> contentsToken = "/Contents <"u8;
         int searchPos = 0;
@@ -283,7 +322,6 @@ public sealed class LtvEmbedder
             matchPos += searchPos;
             int hexStart = matchPos + contentsToken.Length;
 
-            // Find closing '>'
             int hexEnd = span[hexStart..].IndexOf((byte)'>');
             if (hexEnd < 0)
             {
@@ -292,7 +330,6 @@ public sealed class LtvEmbedder
 
             hexEnd += hexStart;
 
-            // Check this looks like a signature /Contents (long hex string, >1000 chars)
             int hexLen = hexEnd - hexStart;
             if (hexLen > 1000)
             {
@@ -301,7 +338,6 @@ public sealed class LtvEmbedder
                 try
                 {
                     string hexString = System.Text.Encoding.Latin1.GetString(span.Slice(hexStart, hexLen));
-                    // Pad with leading zero if odd length (hex encoding requires even length)
                     if (hexString.Length % 2 != 0)
                     {
                         hexString = "0" + hexString;
@@ -311,21 +347,21 @@ public sealed class LtvEmbedder
                     {
                         byte[] sigBytes = Convert.FromHexString(hexString);
 #pragma warning disable CA5350 // VRI key is defined as SHA-1 by PAdES spec
-                        byte[] hash = SHA1.HashData(sigBytes);
+                        byte[] sha1 = SHA1.HashData(sigBytes);
 #pragma warning restore CA5350
-                        hashes.Add(Convert.ToHexString(hash));
+                        byte[] sha256 = SHA256.HashData(sigBytes);
+                        pairs.Add((Convert.ToHexString(sha1), Convert.ToHexString(sha256)));
                     }
                 }
                 catch (FormatException)
                 {
-                    // Not valid hex — skip
                 }
             }
 
             searchPos = hexEnd + 1;
         }
 
-        return hashes;
+        return pairs;
     }
 
     private static byte[] AppendDssDictionary(
@@ -333,7 +369,7 @@ public sealed class LtvEmbedder
         List<byte[]> crls,
         List<byte[]> ocsps,
         IReadOnlyList<X509Certificate2> certs,
-        List<string> signatureHashes,
+        List<(string Sha1, string Sha256)> signatureHashPairs,
         ExistingDssData existingDss,
         byte[]? timestampTokenBytes = null)
     {
@@ -408,7 +444,7 @@ public sealed class LtvEmbedder
 
         // Build VRI dictionaries (one per signature)
         var vriEntries = new List<(string Hash, int ObjNum)>();
-        foreach (var sigHash in signatureHashes)
+        foreach (var (sha1Hash, sha256Hash) in signatureHashPairs)
         {
             int vriObjNum = nextObjNum++;
             long vriOffset = result.Position;
@@ -437,13 +473,15 @@ public sealed class LtvEmbedder
                 vriSb.Append($"   /TS {tsRef}\n");
             }
 
+            vriSb.Append($"   /SHA256 <{sha256Hash.ToLowerInvariant()}>\n");
+
             // ISO 32000-2 §12.8.4.4: /TU is the time at which the VRI was created
             vriSb.Append($"   /TU (D:{DateTime.UtcNow:yyyyMMddHHmmss}+00'00')\n");
 
             vriSb.Append(">>\nendobj\n");
             result.Write(System.Text.Encoding.Latin1.GetBytes(vriSb.ToString()));
 
-            vriEntries.Add((sigHash, vriObjNum));
+            vriEntries.Add((sha1Hash, vriObjNum));
         }
 
         // Write DSS dictionary — merge existing refs with new refs

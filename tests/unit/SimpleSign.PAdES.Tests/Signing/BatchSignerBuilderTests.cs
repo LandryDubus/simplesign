@@ -208,15 +208,15 @@ public sealed class BatchSignerBuilderTests
         signer.ShouldNotBeNull();
     }
 
-    [Fact(DisplayName = "Builder is mutable: chained calls return the same instance")]
-    public void Builder_IsMutable_ReturnsSameInstance()
+    [Fact(DisplayName = "Builder is immutable: chained calls return new instances")]
+    public void Builder_IsImmutable_ReturnsNewInstances()
     {
         using var cert = TestCertificateFactory.CreateSelfSignedCert();
         var b1 = BatchSigner.Create(cert);
         var b2 = b1.WithHashAlgorithm(HashAlgorithmName.SHA512);
         var b3 = b2.WithMaxConcurrency(2);
-        b1.ShouldBeSameAs(b2);
-        b2.ShouldBeSameAs(b3);
+        b1.ShouldNotBeSameAs(b2);
+        b2.ShouldNotBeSameAs(b3);
     }
 
     // ── BatchSignResult.IsSuccess branches ───────────────────────────────────

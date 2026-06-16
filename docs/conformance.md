@@ -62,6 +62,10 @@ SimpleSign is designed with PDF 2.0 alignment in mind. The digital signature sub
 | **RFC 5652** | CMS SignedData | ✅ | Full compliance (§5.1–5.6), detached signatures |
 | **ETSI EN 319 142-1** | PAdES core (B-B, B-T, B-LT, B-LTA) | ✅ | Signature creation & augmentation |
 | **ETSI EN 319 142-2** | PAdES extended (LTV, archival) | ✅ | DSS/VRI + document timestamps |
+| **RFC 8702** | SHA-3 OIDs in CMS | ✅ | id-sha3-256/384/512, id-rsassa-pkcs1-v1_5-with-sha3-256/384/512, id-ecdsa-with-sha3-256/384/512 |
+| **RFC 8933** | EdDSA in CMS | ✅ | id-EdDSA-25519 / id-EdDSA-448 in signatureAlgorithm |
+| **RFC 8032** | EdDSA algorithm | ✅ | Ed25519/Ed448 via external signer pipeline |
+| **RFC 8410** | EdDSA X.509 identifiers | ✅ | OIDs 1.3.101.112 (Ed25519) / 1.3.101.113 (Ed448) |
 
 ## SubFilter Support
 
@@ -76,9 +80,11 @@ SimpleSign is designed with PDF 2.0 alignment in mind. The digital signature sub
 | Category | Algorithms |
 |---|---|
 | **Hash** | SHA-256, SHA-384, SHA-512, SHA3-256, SHA3-384, SHA3-512 |
-| **Signature** | RSA PKCS#1 v1.5, RSA-PSS, ECDSA (P-256/P-384/P-521), EdDSA (Ed25519/Ed448)¹ |
+| **Signature** | RSA PKCS#1 v1.5, RSA-PSS, RSA-SHA3-256/384/512², ECDSA (P-256/P-384/P-521), ECDSA-SHA3-256/384/512², EdDSA (Ed25519/Ed448)³ |
 | **Revocation** | CRL, OCSP, embedded DSS |
 | **Timestamps** | RFC 3161 |
 | **PDF/A** | 1a, 1b, 2a, 2b, 2u, 3a, 3b, 3u, 4a, 4b, 4u, 4e (detection + preservation) |
 
 ¹ EdDSA via external signer pipeline; verification depends on runtime support.
+² SHA-3 signature and digest OIDs defined in RFC 8702; CMS encoding defined in RFC 8933.
+³ EdDSA algorithm defined in RFC 8032; X.509 algorithm identifiers defined in RFC 8410.

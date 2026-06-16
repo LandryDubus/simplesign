@@ -66,14 +66,23 @@ public static class SimpleSignServiceCollectionExtensions
             NetworkTimeout = options.NetworkTimeout
         });
 
-        // IHttpClientProvider — custom, or default shared-static
+        // IHttpClientProvider — custom, IHttpClientFactory-backed, or default shared-static
         if (httpClientProvider is not null)
         {
             services.TryAddSingleton(httpClientProvider);
         }
         else
         {
-            services.TryAddSingleton<IHttpClientProvider>(DefaultHttpClientProvider.Instance);
+            services.TryAddSingleton<IHttpClientProvider>(sp =>
+            {
+                var factory = sp.GetService<IHttpClientFactory>();
+                if (factory is not null)
+                {
+                    return new HttpClientFactoryProvider(factory, options.HttpClientName);
+                }
+
+                return DefaultHttpClientProvider.Instance;
+            });
         }
 
         // Validator — collects any registered ITrustAnchorProvider instances

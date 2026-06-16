@@ -5,12 +5,14 @@
 <h1 align="center">SimpleSign</h1>
 
 <p align="center">
-  <strong>Digital signatures for .NET — PAdES.</strong><br/>
-  Sign, validate, and inspect PDF documents with a clean, modern API.
+  <strong>PAdES digital signatures for .NET</strong><br/>
+  Sign, validate, and inspect PDFs — no BouncyCastle required.
 </p>
 
 <p align="center">
   <img src="https://img.shields.io/badge/.NET-8%20%7C%2010-512BD4?style=flat-square&logo=dotnet" alt=".NET 8 | 10" />
+  <img src="https://img.shields.io/nuget/v/SimpleSign?style=flat-square&logo=nuget" alt="NuGet" />
+  <img src="https://img.shields.io/github/actions/workflow/status/eupassarin/simplesign/ci.yml?style=flat-square&logo=github" alt="CI" />
   <img src="https://img.shields.io/badge/License-MIT-green?style=flat-square" alt="MIT License" />
   <img src="https://img.shields.io/badge/AOT-Compatible-blueviolet?style=flat-square" alt="Native AOT" />
   <img src="https://img.shields.io/badge/Tests-1%2C500%2B-brightgreen?style=flat-square" alt="1,500+ tests" />
@@ -21,59 +23,51 @@
 
 ## What is SimpleSign?
 
-SimpleSign is a .NET library for creating and validating **digitally signed PDF documents** according to European (ETSI) and Brazilian (ICP-Brasil) standards, implementing PAdES (ETSI EN 319 142).
-
-All cryptography is handled by `System.Security.Cryptography` — **no third-party crypto libraries** are used. Runtime dependencies are limited to Polly (resilience), RecyclableMemoryStream (pooling), QRCoder (appearance QR codes), and Microsoft.Extensions abstractions — **nothing** touches your keys but the BCL.
+SimpleSign is a .NET library for creating and validating **PAdES** (ETSI EN 319 142) and **CAdES** (ETSI EN 319 122) digital signatures. All cryptography uses `System.Security.Cryptography` — no BouncyCastle, no third-party crypto dependencies.
 
 ---
 
-## What's New in v0.4.0
+## Why SimpleSign?
 
-**CI infrastructure:**
-- 🧪 **Weekly fuzz testing** — 7 targets (pdf, dss, cms, timestamp, ocsp, validator, xref) via SharpFuzz, non-blocking
-- 🧪 **Stryker mutation testing** — Advanced level, thresholds high=80/low=60/break=50
-- 🧪 **Stress tests in CI** — 1,000 sequential, 500 concurrent, 100 incremental (non-blocking job)
-- 🧪 **NU1903 suppression removed** — `dotnet list package --vulnerable` confirms zero vulnerable packages
+- **Zero third-party crypto** — all operations via BCL `System.Security.Cryptography`
+- **Native AOT compatible** — no reflection, no `dynamic`, no `Assembly.Load`
+- **MIT licensed** — use anywhere, for anything, with no restrictions
+- **1,500+ tests** — comprehensive coverage, 0 warnings, CI-enforced quality gates
+- **Multi-target** — .NET 8 and .NET 10 on Windows, macOS, and Linux
 
-**PDF/A-4 (ISO 19005-4:2020):**
-- 📄 Detection via XMP metadata (`pdfaid:part=4`), CLI formatting, HostSigner display
-- 📄 New enum values: `A4a`, `A4b`, `A4u`, `A4e` (plus previously missing `A2u`, `A3u`)
-- 📄 Preservation validation allows PNG/transparency (relaxed in ISO 19005-4 vs -1)
+---
 
-**EdDSA verification:**
-- `CryptoVerifier.VerifySignature` no longer throws for Ed25519/Ed448 — falls through to ECDSA path on .NET 9+
-- Direct signing remains external-signer pipeline only; `CmsSignatureBuilder` provides clear guidance
+## What's New in v0.5.0
 
-**CAdES-XL validation references (AD-RV/RC/RA):**
-- New `CmsAttribute` factory methods: `CertificateRefs()`, `RevocationRefs()`, `CertValues()`, `RevocationValues()`
-- Enables ICP-Brasil AD-RV/AD-RC/AD-RA signing via attribute injection
+**CAdES** — New standalone CMS/PKCS#7 signing library (ETSI EN 319 122) with B-B, B-T, B-LT, and B-LTA conformance levels, plus `cades sign`/`cades validate` CLI commands. Also: SHA-3 hash + signature algorithms, EdDSA (Ed25519) external signer, QR code on visible signatures, DocMDP certification enforcement, client-side SHA-3/EdDSA compatibility with graceful fallback, `HttpClientFactoryProvider` + per-operation HTTP client slots, and CLI validate command. See the [full changelog](CHANGELOG.md) for details.
 
-**SHA-3 hash support (NET 9+):**
-- SHA3-256/384/512 across hashing, CMS digest OIDs, timestamping, verification, XMLDSig URIs
+---
 
-**Documentation:**
-- 📚 **4 Architecture Decision Records** — no BouncyCastle, incremental PDF, result-object validation, AOT
-- 📚 **Migration guides** — v0.2→v0.3 and v0.3→v0.4 with breaking changes
-- 📚 **Issue templates** — bug report, feature request, standards request
+## Installation
 
-**Algorithm inference + signature algorithm override (from v0.3.3):**
-- **PSS cert hash inference** — `RSASSA-PSS-params` (RFC 4055 §3.1) honoured when selecting digest algorithm
-- **RSA key-size-based hash** — PKCS#1 keys >= 3072 bits default to SHA-384 per NIST SP 800-57
-- **`.WithSignatureAlgorithm(oid)`** — force RSASSA-PSS on plain `rsaEncryption` certificates
-- **Compatibility validation** — incompatible OIDs throw `ArgumentException` at signing time
+Packages are split by concern — install only what you need:
 
-**Bug fixes (from v0.3.3):**
-- PDF/A-3b `spacingCompliesPDFA` — residual EOL failures fixed via shared `EnsureTrailingEol` helper
-- Deferred timestamp hash, external signer inference, PSS logging, hex extraction fixes
-- Empty stub projects removed (DocxToPdf, Europa, App)
-- 📄 **LTV early-return EOL guard** — even when no CRL/OCSP data is collected, the source PDF is now passed through `EnsureTrailingEol` so any follow-up incremental update remains LF-preceded.
+```bash
+# Full PAdES stack (most common)
+dotnet add package SimpleSign
 
-**Test coverage:**
-- 26 new tests across 4 test files: algorithm inference on all 3 signing paths, compatibility validation (RSA, ECDSA, EdDSA), and deferred PSS end-to-end.
-- **EdDSA test support** — `TryCreateEdDsaCert` helper on .NET 9+ (auto-skip on unsupported platforms).
-- **1,519 unit tests** — all passing, 0 warnings, 0 errors.
+# Brazilian PKI (ICP-Brasil + Gov.br)
+dotnet add package SimpleSign.Brasil
 
-See the [full changelog](CHANGELOG.md) for details.
+# CLI tool
+dotnet tool install -g SimpleSign.Cli
+```
+
+### Package Map
+
+- **SimpleSign** (meta-package) — full PAdES stack
+  - **SimpleSign.PAdES** — PDF signing & validation (PAdES B-B/T/LT/LTA)
+    - **SimpleSign.Pdf** — PDF structure parser (xref, objects, fields)
+    - **SimpleSign.Core** — Crypto primitives, CMS, TSA, revocation, HTTP
+- **SimpleSign.Brasil** — ICP-Brasil + Gov.br + Lei 14.063 (depends on PAdES)
+- **SimpleSign.HtmlToPdf** — Pure-.NET HTML→PDF (independent)
+- **SimpleSign.Cli** — CLI tool (install as dotnet tool)
+- **SimpleSign.HostSigner** — Windows tray app for local signing API
 
 ---
 
@@ -120,33 +114,59 @@ foreach (var r in results)
 
 ---
 
-## Installation
+### CAdES — Standalone CMS Signatures
 
-Packages are split by concern — install only what you need:
+Create and validate detached CAdES signatures (CMS/PKCS#7 SignedData) for any binary data:
 
-```bash
-# Full PAdES stack (most common)
-dotnet add package SimpleSign
+```csharp
+using SimpleSign.CAdES;
 
-# Brazilian PKI (ICP-Brasil + Gov.br)
-dotnet add package SimpleSign.Brasil
+var data = File.ReadAllBytes("document.pdf");
+var cms = await CadesSigner.SignAsync(data, certificate);
 
-# CLI tool
-dotnet tool install -g SimpleSign.Cli
+// CAdES-B-T (with timestamp)
+var cmsBt = await CadesSigner.SignAsync(data, certificate, new CadesSigningOptions
+{
+    TsaUrl = "http://timestamp.digicert.com",
+    Level = CadesLevel.Timestamped
+});
+
+// CAdES-B-LT (long-term with LTV data)
+var cmsBlt = await CadesSigner.SignAsync(data, certificate, new CadesSigningOptions
+{
+    TsaUrl = "http://timestamp.digicert.com",
+    Level = CadesLevel.LongTerm,
+    ExtraCertificates = chain
+});
+
+// CAdES-B-LTA (archival timestamp)
+var cmsBlta = await CadesSigner.SignAsync(data, certificate, new CadesSigningOptions
+{
+    TsaUrl = "http://timestamp.digicert.com",
+    Level = CadesLevel.Archive
+});
+
+File.WriteAllBytes("document.pdf.p7s", cms);
 ```
 
-### Package Map
+### Validate CAdES Signatures
 
-```
-SimpleSign (meta-package)
-├── SimpleSign.PAdES        PDF signing & validation (PAdES B-B/T/LT/LTA)
-│   ├── SimpleSign.Pdf      PDF structure parser (xref, objects, fields)
-│   └── SimpleSign.Core     Crypto primitives, CMS, TSA, revocation, HTTP
-│
-SimpleSign.Brasil           ICP-Brasil + Gov.br + Lei 14.063  → depends on PAdES
-SimpleSign.HtmlToPdf        Pure-.NET HTML→PDF (independent)
-SimpleSign.Cli              CLI tool (install as dotnet tool)
-SimpleSign.HostSigner       Windows tray app — local signing API
+```csharp
+using SimpleSign.CAdES;
+
+var validator = new CadesSignatureValidator(
+    new ValidationOptions { CheckRevocation = false });
+
+var result = validator.Validate(cmsBytes, originalData, trustAnchors);
+
+Console.WriteLine($"Signer: {result.SignerCertificate?.Subject}");
+Console.WriteLine($"Integrity: {result.IsIntegrityValid}");
+Console.WriteLine($"Signature: {result.IsSignatureValid}");
+Console.WriteLine($"Chain: {result.IsCertificateChainValid}");
+Console.WriteLine($"Timestamp: {result.HasValidTimestamp}");
+Console.WriteLine($"LTV: {result.IsLtvDataValid}");
+Console.WriteLine($"Archive TS: {result.HasValidArchiveTimestamp}");
+Console.WriteLine($"Valid: {result.IsValid}");
 ```
 
 ---
@@ -179,6 +199,7 @@ var signed = await SimpleSigner
 | PDF/A preservation | `.WithPdfAPreservation()` |
 | Visible signature with QR code | `.WithAppearance(appearance)` |
 | External signer (HSM, KMS) | `.WithExternalSigner(cert, signerFunc)` |
+| Custom HTTP client | `.WithHttpClient(client)` / `.WithTimestamp(url, client)` |
 | Existing field | `.WithExistingField("SignHere")` |
 | Deferred (2-phase) | `DeferredSigner.PrepareAsync()` → `CompleteAsync()` |
 | Batch (parallel) | `BatchSigner.Create(cert).Build()` |
@@ -383,6 +404,8 @@ var options = new ValidationOptions
 
 ## CLI Tool
 
+### PDF Signatures
+
 ```bash
 # Sign a PDF
 simplesign sign contract.pdf --cert mycert.pfx --password secret --timestamp
@@ -393,11 +416,33 @@ simplesign validate signed.pdf
 # Inspect
 simplesign inspect signed.pdf
 
-# Batch sign
-simplesign batch-sign ./documents/ --cert mycert.pfx --parallel 8
-
 # Extract CMS from signed PDF
 simplesign extract signed.pdf --output signature.p7s
+```
+
+### CAdES Signatures
+
+```bash
+# CAdES-B-B (basic)
+simplesign cades sign document.pdf --cert mycert.pfx
+
+# CAdES-B-T (with timestamp)
+simplesign cades sign document.pdf --cert mycert.pfx \
+    --tsa http://timestamp.digicert.com --level timestamped
+
+# CAdES-B-LT (long-term with LTV)
+simplesign cades sign document.pdf --cert mycert.pfx \
+    --tsa http://timestamp.digicert.com --level longterm --chain chain.pem
+
+# CAdES-B-LTA (with archival timestamp)
+simplesign cades sign document.pdf --cert mycert.pfx \
+    --tsa http://timestamp.digicert.com --level archive
+
+# Validate a CAdES detached signature
+simplesign cades validate document.pdf.p7s --data document.pdf
+
+# Validate with custom trust anchors
+simplesign cades validate document.pdf.p7s --data document.pdf --trust root-ca.pem
 ```
 
 ### Validation Output
@@ -459,7 +504,7 @@ contract-signed.pdf  1/1 valid
 ## Documentation
 
 | Document | Description |
-|---|---|---|
+|---|---|
 | [API Reference](https://eupassarin.github.io/simplesign/) | Full API documentation (Docfx) |
 | [Documentation Home](docs/index.md) | Docfx documentation entry point |
 | [Getting Started](docs/articles/getting-started.md) | Installation, first signature, validation |
@@ -468,9 +513,7 @@ contract-signed.pdf  1/1 valid
 | [ICP-Brasil](docs/articles/icp-brasil.md) | Brazilian PKI integration |
 | [Interoperability](docs/interoperability.md) | PDF generators tested, cross-validation matrix, ETSI corpus |
 | [Conformance](docs/conformance.md) | ISO 32000, PAdES ETSI EN 319 142, RFC 5652 compliance |
-| [Performance](docs/performance.md) | Benchmarks: signing, validation, concurrency, vs competitors |
 | [Benchmark Results](docs/benchmarks.md) | Comprehensive 14-suite benchmark report with 67 metrics |
-| [Architecture](docs/architecture.md) | Package structure, design principles, quality metrics |
 | [HostSigner](src/SimpleSign.HostSigner/README.md) | Local signing tray app — API docs & install |
 | [Web Signing Sample](samples/WebSigningSample/README.md) | Browser-based PDF signing demo |
 | [Web Inspect Sample](samples/WebInspectSample/README.md) | Browser-based PDF inspector & validator |

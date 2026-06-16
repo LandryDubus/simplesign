@@ -4,9 +4,10 @@ using SimpleSign.PAdES;
 using SimpleSign.PAdES.Validation;
 using SimpleSign.Pdf;
 using SimpleSign.TestHelpers;
+using Xunit;
 using Xunit.Abstractions;
 
-namespace SimpleSign.Brasil.Tests.Integration;
+namespace SimpleSign.Integration.Tests;
 
 /// <summary>
 /// Integration tests using a real-world PDF signed via Gov.br (assinatura.gov.br).
@@ -18,7 +19,7 @@ public sealed class GovBrIntegrationTests(ITestOutputHelper output)
     private const string Fixture = "signed-gov-br.pdf";
 
     private static string FixturePath(string name) =>
-        Path.Combine("Integration", "Fixtures", name);
+        Path.Combine("Fixtures", name);
 
     private static bool FixtureExists(string name) =>
         File.Exists(FixturePath(name));

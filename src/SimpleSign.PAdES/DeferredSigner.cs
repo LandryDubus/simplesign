@@ -91,7 +91,7 @@ public static class DeferredSigner
         using var inputStream = new MemoryStream(pdfBytes);
         using var outputStream = new MemoryStream();
         var prepareResult = await PdfSignatureWriter.PrepareAsync(
-            inputStream, outputStream, fieldOptions, logger, cancellationToken).ConfigureAwait(false);
+            inputStream, outputStream, fieldOptions, logger, cancellationToken: cancellationToken).ConfigureAwait(false);
 
         (logger ?? NullLogger.Instance).DeferredPdfPrepared();
 

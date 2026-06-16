@@ -28,6 +28,7 @@ public sealed class SignerBuilder
     private readonly bool _hashAlgorithmExplicitlySet;
     private readonly SignatureFieldOptions _fieldOptions;
     private readonly HttpClient? _httpClient;
+    private readonly HttpClient? _tsaHttpClient;
     private readonly IHttpClientProvider _httpClientProvider;
     private readonly ILogger _logger;
     private readonly Func<byte[], Task<byte[]>>? _externalSigner;
@@ -47,6 +48,7 @@ public sealed class SignerBuilder
         _httpClientProvider = DefaultHttpClientProvider.Instance;
         _logger = logger ?? NullLogger.Instance;
         _padesAttributes = true;
+        CountryExtensions = [];
     }
 
     private SignerBuilder(
@@ -58,6 +60,8 @@ public sealed class SignerBuilder
         bool hashAlgorithmExplicitlySet,
         SignatureFieldOptions fieldOptions,
         HttpClient? httpClient,
+        HttpClient? tsaHttpClient,
+        IHttpClientProvider? httpClientProvider,
         ILogger logger,
         Func<byte[], Task<byte[]>>? externalSigner = null,
         string? signatureAlgorithmOid = null,
@@ -66,7 +70,8 @@ public sealed class SignerBuilder
         string? operationId = null,
         bool enforcePdfA = false,
         SignatureMetadata? metadata = null,
-        bool padesAttributes = true)
+        bool padesAttributes = true,
+        IReadOnlyList<ICountryExtension>? countryExtensions = null)
     {
         _inputPdf = inputPdf;
         _certificate = certificate;
@@ -76,7 +81,8 @@ public sealed class SignerBuilder
         _hashAlgorithmExplicitlySet = hashAlgorithmExplicitlySet;
         _fieldOptions = fieldOptions;
         _httpClient = httpClient;
-        _httpClientProvider = DefaultHttpClientProvider.Instance;
+        _tsaHttpClient = tsaHttpClient;
+        _httpClientProvider = httpClientProvider ?? DefaultHttpClientProvider.Instance;
         _logger = logger;
         _externalSigner = externalSigner;
         _signatureAlgorithmOid = signatureAlgorithmOid;
@@ -86,6 +92,7 @@ public sealed class SignerBuilder
         _enforcePdfA = enforcePdfA;
         _metadata = metadata;
         _padesAttributes = padesAttributes;
+        CountryExtensions = countryExtensions ?? [];
     }
 
     #region Fluent configuration
@@ -117,7 +124,7 @@ public sealed class SignerBuilder
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(tsaUrl);
         ArgumentNullException.ThrowIfNull(httpClient);
-        return With(tsaUrl: tsaUrl, httpClient: httpClient);
+        return With(tsaUrl: tsaUrl, tsaHttpClient: httpClient);
     }
 
     /// <summary>
@@ -130,9 +137,24 @@ public sealed class SignerBuilder
         var clone = With();
         return new(
             _inputPdf, _certificate, _chain, _tsaUrl, _hashAlgorithm,
-            _hashAlgorithmExplicitlySet, _fieldOptions, provider.GetClient(), _logger, _externalSigner,
+            _hashAlgorithmExplicitlySet, _fieldOptions,
+            httpClient: null,
+            tsaHttpClient: null,
+            httpClientProvider: provider,
+            _logger, _externalSigner,
             _signatureAlgorithmOid, _enableLtv, _archivalTsaUrl, _operationId,
-            _enforcePdfA, _metadata, _padesAttributes);
+            _enforcePdfA, _metadata, _padesAttributes, CountryExtensions);
+    }
+
+    /// <summary>
+    /// Sets the default <see cref="HttpClient"/> for all outbound HTTP operations
+    /// (OCSP, CRL, AIA, and TSA when no TSA-specific client is configured via
+    /// <see cref="WithTimestamp(string, HttpClient)"/>).
+    /// </summary>
+    public SignerBuilder WithHttpClient(HttpClient httpClient)
+    {
+        ArgumentNullException.ThrowIfNull(httpClient);
+        return With(httpClient: httpClient);
     }
 
     /// <summary>Sets the hash algorithm. Default: SHA-256 (recommended by ICP-Brasil).</summary>
@@ -215,9 +237,9 @@ public sealed class SignerBuilder
 
         return new(
             _inputPdf, _certificate, _chain, _tsaUrl, _hashAlgorithm,
-            _hashAlgorithmExplicitlySet, updatedOptions, _httpClient, _logger, _externalSigner,
+            _hashAlgorithmExplicitlySet, updatedOptions, _httpClient, _tsaHttpClient, _httpClientProvider, _logger, _externalSigner,
             _signatureAlgorithmOid, _enableLtv, _archivalTsaUrl, _operationId, _enforcePdfA,
-            metadata: metadata, padesAttributes: _padesAttributes);
+            metadata: metadata, padesAttributes: _padesAttributes, countryExtensions: CountryExtensions);
     }
 
     /// <summary>Sets visible metadata on the signature.</summary>
@@ -357,9 +379,9 @@ public sealed class SignerBuilder
         ArgumentException.ThrowIfNullOrWhiteSpace(operationId);
         return new(
             _inputPdf, _certificate, _chain, _tsaUrl, _hashAlgorithm,
-            _hashAlgorithmExplicitlySet, _fieldOptions, _httpClient, _logger, _externalSigner,
+            _hashAlgorithmExplicitlySet, _fieldOptions, _httpClient, _tsaHttpClient, _httpClientProvider, _logger, _externalSigner,
             _signatureAlgorithmOid, _enableLtv, _archivalTsaUrl, operationId, _enforcePdfA,
-            _metadata, _padesAttributes);
+            _metadata, _padesAttributes, CountryExtensions);
     }
 
     /// <summary>
@@ -371,9 +393,9 @@ public sealed class SignerBuilder
     {
         return new(
             _inputPdf, _certificate, _chain, _tsaUrl, _hashAlgorithm,
-            _hashAlgorithmExplicitlySet, _fieldOptions, _httpClient, _logger, _externalSigner,
+            _hashAlgorithmExplicitlySet, _fieldOptions, _httpClient, _tsaHttpClient, _httpClientProvider, _logger, _externalSigner,
             _signatureAlgorithmOid, _enableLtv, _archivalTsaUrl, _operationId, enforcePdfA: true,
-            metadata: _metadata, padesAttributes: _padesAttributes);
+            metadata: _metadata, padesAttributes: _padesAttributes, countryExtensions: CountryExtensions);
     }
 
     #endregion
@@ -448,11 +470,14 @@ public sealed class SignerBuilder
                 "This PDF has a certification signature (DocMDP) that prohibits further changes. Signing is not allowed.");
         }
 
+        // Detect PDF/A level for annotation flags and preservation check
+        _inputPdf.Seek(0, SeekOrigin.Begin);
+        var pdfALevel = await PdfStructureReader.DetectPdfALevelAsync(_inputPdf, cancellationToken: cancellationToken).ConfigureAwait(false);
+
         // PDF/A preservation check
         if (_enforcePdfA)
         {
-            _inputPdf.Seek(0, SeekOrigin.Begin);
-            var pdfAIssues = await PdfAPreservationValidator.ValidateAsync(_inputPdf, _fieldOptions, cancellationToken).ConfigureAwait(false);
+            var pdfAIssues = PdfAPreservationValidator.Validate(pdfALevel, _fieldOptions);
             var errors = pdfAIssues.Where(i => i.Severity == PdfAIssueSeverity.Error).ToList();
             if (errors.Count > 0)
             {
@@ -463,7 +488,7 @@ public sealed class SignerBuilder
 
         // 1. Prepares the PDF (reserves space for the CMS)
         var prepareResult = await PdfSignatureWriter.PrepareAsync(
-            _inputPdf, outputStream, _fieldOptions, _logger, cancellationToken).ConfigureAwait(false);
+            _inputPdf, outputStream, _fieldOptions, _logger, pdfALevel: pdfALevel, cancellationToken: cancellationToken).ConfigureAwait(false);
 
         // 2. Reads the bytes to be signed (ByteRange 1 + 2)
         byte[] signedBytes = await PdfStructureReader.ReadSignedBytesAsync(
@@ -523,8 +548,8 @@ public sealed class SignerBuilder
         if (_tsaUrl is not null)
         {
             _logger.TimestampRequested(opId, _tsaUrl);
-            var httpClient = _httpClient ?? _httpClientProvider.GetClient();
-            var tsaClient = new TimestampClient(httpClient, _tsaUrl, _logger);
+            var tsaClient = new TimestampClient(
+                _tsaHttpClient ?? _httpClient ?? _httpClientProvider.GetClient(), _tsaUrl, _logger);
             timestampTokenBytes = await tsaClient.GetTimestampAsync(
                 TimestampClient.ExtractSignatureValue(cms), effectiveHash, cancellationToken).ConfigureAwait(false);
             cms = TimestampClient.EmbedTimestampInCms(cms, timestampTokenBytes);
@@ -569,7 +594,8 @@ public sealed class SignerBuilder
             {
                 _logger.ArchivalTimestampAppending(opId, _archivalTsaUrl);
                 ltvPdf = await DocTimeStampWriter.AppendDocTimeStampAsync(
-                    ltvPdf, _archivalTsaUrl, httpClient, effectiveHash, cancellationToken).ConfigureAwait(false);
+                    ltvPdf, _archivalTsaUrl, _tsaHttpClient ?? _httpClient ?? _httpClientProvider.GetClient(),
+                    effectiveHash, pdfALevel: pdfALevel, cancellationToken: cancellationToken).ConfigureAwait(false);
                 _logger.ArchivalTimestampComplete(opId);
             }
             else
@@ -659,9 +685,9 @@ public sealed class SignerBuilder
         };
         return new(
             _inputPdf, _certificate, _chain, _tsaUrl, _hashAlgorithm,
-            _hashAlgorithmExplicitlySet, legacyOptions, _httpClient, _logger, _externalSigner,
+            _hashAlgorithmExplicitlySet, legacyOptions, _httpClient, _tsaHttpClient, _httpClientProvider, _logger, _externalSigner,
             _signatureAlgorithmOid, _enableLtv, _archivalTsaUrl, _operationId, _enforcePdfA,
-            _metadata, padesAttributes: false);
+            _metadata, padesAttributes: false, countryExtensions: CountryExtensions);
     }
 
     /// <summary>
@@ -692,10 +718,54 @@ public sealed class SignerBuilder
         };
         return new(
             _inputPdf, _certificate, _chain, _tsaUrl, _hashAlgorithm,
-            _hashAlgorithmExplicitlySet, newOptions, _httpClient, _logger, _externalSigner,
+            _hashAlgorithmExplicitlySet, newOptions, _httpClient, _tsaHttpClient, _httpClientProvider, _logger, _externalSigner,
             _signatureAlgorithmOid, _enableLtv, _archivalTsaUrl, _operationId, _enforcePdfA,
-            _metadata, _padesAttributes);
+            _metadata, _padesAttributes, CountryExtensions);
     }
+
+    /// <summary>
+    /// Registers a country/region-specific extension package (e.g., ICP-Brasil, eIDAS).
+    /// Extensions provide trust anchors for validation and chain validation providers
+    /// that enrich <see cref="Core.Validation.SignatureValidationResult"/> with country-specific
+    /// metadata (policy level, signer national ID, etc.).
+    /// </summary>
+    /// <typeparam name="T">A concrete <see cref="ICountryExtension"/> with a parameterless constructor.</typeparam>
+    public SignerBuilder WithCountryExtension<T>()
+        where T : ICountryExtension, new()
+    {
+        var extension = new T();
+        var newExtensions = new List<ICountryExtension>(CountryExtensions.Count + 1);
+        newExtensions.AddRange(CountryExtensions);
+        newExtensions.Add(extension);
+        return new(
+            _inputPdf, _certificate, _chain, _tsaUrl, _hashAlgorithm,
+            _hashAlgorithmExplicitlySet, _fieldOptions, _httpClient, _tsaHttpClient, _httpClientProvider, _logger, _externalSigner,
+            _signatureAlgorithmOid, _enableLtv, _archivalTsaUrl, _operationId, _enforcePdfA,
+            _metadata, _padesAttributes, newExtensions.AsReadOnly());
+    }
+
+    /// <summary>
+    /// Registers a pre-configured country extension instance for DI scenarios
+    /// where the extension needs constructor-injected dependencies (HttpClient, ILogger).
+    /// </summary>
+    public SignerBuilder WithCountryExtension(ICountryExtension extension)
+    {
+        ArgumentNullException.ThrowIfNull(extension);
+        var newExtensions = new List<ICountryExtension>(CountryExtensions.Count + 1);
+        newExtensions.AddRange(CountryExtensions);
+        newExtensions.Add(extension);
+        return new(
+            _inputPdf, _certificate, _chain, _tsaUrl, _hashAlgorithm,
+            _hashAlgorithmExplicitlySet, _fieldOptions, _httpClient, _tsaHttpClient, _httpClientProvider, _logger, _externalSigner,
+            _signatureAlgorithmOid, _enableLtv, _archivalTsaUrl, _operationId, _enforcePdfA,
+            _metadata, _padesAttributes, newExtensions.AsReadOnly());
+    }
+
+    /// <summary>
+    /// The registered country extensions.
+    /// Consumed by <see cref="Validation.PdfSignatureValidator"/> during validation.
+    /// </summary>
+    public IReadOnlyList<ICountryExtension> CountryExtensions { get; }
 
     /// <summary>
     /// Enables LTV (Long-Term Validation) by embedding DSS with CRLs, OCSP responses, and VRI
@@ -713,9 +783,9 @@ public sealed class SignerBuilder
 
         return new(
             _inputPdf, _certificate, _chain, _tsaUrl, _hashAlgorithm,
-            _hashAlgorithmExplicitlySet, _fieldOptions, _httpClient, _logger, _externalSigner,
+            _hashAlgorithmExplicitlySet, _fieldOptions, _httpClient, _tsaHttpClient, _httpClientProvider, _logger, _externalSigner,
             _signatureAlgorithmOid, enableLtv: true, archivalTsaUrl: _archivalTsaUrl, operationId: _operationId,
-            metadata: _metadata, padesAttributes: _padesAttributes);
+            metadata: _metadata, padesAttributes: _padesAttributes, countryExtensions: CountryExtensions);
     }
 
     /// <summary>
@@ -735,9 +805,9 @@ public sealed class SignerBuilder
 
         return new(
             _inputPdf, _certificate, _chain, _tsaUrl, _hashAlgorithm,
-            _hashAlgorithmExplicitlySet, _fieldOptions, _httpClient, _logger, _externalSigner,
+            _hashAlgorithmExplicitlySet, _fieldOptions, _httpClient, _tsaHttpClient, _httpClientProvider, _logger, _externalSigner,
             _signatureAlgorithmOid, enableLtv: true, archivalTsaUrl: tsaUrl ?? _tsaUrl, operationId: _operationId,
-            metadata: _metadata, padesAttributes: _padesAttributes);
+            metadata: _metadata, padesAttributes: _padesAttributes, countryExtensions: CountryExtensions);
     }
 
     private SignerBuilder With(
@@ -748,6 +818,8 @@ public sealed class SignerBuilder
         bool? hashAlgorithmExplicitlySet = null,
         SignatureFieldOptions? fieldOptions = null,
         HttpClient? httpClient = null,
+        HttpClient? tsaHttpClient = null,
+        IHttpClientProvider? httpClientProvider = null,
         Func<byte[], Task<byte[]>>? externalSigner = null,
         string? signatureAlgorithmOid = null) =>
         new(
@@ -759,6 +831,8 @@ public sealed class SignerBuilder
             hashAlgorithmExplicitlySet ?? _hashAlgorithmExplicitlySet,
             fieldOptions ?? _fieldOptions,
             httpClient ?? _httpClient,
+            tsaHttpClient ?? _tsaHttpClient,
+            httpClientProvider ?? _httpClientProvider,
             _logger,
             externalSigner ?? _externalSigner,
             signatureAlgorithmOid ?? _signatureAlgorithmOid,
@@ -767,7 +841,8 @@ public sealed class SignerBuilder
             _operationId,
             _enforcePdfA,
             _metadata,
-            _padesAttributes);
+            _padesAttributes,
+            CountryExtensions);
 
     private static string DetectSignatureAlgorithmOid(X509Certificate2 cert, HashAlgorithmName hashAlg)
     {

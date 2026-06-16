@@ -1,7 +1,11 @@
+using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Text.RegularExpressions;
 using Shouldly;
+using SimpleSign.Core.Crypto;
 using SimpleSign.PAdES.Signing;
+using SimpleSign.Pdf;
 using Xunit;
 
 namespace SimpleSign.PAdES.Tests.Signing;
@@ -732,5 +736,70 @@ public sealed class Iso32000ComplianceTests
         objCount.ShouldBeGreaterThan(0);
         endobjCount.ShouldBeGreaterThanOrEqualTo(objCount,
             "every object must have a matching endobj");
+    }
+
+    // ── §12.8.2: DocMDP enforcement ────────────────────────────────────────────
+
+    [Fact(DisplayName = "§12.8.2: DocMDP NoChanges locks the document")]
+    public async Task DocMDP_NoChanges_LocksDocument()
+    {
+        using var cert = CreateRsaCert();
+        byte[] pdf = BuildMinimalPdf();
+        byte[] signed = await SimpleSigner.Document(pdf).WithCertificate(cert)
+            .AsCertification(CertificationLevel.NoChanges)
+            .SignAsync();
+
+        using var stream = new MemoryStream(signed);
+        bool locked = await PdfStructureReader.IsDocMdpLockedAsync(stream);
+        locked.ShouldBeTrue("DocMDP NoChanges should lock the document");
+    }
+
+    [Fact(DisplayName = "§12.8.2: DocMDP FormFilling locks the document")]
+    public async Task DocMDP_FormFilling_LocksDocument()
+    {
+        using var cert = CreateRsaCert();
+        byte[] pdf = BuildMinimalPdf();
+        byte[] signed = await SimpleSigner.Document(pdf).WithCertificate(cert)
+            .AsCertification(CertificationLevel.FormFilling)
+            .SignAsync();
+
+        using var stream = new MemoryStream(signed);
+        bool locked = await PdfStructureReader.IsDocMdpLockedAsync(stream);
+        locked.ShouldBeTrue("DocMDP FormFilling should lock the document");
+    }
+
+    [Fact(DisplayName = "§12.8.2: DocMDP FormFillingAndAnnotations does not lock the document")]
+    public async Task DocMDP_FormFillingAndAnnotations_DoesNotLock()
+    {
+        using var cert = CreateRsaCert();
+        byte[] pdf = BuildMinimalPdf();
+        byte[] signed = await SimpleSigner.Document(pdf).WithCertificate(cert)
+            .AsCertification(CertificationLevel.FormFillingAndAnnotations)
+            .SignAsync();
+
+        using var stream = new MemoryStream(signed);
+        bool locked = await PdfStructureReader.IsDocMdpLockedAsync(stream);
+        locked.ShouldBeFalse("FormFillingAndAnnotations should not lock the document");
+    }
+
+    [Fact(DisplayName = "§12.8.2: Signature without DocMDP does not lock")]
+    public async Task DocMDP_NoCertification_DoesNotLock()
+    {
+        using var cert = CreateRsaCert();
+        byte[] pdf = BuildMinimalPdf();
+        byte[] signed = await SimpleSigner.Document(pdf).WithCertificate(cert).SignAsync();
+
+        using var stream = new MemoryStream(signed);
+        bool locked = await PdfStructureReader.IsDocMdpLockedAsync(stream);
+        locked.ShouldBeFalse("non-certification signature should not lock");
+    }
+
+    private static X509Certificate2 CreateRsaCert()
+    {
+        using RSA key = RSA.Create(2048);
+        var req = new CertificateRequest("CN=DocMDP Test", key, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+        req.CertificateExtensions.Add(new X509KeyUsageExtension(X509KeyUsageFlags.DigitalSignature, critical: false));
+        var cert = req.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddYears(1));
+        return CertificateLoader.LoadPkcs12(cert.Export(X509ContentType.Pfx, "export"), "export");
     }
 }

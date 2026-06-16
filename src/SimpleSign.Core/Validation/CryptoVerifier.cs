@@ -11,13 +11,13 @@ namespace SimpleSign.Core.Validation;
 /// Verifies cryptographic signature validity and PAdES attribute binding.
 /// All methods are static — no state needed. Uses Span&lt;byte&gt; to minimize allocations.
 /// </summary>
-internal static class CryptoVerifier
+public static class CryptoVerifier
 {
     /// <summary>
     /// Verifies the RSA/ECDSA signature over the signed attributes.
     /// SignedAttrs must already have SET OF tag (0x31) — normalized by CmsParser.
     /// </summary>
-    internal static bool VerifySignature(CmsSignedData cmsData, ILogger? logger = null)
+    public static bool VerifySignature(CmsSignedData cmsData, ILogger? logger = null)
     {
         if (cmsData.SignerCertificate is null || cmsData.SignedAttrs is null || cmsData.Signature is null)
         {
@@ -87,7 +87,7 @@ internal static class CryptoVerifier
     /// Validates signingCertificate (V1/V2) binding (certificate ↔ signature anti-substitution).
     /// Respects the hash algorithm declared in the attribute (SHA-1 for V1, SHA-256 default for V2).
     /// </summary>
-    internal static void ValidateSigningCertV2(CmsSignedData cmsData, List<string> errors, ILogger? logger = null)
+    public static void ValidateSigningCertV2(CmsSignedData cmsData, List<string> errors, ILogger? logger = null)
     {
         if (cmsData.SigningCertificateHash is not null && cmsData.SignerCertificate is not null)
         {

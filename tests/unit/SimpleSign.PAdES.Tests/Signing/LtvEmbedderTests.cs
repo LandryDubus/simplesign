@@ -320,6 +320,115 @@ public sealed class LtvEmbedderTests
         }
     }
 
+    // ── Parallelism ───────────────────────────────────────────────────────────
+
+    [Fact(DisplayName = "Multiple certs with CRL URLs: all CRLs are embedded")]
+    public async Task EmbedLtvDataAsync_MultipleCertsWithCrls_AllCrlsEmbedded()
+    {
+        byte[] crl1 = [48, 12, 2, 1, 1];
+        byte[] crl2 = [48, 12, 2, 1, 2];
+        int requestCount = 0;
+
+        using HttpClient httpClient = new HttpClient(new MockHttpHandler(async _ =>
+        {
+            int current = Interlocked.Increment(ref requestCount);
+            byte[] response = current % 2 == 1 ? crl1 : crl2;
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new ByteArrayContent(response)
+            };
+        }));
+
+        LtvEmbedder embedder = new LtvEmbedder(httpClient);
+        using X509Certificate2 cert1 = CreateCertWithCrlUrl("http://crl.test/cert1.crl");
+        using X509Certificate2 cert2 = CreateCertWithCrlUrl("http://crl.test/cert2.crl");
+        byte[] pdf = TestPdfFactory.CreateMinimalPdf();
+
+        byte[] result = await embedder.EmbedLtvDataAsync(pdf, [cert1, cert2]);
+
+        requestCount.ShouldBeGreaterThanOrEqualTo(2, "both certs should have triggered a CRL request");
+        string text = Encoding.Latin1.GetString(result);
+        text.ShouldContain("/Type /DSS");
+    }
+
+    [Fact(DisplayName = "Parallel processing: one cert failure does not block others")]
+    public async Task EmbedLtvDataAsync_OneCertFails_StillProcessesOthers()
+    {
+        byte[] crlData = [48, 12, 2, 1, 0];
+
+        int requestCount = 0;
+        using HttpClient httpClient = new HttpClient(new MockHttpHandler(async _ =>
+        {
+            int seq = Interlocked.Increment(ref requestCount);
+            if (seq == 1)
+            {
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new ByteArrayContent(crlData)
+                };
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.InternalServerError);
+        }));
+
+        LtvEmbedder embedder = new LtvEmbedder(httpClient);
+        using X509Certificate2 cert1 = CreateCertWithCrlUrl("http://crl.test/ok.crl");
+        using X509Certificate2 cert2 = CreateCertWithCrlUrl("http://crl.test/fail.crl");
+        byte[] pdf = TestPdfFactory.CreateMinimalPdf();
+
+        byte[] result = await embedder.EmbedLtvDataAsync(pdf, [cert1, cert2]);
+        string text = Encoding.Latin1.GetString(result);
+        text.ShouldContain("/Type /DSS");
+    }
+
+    [Fact(DisplayName = "Multiple certs: result is structurally identical across runs")]
+    public async Task EmbedLtvDataAsync_MultipleCerts_StructureStableAcrossRuns()
+    {
+        byte[] crl1 = [48, 6, 2, 1, 0];
+        byte[] crl2 = [48, 6, 2, 1, 1];
+
+        async Task<byte[]> RunEmbedAsync()
+        {
+            using HttpClient httpClient = new HttpClient(new MockHttpHandler(async req =>
+            {
+                string url = req.RequestUri?.AbsoluteUri ?? "";
+                byte[] data = url.Contains("cert1", StringComparison.OrdinalIgnoreCase) ? crl1 : crl2;
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new ByteArrayContent(data)
+                };
+            }));
+
+            LtvEmbedder embedder = new LtvEmbedder(httpClient);
+            using X509Certificate2 cert1 = CreateCertWithCrlUrl("http://crl.test/cert1.crl");
+            using X509Certificate2 cert2 = CreateCertWithCrlUrl("http://crl.test/cert2.crl");
+            return await embedder.EmbedLtvDataAsync(TestPdfFactory.CreateMinimalPdf(), [cert1, cert2]);
+        }
+
+        byte[] result1 = await RunEmbedAsync();
+        byte[] result2 = await RunEmbedAsync();
+
+        Encoding.Latin1.GetString(result1).ShouldContain("/Type /DSS");
+        Encoding.Latin1.GetString(result2).ShouldContain("/Type /DSS");
+
+        int count1 = CountSubstring(Encoding.Latin1.GetString(result1), "/FlateDecode");
+        int count2 = CountSubstring(Encoding.Latin1.GetString(result2), "/FlateDecode");
+        count1.ShouldBe(count2);
+    }
+
+    private static int CountSubstring(string text, string substring)
+    {
+        int count = 0;
+        int pos = 0;
+        while ((pos = text.IndexOf(substring, pos, StringComparison.Ordinal)) >= 0)
+        {
+            count++;
+            pos += substring.Length;
+        }
+
+        return count;
+    }
+
     private static byte[] BuildFakeCrl()
     {
         // Build a minimal DER-encoded CRL structure

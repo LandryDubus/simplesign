@@ -9,6 +9,7 @@ using Xunit.Abstractions;
 
 namespace SimpleSign.Integration.Tests;
 
+[Trait("Category", "Integration")]
 public sealed class EdgeCaseValidationTests(ITestOutputHelper output)
 {
     private static PdfSignatureValidator CreateValidator() =>

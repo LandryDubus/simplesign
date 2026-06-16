@@ -37,6 +37,7 @@ public sealed class PdfSignatureValidator
     private readonly HttpClient _httpClient;
     private readonly ILogger _logger;
     private readonly IReadOnlyList<ITrustAnchorProvider> _trustAnchorProviders;
+    private readonly IReadOnlyList<IChainValidationProvider> _chainValidationProviders;
 
     /// <param name="options">Validation options. If null, uses <see cref="ValidationOptions.Default"/>.</param>
     /// <param name="httpClient">
@@ -46,7 +47,7 @@ public sealed class PdfSignatureValidator
     /// </param>
     /// <param name="logger">Optional logger for structured diagnostics.</param>
     public PdfSignatureValidator(ValidationOptions? options = null, HttpClient? httpClient = null, ILogger<PdfSignatureValidator>? logger = null)
-        : this(options, httpClient, logger, trustAnchorProviders: null)
+        : this(options, httpClient, logger, trustAnchorProviders: null, chainValidationProviders: null)
     {
     }
 
@@ -55,19 +56,21 @@ public sealed class PdfSignatureValidator
     /// Use this in ASP.NET Core to integrate with <c>IHttpClientFactory</c>.
     /// </summary>
     public PdfSignatureValidator(IHttpClientProvider httpClientProvider, ValidationOptions? options = null, ILogger<PdfSignatureValidator>? logger = null)
-        : this(httpClientProvider, options, logger, trustAnchorProviders: null)
+        : this(httpClientProvider, options, logger, trustAnchorProviders: null, chainValidationProviders: null)
     {
     }
 
     /// <summary>
-    /// Creates a validator with explicit trust anchor providers.
-    /// Use this to register country-specific root CA bundles (e.g., ICP-Brasil, Gov.br).
+    /// Creates a validator with explicit trust anchor and chain validation providers.
+    /// Use this to register country-specific root CA bundles and validation rules
+    /// (e.g., ICP-Brasil, Gov.br).
     /// </summary>
     public PdfSignatureValidator(
         ValidationOptions? options,
         HttpClient? httpClient,
         ILogger<PdfSignatureValidator>? logger,
-        IEnumerable<ITrustAnchorProvider>? trustAnchorProviders)
+        IEnumerable<ITrustAnchorProvider>? trustAnchorProviders,
+        IEnumerable<IChainValidationProvider>? chainValidationProviders = null)
     {
         _options = options ?? ValidationOptions.Default;
         _logger = logger ?? NullLogger<PdfSignatureValidator>.Instance;
@@ -76,16 +79,20 @@ public sealed class PdfSignatureValidator
         _revocationChecker = new RevocationChecker(new OcspClient(client, _logger), new CrlClient(client, _logger), _logger);
         _trustAnchorProviders = trustAnchorProviders?.ToList().AsReadOnly()
             ?? LoadDefaultTrustAnchorProviders();
+        _chainValidationProviders = (chainValidationProviders ?? []).ToList().AsReadOnly();
+
     }
 
     /// <summary>
-    /// Creates a validator with a custom HTTP client provider and explicit trust anchor providers.
+    /// Creates a validator with explicit trust anchor and chain validation providers,
+    /// using a custom <see cref="IHttpClientProvider"/>.
     /// </summary>
     public PdfSignatureValidator(
         IHttpClientProvider httpClientProvider,
         ValidationOptions? options,
         ILogger<PdfSignatureValidator>? logger,
-        IEnumerable<ITrustAnchorProvider>? trustAnchorProviders)
+        IEnumerable<ITrustAnchorProvider>? trustAnchorProviders,
+        IEnumerable<IChainValidationProvider>? chainValidationProviders = null)
     {
         ArgumentNullException.ThrowIfNull(httpClientProvider);
         _options = options ?? ValidationOptions.Default;
@@ -95,6 +102,39 @@ public sealed class PdfSignatureValidator
         _revocationChecker = new RevocationChecker(new OcspClient(client, _logger), new CrlClient(client, _logger), _logger);
         _trustAnchorProviders = trustAnchorProviders?.ToList().AsReadOnly()
             ?? LoadDefaultTrustAnchorProviders();
+        _chainValidationProviders = (chainValidationProviders ?? []).ToList().AsReadOnly();
+
+    }
+
+    /// <summary>
+    /// Creates a validator from one or more <see cref="ICountryExtension"/> packages.
+    /// Each extension contributes its trust anchors and chain validation providers automatically.
+    /// This is the recommended way to enable country-specific validation (e.g., ICP-Brasil, eIDAS).
+    /// </summary>
+    public PdfSignatureValidator(
+        ValidationOptions? options,
+        HttpClient? httpClient,
+        ILogger<PdfSignatureValidator>? logger,
+        IEnumerable<ICountryExtension>? countryExtensions)
+        : this(options, httpClient, logger,
+            trustAnchorProviders: countryExtensions?.SelectMany(e => e.TrustAnchorProviders),
+            chainValidationProviders: countryExtensions?.SelectMany(e => e.ChainValidationProviders))
+    {
+    }
+
+    /// <summary>
+    /// Creates a validator from one or more <see cref="ICountryExtension"/> packages,
+    /// using a custom <see cref="IHttpClientProvider"/>.
+    /// </summary>
+    public PdfSignatureValidator(
+        IHttpClientProvider httpClientProvider,
+        ValidationOptions? options,
+        ILogger<PdfSignatureValidator>? logger,
+        IEnumerable<ICountryExtension>? countryExtensions)
+        : this(httpClientProvider, options, logger,
+            trustAnchorProviders: countryExtensions?.SelectMany(e => e.TrustAnchorProviders),
+            chainValidationProviders: countryExtensions?.SelectMany(e => e.ChainValidationProviders))
+    {
     }
 
     /// <summary>
@@ -299,6 +339,26 @@ public sealed class PdfSignatureValidator
         // 4. Certificate chain
         bool chainValid = await ValidateChainStep(cmsData, errors, warnings, cancellationToken).ConfigureAwait(false);
 
+        // 4a. Country-specific chain validation providers (enrich with policy level, signer ID, etc.)
+        var chainValidationResult = await RunChainValidationProvidersAsync(
+            cmsData.SignerCertificate, cmsData.Certificates, errors, warnings).ConfigureAwait(false);
+
+        // If standard PKI chain fails but a country-specific provider trusts the certificate,
+        // promote chain errors to warnings (same pattern as document timestamps).
+        bool chainTrustWarning = false;
+        if (!chainValid && chainValidationResult?.IsTrusted == true)
+        {
+            chainTrustWarning = true;
+            for (int i = errors.Count - 1; i >= 0; i--)
+            {
+                if (errors[i].StartsWith("Chain: ", StringComparison.Ordinal))
+                {
+                    warnings.Add(errors[i]);
+                    errors.RemoveAt(i);
+                }
+            }
+        }
+
         // 5. Revocation (optional — requires network)
         var (notRevoked, revocationSource) = await ValidateRevocationIfEnabled(
             field, cmsData, embeddedCrls, embeddedOcsps, errors, warnings, cancellationToken).ConfigureAwait(false);
@@ -309,6 +369,12 @@ public sealed class PdfSignatureValidator
             IsIntegrityValid = integrityValid,
             IsSignatureValid = sigValid,
             IsCertificateChainValid = chainValid,
+            IsChainTrustWarning = chainTrustWarning,
+            ChainValidationRegion = chainValidationResult?.RegionCode,
+            PolicyLevel = chainValidationResult?.PolicyLevel,
+            SignerId = chainValidationResult?.SignerId,
+            SignerIdType = chainValidationResult?.SignerIdType,
+            ChainValidationMetadata = chainValidationResult?.Metadata,
             IsNotRevoked = notRevoked,
             RevocationSource = revocationSource,
             HasValidTimestamp = TimestampValidator.Validate(cmsData, warnings, ValidateCertificateChain, _logger),
@@ -359,10 +425,15 @@ public sealed class PdfSignatureValidator
         // 3. TSA certificate chain
         bool chainValid = await ValidateChainStep(cmsData, errors, warnings, cancellationToken).ConfigureAwait(false);
 
+        // 3a. Country-specific chain validation providers (policy level, signer ID enrichment)
+        var chainValidationResult = await RunChainValidationProvidersAsync(
+            cmsData.SignerCertificate, cmsData.Certificates, errors, warnings).ConfigureAwait(false);
+
         // When integrity and signature are cryptographically sound but the TSA chain cannot be
         // anchored to a local trust root, treat this as an advisory warning rather than a hard
         // error.  Archive timestamps derive their value from the cryptographic hash proof, not
         // exclusively from the PKI trust chain.
+        // Also accept when a country-specific provider trusts the chain.
         bool chainTrustWarning = false;
         if (!chainValid && integrityValid && sigValid)
         {
@@ -372,6 +443,19 @@ public sealed class PdfSignatureValidator
             {
                 warnings.Add(errors[i]);
                 errors.RemoveAt(i);
+            }
+        }
+        // Country-specific provider overrides the standard chain result
+        else if (!chainValid && chainValidationResult?.IsTrusted == true)
+        {
+            chainTrustWarning = true;
+            for (int i = errors.Count - 1; i >= 0; i--)
+            {
+                if (errors[i].StartsWith("Chain: ", StringComparison.Ordinal))
+                {
+                    warnings.Add(errors[i]);
+                    errors.RemoveAt(i);
+                }
             }
         }
 
@@ -386,6 +470,11 @@ public sealed class PdfSignatureValidator
             IsSignatureValid = sigValid,
             IsCertificateChainValid = chainValid,
             IsChainTrustWarning = chainTrustWarning,
+            ChainValidationRegion = chainValidationResult?.RegionCode,
+            PolicyLevel = chainValidationResult?.PolicyLevel,
+            SignerId = chainValidationResult?.SignerId,
+            SignerIdType = chainValidationResult?.SignerIdType,
+            ChainValidationMetadata = chainValidationResult?.Metadata,
             IsNotRevoked = notRevoked,
             RevocationSource = revocationSource,
             HasValidTimestamp = null, // doc timestamps ARE the timestamp — no inner RFC 3161 token
@@ -634,6 +723,67 @@ public sealed class PdfSignatureValidator
         }
 
         return chainBuilt;
+    }
+
+    /// <summary>
+    /// Runs registered <see cref="IChainValidationProvider"/> instances against the signer certificate.
+    /// Returns the result from the first matching provider (by <see cref="IChainValidationProvider.CanValidate"/>).
+    /// Non-trusted results add provider errors to <paramref name="errors"/>; trusted results with errors
+    /// add them as <paramref name="warnings"/>. Provider failures are logged and surfaced as warnings.
+    /// </summary>
+    private async Task<ChainValidationResult?> RunChainValidationProvidersAsync(
+        X509Certificate2? signerCert,
+        IReadOnlyList<X509Certificate2> certificates,
+        List<string> errors,
+        List<string> warnings)
+    {
+        if (signerCert is null || _chainValidationProviders.Count == 0)
+        {
+            return null;
+        }
+
+        foreach (var provider in _chainValidationProviders)
+        {
+            if (!provider.CanValidate(signerCert))
+            {
+                continue;
+            }
+
+            try
+            {
+                var result = await provider.ValidateAsync(signerCert, certificates).ConfigureAwait(false);
+
+                if (!result.IsTrusted)
+                {
+                    if (result.Errors is not null)
+                    {
+                        foreach (var error in result.Errors)
+                        {
+                            errors.Add($"[{result.RegionCode}] {error}");
+                        }
+                    }
+                }
+                else
+                {
+                    if (result.Errors is not null)
+                    {
+                        foreach (var error in result.Errors)
+                        {
+                            warnings.Add($"[{result.RegionCode}] {error}");
+                        }
+                    }
+                }
+
+                return result;
+            }
+            catch (Exception ex)
+            {
+                _logger.ChainProviderError(ex, provider.GetType().Name);
+                warnings.Add($"Chain validation provider '{provider.GetType().Name}' failed: {ex.Message}");
+            }
+        }
+
+        return null;
     }
 
     /// <summary>

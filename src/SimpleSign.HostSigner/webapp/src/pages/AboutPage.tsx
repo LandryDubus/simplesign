@@ -46,7 +46,7 @@ export default function AboutPage() {
 
           <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-sm">
             <dt className="text-muted-foreground">Version</dt>
-            <dd><Badge variant="outline">0.1.0-alpha</Badge></dd>
+            <dd><Badge variant="outline">0.5.0</Badge></dd>
             <dt className="text-muted-foreground">Runtime</dt>
             <dd>{window._hostInfo?.runtime || '.NET 8'}</dd>
             <dt className="text-muted-foreground">PID</dt>

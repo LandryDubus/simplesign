@@ -4,8 +4,9 @@ using SimpleSign.PAdES;
 using SimpleSign.PAdES.Validation;
 using SimpleSign.Pdf;
 using SimpleSign.TestHelpers;
+using Xunit;
 
-namespace SimpleSign.Brasil.Tests.Integration;
+namespace SimpleSign.Integration.Tests;
 
 /// <summary>
 /// Integration tests using a real-world PDF signed with ICP-Brasil certificates.
@@ -16,7 +17,7 @@ public sealed class IcpBrasilIntegrationTests
     private const string Fixture = "signed-icp-brasil.pdf";
 
     private static string FixturePath(string name) =>
-        Path.Combine("Integration", "Fixtures", name);
+        Path.Combine("Fixtures", name);
 
     private static bool FixtureExists(string name) =>
         File.Exists(FixturePath(name));

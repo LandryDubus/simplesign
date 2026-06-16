@@ -93,6 +93,10 @@ internal static partial class Log
         Message = "Certificate chain validation error")]
     internal static partial void ChainError(this ILogger logger, Exception ex);
 
+    [LoggerMessage(EventId = 2504, Level = LogLevel.Warning,
+        Message = "Chain validation provider '{ProviderName}' failed")]
+    internal static partial void ChainProviderError(this ILogger logger, Exception ex, string providerName);
+
     // ── Integrity & ByteRange Verification (21xx) ───────────────────
 
     [LoggerMessage(EventId = 2100, Level = LogLevel.Debug,

@@ -33,6 +33,14 @@ internal static partial class Program
             config.AddCommand<VersionCommand>("version")
                 .WithDescription("Show version information");
 
+            config.AddBranch("cades", cades =>
+            {
+                cades.AddCommand<CadesSignCommand>("sign")
+                    .WithDescription("Sign data with CAdES (CMS/PKCS#7)");
+                cades.AddCommand<CadesValidateCommand>("validate")
+                    .WithDescription("Validate a CAdES detached signature");
+            });
+
             config.SetExceptionHandler((ex, _) =>
             {
                 AnsiConsole.MarkupLine($"[red]Error:[/] {ex.Message.EscapeMarkup()}");

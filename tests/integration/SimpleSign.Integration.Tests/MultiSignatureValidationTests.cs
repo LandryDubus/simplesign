@@ -7,6 +7,7 @@ using Xunit.Abstractions;
 
 namespace SimpleSign.Integration.Tests;
 
+[Trait("Category", "Integration")]
 public sealed class MultiSignatureValidationTests(ITestOutputHelper output)
 {
     private static PdfSignatureValidator CreateValidator() =>

@@ -10,7 +10,7 @@ using SimpleSign.Pdf.Enums;
 using SimpleSign.Pdf.Exceptions;
 using SimpleSign.TestHelpers;
 using Xunit;
-namespace SimpleSign.PAdES.Tests;
+namespace SimpleSign.PAdES.Tests.Signing;
 
 /// <summary>
 /// Tests for public APIs without coverage.

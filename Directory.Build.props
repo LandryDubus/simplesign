@@ -1,7 +1,7 @@
 <Project>
   <PropertyGroup>
     <TargetFrameworks>net8.0;net10.0</TargetFrameworks>
-    <Version>0.4.0</Version>
+    <Version>0.5.0</Version>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>13</LangVersion>
@@ -21,6 +21,7 @@
     <PackageTags>pdf;pades;digital-signature;electronic-signature;sign-pdf;pdf-signing;validate-signature;icp-brasil;govbr;etsi;pkcs7;cms;rfc3161;timestamp;x509;certificate;native-aot;no-bouncycastle</PackageTags>
     <PackageProjectUrl>https://github.com/eupassarin/SimpleSign</PackageProjectUrl>
     <PackageIcon>icon.png</PackageIcon>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
     <!-- SourceLink: embed source in PDB for debugger step-through -->
     <!-- SourceLink: embed PDB in DLL for debugging -->
     <DebugType>embedded</DebugType>
@@ -30,11 +31,11 @@
     <ContinuousIntegrationBuild Condition="'$(CI)' == 'true'">true</ContinuousIntegrationBuild>
     <!-- Allow restore/build of Windows-targeting projects (e.g. HostSigner) on Linux CI -->
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
-    <!-- NU1903 was previously suppressed for System.Security.Cryptography.Xml (CVE-2024-30105).
-         Verified via 'dotnet list package -vulnerable' - no vulnerable packages remain. -->
+    <!-- Confirmed: no vulnerable packages (dotnet list package). -->
   </PropertyGroup>
 
   <ItemGroup>
     <None Include="$(MSBuildThisFileDirectory)assets/icon.png" Pack="true" PackagePath="\" Visible="false" />
+    <None Include="$(MSBuildThisFileDirectory)README.md" Pack="true" PackagePath="\" Visible="false" />
   </ItemGroup>
 </Project>

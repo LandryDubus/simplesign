@@ -19,6 +19,9 @@ public sealed class AlgorithmInfoTests
     [InlineData(Oids.Sha256, "SHA-256")]
     [InlineData(Oids.Sha384, "SHA-384")]
     [InlineData(Oids.Sha512, "SHA-512")]
+    [InlineData(Oids.Sha3_256, "SHA3-256")]
+    [InlineData(Oids.Sha3_384, "SHA3-384")]
+    [InlineData(Oids.Sha3_512, "SHA3-512")]
     public void FromOid_DigestAlgorithms_MapsToFriendlyName(string oid, string expected)
     {
         var info = AlgorithmInfo.FromOid(oid);
@@ -39,6 +42,19 @@ public sealed class AlgorithmInfoTests
     [InlineData(Oids.Ed25519, "Ed25519")]
     [InlineData(Oids.Ed448, "Ed448")]
     public void FromOid_SignatureAlgorithms_MapsToFriendlyName(string oid, string expected)
+    {
+        var info = AlgorithmInfo.FromOid(oid);
+        info.Name.ShouldBe(expected);
+    }
+
+    [Theory(DisplayName = "FromOid maps SHA-3 signature OIDs to friendly names")]
+    [InlineData(Oids.RsaSha3_256, "RSA-SHA3-256")]
+    [InlineData(Oids.RsaSha3_384, "RSA-SHA3-384")]
+    [InlineData(Oids.RsaSha3_512, "RSA-SHA3-512")]
+    [InlineData(Oids.EcdsaSha3_256, "ECDSA-SHA3-256")]
+    [InlineData(Oids.EcdsaSha3_384, "ECDSA-SHA3-384")]
+    [InlineData(Oids.EcdsaSha3_512, "ECDSA-SHA3-512")]
+    public void FromOid_Sha3SignatureAlgorithms_MapsToFriendlyName(string oid, string expected)
     {
         var info = AlgorithmInfo.FromOid(oid);
         info.Name.ShouldBe(expected);

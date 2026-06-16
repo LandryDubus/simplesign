@@ -403,34 +403,172 @@ public sealed class PdfStructureReader
     /// <summary>
     /// Scans XMP metadata for pdfaid:part and pdfaid:conformance to determine PDF/A level.
     /// XMP metadata in PDFs is stored as XML inside a stream object.
+    /// Handles compress ObjStm by first decompressing all ObjStms and scanning the decompressed data.
     /// </summary>
     internal static PdfALevel DetectPdfALevel(ReadOnlySpan<byte> data)
     {
-        // XMP metadata contains XML like: <pdfaid:part>1</pdfaid:part> <pdfaid:conformance>B</pdfaid:conformance>
+        PdfALevel level = ScanForPdfAIdTags(data);
+        if (level != PdfALevel.None)
+        {
+            return level;
+        }
+
+        return ScanCompressedObjStmsForPdfAIdTags(data);
+    }
+
+    private static PdfALevel ScanForPdfAIdTags(ReadOnlySpan<byte> span)
+    {
         var partTag = "pdfaid:part>"u8;
-        int partIdx = IndexOf(data, partTag, 0);
+        int partIdx = IndexOf(span, partTag, 0);
         if (partIdx < 0)
         {
             return PdfALevel.None;
         }
 
+        return ParsePdfALevelFromSpan(span, partIdx, partTag);
+    }
+
+    private static PdfALevel ScanCompressedObjStmsForPdfAIdTags(ReadOnlySpan<byte> data)
+    {
+        ReadOnlySpan<byte> objStmMarker1 = "/Type /ObjStm"u8;
+        ReadOnlySpan<byte> objStmMarker2 = "/Type/ObjStm"u8;
+        ReadOnlySpan<byte> streamMarker = "stream"u8;
+        var partTag = "pdfaid:part>"u8;
+
+        int searchPos = 0;
+        while (searchPos < data.Length)
+        {
+            int p1 = data[searchPos..].IndexOf(objStmMarker1);
+            int p2 = data[searchPos..].IndexOf(objStmMarker2);
+            int matchOffset;
+            if (p1 >= 0 && p2 >= 0)
+            { matchOffset = Math.Min(p1, p2); }
+            else if (p1 >= 0)
+            { matchOffset = p1; }
+            else if (p2 >= 0)
+            { matchOffset = p2; }
+            else
+            { break; }
+
+            int absolutePos = searchPos + matchOffset;
+            searchPos = absolutePos + 1;
+
+            int objStart = ScanBackwardsForObjId(data, absolutePos);
+            if (objStart < 0)
+            {
+                continue;
+            }
+
+            int streamKeyPos = IndexOf(data[objStart..], streamMarker, 0);
+            if (streamKeyPos < 0)
+            {
+                continue;
+            }
+
+            int streamContentStart = objStart + streamKeyPos + streamMarker.Length;
+            if (streamContentStart + 1 >= data.Length)
+            {
+                continue;
+            }
+
+            if (data[streamContentStart] == (byte)'\r')
+            {
+                streamContentStart++;
+            }
+
+            if (streamContentStart < data.Length && data[streamContentStart] == (byte)'\n')
+            {
+                streamContentStart++;
+            }
+
+            int endstreamPos = data[streamContentStart..].IndexOf("\nendstream"u8);
+            if (endstreamPos < 0)
+            {
+                continue;
+            }
+
+            int streamContentEnd = streamContentStart + endstreamPos;
+            var compressed = data.Slice(streamContentStart, streamContentEnd - streamContentStart);
+
+            try
+            {
+                byte[] decompressed = InflateZlib(compressed);
+                if (decompressed.Length == 0)
+                {
+                    continue;
+                }
+
+                int partIdx = new ReadOnlySpan<byte>(decompressed).IndexOf(partTag);
+                if (partIdx >= 0)
+                {
+                    return ParsePdfALevelFromSpan(new ReadOnlySpan<byte>(decompressed), partIdx, partTag);
+                }
+            }
+            catch
+            {
+            }
+        }
+
+        return PdfALevel.None;
+    }
+
+    private static int ScanBackwardsForObjId(ReadOnlySpan<byte> data, int fromPos)
+    {
+        int searchStart = Math.Max(0, fromPos - 512);
+        ReadOnlySpan<byte> region = data[searchStart..fromPos];
+        var objMarker = " obj"u8;
+        int objIdx = -1;
+        for (int i = region.Length - objMarker.Length; i >= 0; i--)
+        {
+            bool match = true;
+            for (int j = 0; j < objMarker.Length; j++)
+            {
+                if (region[i + j] != objMarker[j])
+                {
+                    match = false;
+                    break;
+                }
+            }
+            if (match)
+            {
+                objIdx = i;
+                break;
+            }
+        }
+
+        if (objIdx < 0)
+        {
+            return -1;
+        }
+
+        int numEnd = searchStart + objIdx;
+        int numStart = numEnd;
+        while (numStart > searchStart && data[numStart - 1] >= (byte)'0' && data[numStart - 1] <= (byte)'9')
+        {
+            numStart--;
+        }
+
+        return numStart < numEnd ? numStart : -1;
+    }
+
+    private static PdfALevel ParsePdfALevelFromSpan(ReadOnlySpan<byte> span, int partIdx, ReadOnlySpan<byte> partTag)
+    {
         int partStart = partIdx + partTag.Length;
-        if (partStart >= data.Length)
+        if (partStart >= span.Length)
         {
             return PdfALevel.Unknown;
         }
-        int part = data[partStart] - '0';
+        int part = span[partStart] - '0';
 
-        // Find conformance level
         var confTag = "pdfaid:conformance>"u8;
-        int confIdx = IndexOf(data, confTag, partIdx);
-        char conformance = 'B'; // default if not specified
+        int confIdx = IndexOf(span, confTag, partIdx);
+        char conformance = 'B';
         if (confIdx >= 0)
         {
             int confStart = confIdx + confTag.Length;
-            if (confStart < data.Length)
+            if (confStart < span.Length)
             {
-                conformance = char.ToUpperInvariant((char)data[confStart]);
+                conformance = char.ToUpperInvariant((char)span[confStart]);
             }
         }
 

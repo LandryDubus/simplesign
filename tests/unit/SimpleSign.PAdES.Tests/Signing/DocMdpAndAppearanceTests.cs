@@ -5,11 +5,11 @@ using Xunit;
 namespace SimpleSign.PAdES.Tests.Signing;
 
 /// <summary>
-/// Tests for Phase 2 enterprise features: DocMDP certification, existing field signing,
+/// Tests for DocMDP certification, existing field signing,
 /// and rich appearance (image, colors, border).
 /// </summary>
 [Trait("Category", "Unit")]
-public sealed class Phase2EnterpriseTests
+public sealed class DocMdpAndAppearanceTests
 {
 
     // ── DocMDP / Certification ───────────────────────────────────────────

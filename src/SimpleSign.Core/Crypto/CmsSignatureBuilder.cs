@@ -147,7 +147,20 @@ public sealed class CmsSignatureBuilder
 
     #region ASN.1 construction
 
-    internal static byte[] BuildSignedData(
+    /// <summary>
+    /// Assembles a complete CMS/PKCS#7 SignedData DER structure from pre-built components.
+    /// Used by the deferred signing pipeline and the CAdES external signer flow.
+    /// </summary>
+    /// <param name="digestOid">The digest algorithm OID used for the content hash.</param>
+    /// <param name="signatureOid">The signature algorithm OID.</param>
+    /// <param name="hashAlgorithm">The hash algorithm (used for RSASSA-PSS-params).</param>
+    /// <param name="signedAttrs">Pre-built DER-encoded signed attributes SET.</param>
+    /// <param name="signature">The raw signature bytes over the signed attributes.</param>
+    /// <param name="signerCert">The signer's certificate.</param>
+    /// <param name="allCerts">All certificates to embed (signer + intermediates).</param>
+    /// <param name="extraAttributeCount">Count of extra signed attributes (for logging).</param>
+    /// <param name="logger">Optional logger.</param>
+    public static byte[] BuildSignedData(
         string digestOid,
         string signatureOid,
         HashAlgorithmName hashAlgorithm,
@@ -328,7 +341,14 @@ public sealed class CmsSignatureBuilder
         }
     }
 
-    internal static byte[] BuildSignedAttributes(byte[] contentHash, string digestOid, DateTimeOffset time,
+    /// <summary>Builds the DER-encoded signed attributes SET for a CMS signature.</summary>
+    /// <param name="contentHash">The hash of the content being signed.</param>
+    /// <param name="digestOid">The digest algorithm OID.</param>
+    /// <param name="time">Signing timestamp.</param>
+    /// <param name="signerCertificate">The signer's certificate (for signingCertificateV2).</param>
+    /// <param name="extraAttributes">Optional extra CAdES signed attributes.</param>
+    /// <param name="padesAttributes">When true, includes PAdES-specific attributes (signingCertificateV2).</param>
+    public static byte[] BuildSignedAttributes(byte[] contentHash, string digestOid, DateTimeOffset time,
         X509Certificate2 signerCertificate, IReadOnlyList<CmsAttribute>? extraAttributes = null,
         bool padesAttributes = true)
     {
@@ -495,10 +515,11 @@ public sealed class CmsSignatureBuilder
     /// Detects the RSA padding mode from the certificate's signature algorithm.
     /// Returns PSS if the cert was issued with RSA-PSS, PKCS1 otherwise.
     /// </summary>
-    internal static RSASignaturePadding DetectRsaPadding(X509Certificate2 cert)
+    public static RSASignaturePadding DetectRsaPadding(X509Certificate2 cert)
         => CryptoUtility.DetectRsaPadding(cert);
 
-    internal static byte[] ComputeHash(ReadOnlySpan<byte> data, HashAlgorithmName algorithm)
+    /// <summary>Computes a cryptographic hash of the provided data using the specified algorithm.</summary>
+    public static byte[] ComputeHash(ReadOnlySpan<byte> data, HashAlgorithmName algorithm)
         => CryptoUtility.ComputeHash(data, algorithm);
     #endregion
 
@@ -516,16 +537,15 @@ public sealed class CmsSignatureBuilder
         return new System.Numerics.BigInteger(buf);
     }
 
-    internal static string GetDigestOid(HashAlgorithmName alg) => alg switch
+    /// <summary>Maps a HashAlgorithmName to its corresponding OID string.</summary>
+    public static string GetDigestOid(HashAlgorithmName alg) => alg switch
     {
         _ when alg == HashAlgorithmName.SHA256 => Oids.Sha256,
         _ when alg == HashAlgorithmName.SHA384 => Oids.Sha384,
         _ when alg == HashAlgorithmName.SHA512 => Oids.Sha512,
-#if NET9_0_OR_GREATER
         _ when alg == HashAlgorithmName.SHA3_256 => Oids.Sha3_256,
         _ when alg == HashAlgorithmName.SHA3_384 => Oids.Sha3_384,
         _ when alg == HashAlgorithmName.SHA3_512 => Oids.Sha3_512,
-#endif
         _ when alg == HashAlgorithmName.SHA1 => throw new NotSupportedException("SHA-1 is deprecated and not supported for new signatures. Use SHA-256 or stronger."),
         _ when alg == HashAlgorithmName.MD5 => throw new NotSupportedException("MD5 is insecure and not supported for signatures."),
         _ => throw new NotSupportedException($"Hash algorithm '{alg.Name}' is not supported.")
@@ -546,9 +566,15 @@ public sealed class CmsSignatureBuilder
             (Oids.RsaEncryption, _) when hashAlg == HashAlgorithmName.SHA256 => Oids.RsaSha256,
             (Oids.RsaEncryption, _) when hashAlg == HashAlgorithmName.SHA384 => Oids.RsaSha384,
             (Oids.RsaEncryption, _) when hashAlg == HashAlgorithmName.SHA512 => Oids.RsaSha512,
+            (Oids.RsaEncryption, _) when hashAlg == HashAlgorithmName.SHA3_256 => Oids.RsaSha3_256,
+            (Oids.RsaEncryption, _) when hashAlg == HashAlgorithmName.SHA3_384 => Oids.RsaSha3_384,
+            (Oids.RsaEncryption, _) when hashAlg == HashAlgorithmName.SHA3_512 => Oids.RsaSha3_512,
             (Oids.EcPublicKey, _) when hashAlg == HashAlgorithmName.SHA256 => Oids.EcdsaSha256,
             (Oids.EcPublicKey, _) when hashAlg == HashAlgorithmName.SHA384 => Oids.EcdsaSha384,
             (Oids.EcPublicKey, _) when hashAlg == HashAlgorithmName.SHA512 => Oids.EcdsaSha512,
+            (Oids.EcPublicKey, _) when hashAlg == HashAlgorithmName.SHA3_256 => Oids.EcdsaSha3_256,
+            (Oids.EcPublicKey, _) when hashAlg == HashAlgorithmName.SHA3_384 => Oids.EcdsaSha3_384,
+            (Oids.EcPublicKey, _) when hashAlg == HashAlgorithmName.SHA3_512 => Oids.EcdsaSha3_512,
             (Oids.Ed25519, _) => Oids.Ed25519,
             (Oids.Ed448, _) => Oids.Ed448,
             _ => throw new NotSupportedException(
@@ -563,7 +589,7 @@ public sealed class CmsSignatureBuilder
     /// <param name="cert">The signer's certificate.</param>
     /// <param name="signatureAlgorithmOid">OID of the signature algorithm to validate.</param>
     /// <exception cref="ArgumentException">The OID is incompatible with the certificate's key type.</exception>
-    internal static void ValidateSignatureAlgorithmCompatibility(
+    public static void ValidateSignatureAlgorithmCompatibility(
         X509Certificate2 cert, string signatureAlgorithmOid)
     {
         string keyOid = cert.PublicKey.Oid.Value ?? string.Empty;
@@ -591,13 +617,168 @@ public sealed class CmsSignatureBuilder
         }
     }
 
-    internal static bool SignatureAlgorithmUsesNullParameter(string signatureOid) => signatureOid switch
+    /// <summary>Returns true when the signature algorithm OID expects an explicit NULL parameter in the AlgorithmIdentifier.</summary>
+    public static bool SignatureAlgorithmUsesNullParameter(string signatureOid) => signatureOid switch
     {
         Oids.EcdsaSha256 or Oids.EcdsaSha384 or Oids.EcdsaSha512 => false,
         Oids.Ed25519 or Oids.Ed448 => false,
         Oids.RsaPss => false,
         _ => true
     };
+
+    /// <summary>
+    /// Adds unsigned attributes to an existing CMS/PKCS#7 SignedData structure.
+    /// Parses the original CMS, injects the attributes into SignerInfo unsignedAttrs [1],
+    /// and returns the rewritten DER. Follows the same pattern used for timestamp embedding.
+    /// </summary>
+    /// <param name="cmsBytes">DER-encoded CMS/PKCS#7 SignedData.</param>
+    /// <param name="unsignedAttributes">Unsigned attributes to inject (e.g., CertValues, RevocationValues, ArchiveTimeStamp).</param>
+    /// <returns>Rewritten CMS bytes with unsigned attributes appended.</returns>
+    public static byte[] AddUnsignedAttributes(byte[] cmsBytes, IReadOnlyList<CmsAttribute> unsignedAttributes)
+    {
+        ArgumentNullException.ThrowIfNull(cmsBytes);
+        ArgumentNullException.ThrowIfNull(unsignedAttributes);
+
+        if (unsignedAttributes.Count == 0)
+        {
+            return cmsBytes;
+        }
+
+        var reader = new AsnReader(cmsBytes, AsnEncodingRules.DER);
+        var contentInfoSeq = reader.ReadSequence();
+        string contentOid = contentInfoSeq.ReadObjectIdentifier();
+
+        var explicitWrapper = contentInfoSeq.ReadSequence(new Asn1Tag(TagClass.ContextSpecific, 0, true));
+        var signedDataSeq = explicitWrapper.ReadSequence();
+
+        int version = (int)signedDataSeq.ReadInteger();
+        byte[] digestAlgorithms = signedDataSeq.ReadEncodedValue().ToArray();
+        byte[] encapContentInfo = signedDataSeq.ReadEncodedValue().ToArray();
+
+        byte[]? certificates = null;
+        if (signedDataSeq.HasData && signedDataSeq.PeekTag() == new Asn1Tag(TagClass.ContextSpecific, 0, true))
+        {
+            certificates = signedDataSeq.ReadEncodedValue().ToArray();
+        }
+
+        byte[]? crls = null;
+        if (signedDataSeq.HasData && signedDataSeq.PeekTag() == new Asn1Tag(TagClass.ContextSpecific, 1, true))
+        {
+            crls = signedDataSeq.ReadEncodedValue().ToArray();
+        }
+
+        var signerInfosTag = signedDataSeq.ReadSetOf();
+        byte[] signerInfoBytes = signerInfosTag.ReadEncodedValue().ToArray();
+        byte[] newSignerInfo = AddUnsignedAttrsToSignerInfo(signerInfoBytes, unsignedAttributes);
+
+        var writer = new AsnWriter(AsnEncodingRules.DER);
+        using (writer.PushSequence())
+        {
+            writer.WriteObjectIdentifier(contentOid);
+            using (writer.PushSequence(new Asn1Tag(TagClass.ContextSpecific, 0, true)))
+            {
+                using (writer.PushSequence())
+                {
+                    writer.WriteInteger(version);
+                    writer.WriteEncodedValue(digestAlgorithms);
+                    writer.WriteEncodedValue(encapContentInfo);
+
+                    if (certificates is not null)
+                    {
+                        writer.WriteEncodedValue(certificates);
+                    }
+                    if (crls is not null)
+                    {
+                        writer.WriteEncodedValue(crls);
+                    }
+
+                    using (writer.PushSetOf())
+                    {
+                        writer.WriteEncodedValue(newSignerInfo);
+                    }
+                }
+            }
+        }
+
+        return writer.Encode();
+    }
+
+    private static byte[] AddUnsignedAttrsToSignerInfo(byte[] signerInfoBytes, IReadOnlyList<CmsAttribute> unsignedAttributes)
+    {
+        var reader = new AsnReader(signerInfoBytes, AsnEncodingRules.DER);
+        var siSeq = reader.ReadSequence();
+
+        int version = (int)siSeq.ReadInteger();
+        byte[] issuerAndSerial = siSeq.ReadEncodedValue().ToArray();
+        byte[] digestAlg = siSeq.ReadEncodedValue().ToArray();
+
+        byte[]? signedAttrs = null;
+        if (siSeq.HasData && siSeq.PeekTag() == new Asn1Tag(TagClass.ContextSpecific, 0, true))
+        {
+            signedAttrs = siSeq.ReadEncodedValue().ToArray();
+        }
+
+        byte[] signatureAlg = siSeq.ReadEncodedValue().ToArray();
+        byte[] signature = siSeq.ReadEncodedValue().ToArray();
+
+        var existing = new List<(string oid, byte[] val)>();
+        if (siSeq.HasData && siSeq.PeekTag() == new Asn1Tag(TagClass.ContextSpecific, 1, true))
+        {
+            var existingSet = siSeq.ReadSequence(new Asn1Tag(TagClass.ContextSpecific, 1, true));
+            while (existingSet.HasData)
+            {
+                var attrSeq = existingSet.ReadSequence();
+                string oid = attrSeq.ReadObjectIdentifier();
+                byte[] val = attrSeq.ReadEncodedValue().ToArray();
+                existing.Add((oid, val));
+            }
+        }
+
+        var writer = new AsnWriter(AsnEncodingRules.DER);
+        using (writer.PushSequence())
+        {
+            writer.WriteInteger(version);
+            writer.WriteEncodedValue(issuerAndSerial);
+            writer.WriteEncodedValue(digestAlg);
+
+            if (signedAttrs is not null)
+            {
+                writer.WriteEncodedValue(signedAttrs);
+            }
+
+            writer.WriteEncodedValue(signatureAlg);
+            writer.WriteEncodedValue(signature);
+
+            using (writer.PushSequence(new Asn1Tag(TagClass.ContextSpecific, 1, true)))
+            {
+                foreach (var (oid, val) in existing)
+                {
+                    using (writer.PushSequence())
+                    {
+                        writer.WriteObjectIdentifier(oid);
+                        using (writer.PushSetOf())
+                        {
+                            writer.WriteEncodedValue(val);
+                        }
+                    }
+                }
+                foreach (var attr in unsignedAttributes)
+                {
+                    using (writer.PushSequence())
+                    {
+                        writer.WriteObjectIdentifier(attr.Oid);
+                        using (writer.PushSetOf())
+                        {
+                            writer.WriteEncodedValue(attr.DerValue);
+                        }
+                    }
+                }
+            }
+        }
+
+        return writer.Encode();
+    }
+
     #endregion
 
 }

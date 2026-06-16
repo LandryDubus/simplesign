@@ -100,4 +100,17 @@ public sealed class CmsSignedData
     /// For document timestamps (ETSI.RFC3161) this is id-ct-TSTInfo (1.2.840.113549.1.9.16.1.4).
     /// </summary>
     public string? ContentTypeOid { get; init; }
+
+    /// <summary>
+    /// All unsigned attributes parsed from SignerInfo, keyed by OID.
+    /// Each OID maps to an array of DER-encoded attribute values.
+    /// Null when no unsigned attributes are present.
+    /// </summary>
+    public IReadOnlyDictionary<string, byte[][]>? UnsignedAttributes { get; init; }
+
+    /// <summary>
+    /// Archive timestamp token (id-aa-ets-archiveTimeStampV3, OID 1.2.840.113549.1.9.16.2.48)
+    /// for CAdES-B-LTA. Null when not present.
+    /// </summary>
+    public byte[]? ArchiveTimestampToken { get; init; }
 }

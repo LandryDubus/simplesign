@@ -5,6 +5,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using SimpleSign.Pdf;
 using SimpleSign.Pdf.Constants;
+using SimpleSign.Pdf.Enums;
 
 namespace SimpleSign.PAdES.Signing;
 
@@ -27,7 +28,7 @@ public sealed class PdfSignatureWriter
     /// catalog, optional appearance, cross-reference table, and trailer to the output stream.
     /// The ByteRange placeholder is then back-filled with actual offsets.
     /// </summary>
-    public static async Task<PdfSignaturePrepareResult> PrepareAsync(Stream inputPdf, Stream outputStream, SignatureFieldOptions options, ILogger? logger = null, CancellationToken cancellationToken = default(CancellationToken))
+    public static async Task<PdfSignaturePrepareResult> PrepareAsync(Stream inputPdf, Stream outputStream, SignatureFieldOptions options, ILogger? logger = null, PdfALevel? pdfALevel = null, CancellationToken cancellationToken = default(CancellationToken))
     {
         ArgumentNullException.ThrowIfNull(inputPdf, nameof(inputPdf));
         ArgumentNullException.ThrowIfNull(outputStream, nameof(outputStream));
@@ -165,7 +166,7 @@ public sealed class PdfSignatureWriter
         // Step 5: Build all new PDF objects.
         string sigDictText = BuildSignatureDictionary(sigObjNum, options, contentsHexLength, sigNow);
         var fieldAnnParams = new FieldAnnotationParams(fieldName, fieldObjNum, sigObjNum, appObjNum, appX, appY, appWidth, appHeight, pageObjNum);
-        string fieldDictText = BuildFieldAnnotation(options, fieldAnnParams);
+        string fieldDictText = BuildFieldAnnotation(options, fieldAnnParams, pdfALevel);
         byte[] sigDictBytes = Encoding.Latin1.GetBytes(sigDictText);
         byte[] fieldDictBytes = Encoding.Latin1.GetBytes(fieldDictText);
         byte[] acroFormBytes = BuildAcroFormDictionary(acroFormObjNum, inputMem.Span, existingAcroFormObjNum, fieldObjNum, catalogObjNum);
@@ -535,10 +536,12 @@ public sealed class PdfSignatureWriter
 
     private sealed record FieldAnnotationParams(string FieldName, int FieldObjNum, int SigObjNum, int AppObjNum, float X, float Y, float Width, float Height, int PageObjNum = 0);
 
-    private static string BuildFieldAnnotation(SignatureFieldOptions options, FieldAnnotationParams p)
+    private static string BuildFieldAnnotation(SignatureFieldOptions options, FieldAnnotationParams p, PdfALevel? pdfALevel = null)
     {
         string fieldName = p.FieldName;
         bool hasAppearance = options.Appearance is not null;
+        bool isPdfA1 = pdfALevel is PdfALevel.A1a or PdfALevel.A1b;
+        string annotationFlags = isPdfA1 ? "   /F 4\n" : "   /F 132\n";
         var fieldDict = new StringBuilder();
         fieldDict.Append($"{p.FieldObjNum} 0 obj\n");
         fieldDict.Append("<< /Type /Annot\n");
@@ -550,7 +553,7 @@ public sealed class PdfSignatureWriter
         {
             fieldDict.Append($"   /P {p.PageObjNum} 0 R\n");
         }
-        fieldDict.Append("   /F 132\n");
+        fieldDict.Append(annotationFlags);
         fieldDict.Append("   /Border [0 0 0]\n");
         if (hasAppearance)
         {

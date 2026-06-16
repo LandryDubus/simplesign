@@ -5,7 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.1] - 2026-06-16
+
+### Fixed
+
+- **SHA3 signature OID detection on Linux** — `DetectSignatureAlgorithmOid` in both `SignerBuilder` and `DeferredSigner` was missing SHA3-256/384/512 cases, causing `NotSupportedException` on platforms where SHA3 is available (Linux with OpenSSL 3.x). Added the same RSA and ECDSA SHA3 OID mappings already present in `CmsSignatureBuilder`.
+
 ## [0.5.0] - 2026-06-16
+
+
 
 ### Added
 

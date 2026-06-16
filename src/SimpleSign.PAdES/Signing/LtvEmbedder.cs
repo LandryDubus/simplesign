@@ -230,7 +230,9 @@ public sealed class LtvEmbedder
             }
         }
 
-        if (crlData is [] && ocspData is [])
+        // If no revocation data found AND no certificates to embed, return early
+        // (but still append EOL if needed for proper incremental update chaining)
+        if (crlData is [] && ocspData is [] && allCerts is [])
         {
             _logger.LtvNoRevocationDataCollected();
             // v0.4.0: even when no LTV data is embedded, the source PDF must end
@@ -253,6 +255,27 @@ public sealed class LtvEmbedder
         // Extract signature /Contents hashes for VRI (SHA-1 as PAdES key, SHA-256 for collision resilience)
         var signatureHashPairs = ExtractSignatureContentHashPairs(signedPdf);
 
+        if (crlData is [] && ocspData is [])
+        {
+            _logger.LtvNoRevocationDataCollected();
+            // Only certificates are available — only worth embedding a DSS if there are
+            // actual signatures to key VRI entries against (e.g. self-signed cert scenario).
+            // Without signatures there is nothing to reference; return early and preserve
+            // the EOL invariant the same way the "no data at all" path does.
+            if (signatureHashPairs.Count == 0)
+            {
+                if (signedPdf.Length > 0 && signedPdf[^1] != (byte)'\n' && signedPdf[^1] != (byte)'\r')
+                {
+                    byte[] result = new byte[signedPdf.Length + 1];
+                    signedPdf.CopyTo(result, 0);
+                    result[^1] = (byte)'\n';
+                    return result;
+                }
+
+                return signedPdf;
+            }
+        }
+
         // Parse existing DSS for merge (multi-signature support)
         var existingDss = Validation.DssExtractor.ParseExistingDss(signedPdf);
 
@@ -261,8 +284,11 @@ public sealed class LtvEmbedder
 
     /// <summary>
     /// Computes the SHA-1 hash of each signature's /Contents value for VRI dictionary keys.
-    /// Per PAdES Part 4, VRI keys are uppercase hex SHA-1 of the DER-encoded signature value.
-    /// Only the actual DER content is hashed (trailing padding zeros in /Contents are excluded).
+    /// Per ISO 32000-2 §12.8.4.4, the VRI key is the uppercase hex SHA-1 of the raw byte string
+    /// value of the /Contents entry — i.e. the full decoded bytes including any trailing zero
+    /// padding used to reserve space for the signature. Validators such as the ETSI Signature
+    /// Conformance Checker compute SHA-1 over the complete /Contents bytes and look for a
+    /// matching VRI key; stripping the padding would produce a different hash and break matching.
     /// </summary>
     internal static List<string> ExtractSignatureContentHashes(byte[] pdf)
     {
@@ -307,6 +333,8 @@ public sealed class LtvEmbedder
             int hexLen = hexEnd - hexStart;
             if (hexLen > 1000)
             {
+                // Decode the hex to bytes and compute SHA-1 over the full byte string value,
+                // including any trailing zero padding (ISO 32000-2 §12.8.4.4).
                 try
                 {
                     string hexString = System.Text.Encoding.Latin1.GetString(span.Slice(hexStart, hexLen));
@@ -318,11 +346,10 @@ public sealed class LtvEmbedder
                     if (hexString.Length > 0)
                     {
                         byte[] sigBytes = Convert.FromHexString(hexString);
-                        int derLength = ComputeDerTotalLength(sigBytes);
 #pragma warning disable CA5350 // VRI key is defined as SHA-1 by PAdES spec
-                        byte[] sha1 = SHA1.HashData(sigBytes.AsSpan(0, derLength));
+                        byte[] sha1 = SHA1.HashData(sigBytes);
 #pragma warning restore CA5350
-                        byte[] sha256 = SHA256.HashData(sigBytes.AsSpan(0, derLength));
+                        byte[] sha256 = SHA256.HashData(sigBytes);
                         pairs.Add((Convert.ToHexString(sha1), Convert.ToHexString(sha256)));
                     }
                 }
@@ -335,56 +362,6 @@ public sealed class LtvEmbedder
         }
 
         return pairs;
-    }
-
-    /// <summary>
-    /// Computes the total length of a DER-encoded structure (tag + length + content).
-    /// This is used to determine how many bytes of /Contents are actual CMS data
-    /// vs. trailing zero padding added to fill the reserved space.
-    /// </summary>
-    internal static int ComputeDerTotalLength(byte[] data)
-    {
-        if (data.Length < 2)
-        {
-            return data.Length;
-        }
-
-        // Skip tag byte
-        int pos = 1;
-
-        // Read length
-        byte firstLenByte = data[pos++];
-        long contentLength;
-
-        if (firstLenByte < 0x80)
-        {
-            // Short form: length is the byte itself
-            contentLength = firstLenByte;
-        }
-        else if (firstLenByte == 0x80)
-        {
-            // Indefinite length — not valid DER, fall back to full length
-            return data.Length;
-        }
-        else
-        {
-            // Long form: lower 7 bits = number of subsequent length bytes
-            int numLenBytes = firstLenByte & 0x7F;
-            if (numLenBytes > 4 || pos + numLenBytes > data.Length)
-            {
-                // More than 4 length bytes means > 4GB content — not realistic for CMS in PDFs
-                return data.Length;
-            }
-
-            contentLength = 0;
-            for (int i = 0; i < numLenBytes; i++)
-            {
-                contentLength = (contentLength << 8) | data[pos++];
-            }
-        }
-
-        long totalLength = pos + contentLength;
-        return totalLength <= data.Length ? (int)totalLength : data.Length;
     }
 
     private static byte[] AppendDssDictionary(

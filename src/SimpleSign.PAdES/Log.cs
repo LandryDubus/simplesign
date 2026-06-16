@@ -204,6 +204,6 @@ internal static partial class Log
     // ── LTV Embedder (36xx) ───────────────────────────────────────────
 
     [LoggerMessage(EventId = 3600, Level = LogLevel.Debug,
-        Message = "No revocation data (CRL/OCSP) was collected — LTV/DSS will not be embedded")]
+        Message = "No revocation data (CRL/OCSP) was collected")]
     internal static partial void LtvNoRevocationDataCollected(this ILogger logger);
 }

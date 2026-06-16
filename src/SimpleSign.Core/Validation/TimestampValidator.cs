@@ -11,13 +11,13 @@ namespace SimpleSign.Core.Validation;
 /// Validates RFC 3161 timestamp tokens embedded in CMS signatures.
 /// Verifies TSA signature, nonce, and extracts timestamp date.
 /// </summary>
-internal static class TimestampValidator
+public static class TimestampValidator
 {
 
     /// <summary>
     /// Delegate for certificate chain validation, allowing the caller to supply its own implementation.
     /// </summary>
-    internal delegate bool CertificateChainValidatorDelegate(
+    public delegate bool CertificateChainValidatorDelegate(
         X509Certificate2? signerCert,
         IReadOnlyList<X509Certificate2> embeddedCerts,
         List<string> errors,

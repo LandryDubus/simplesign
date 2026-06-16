@@ -140,7 +140,7 @@ public sealed class CmsSignatureBuilderCompatibilityTests
     private static string GetOidValue(string fieldName)
     {
         var field = typeof(Oids).GetField(fieldName,
-            System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic);
+            System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.Public);
         return (string)field!.GetValue(null)!;
     }
 }

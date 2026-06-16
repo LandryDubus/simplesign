@@ -297,4 +297,17 @@ public sealed class CmsAttribute
         }
         return new CmsAttribute(Oids.RevocationValues, writer.Encode());
     }
+
+    /// <summary>
+    /// Creates a custom attribute from an OID and a DER-encoded attribute value.
+    /// The <paramref name="derValue"/> will be wrapped in SET OF by the CMS rendering code.
+    /// </summary>
+    /// <param name="oid">The attribute OID.</param>
+    /// <param name="derValue">The DER-encoded attribute value (content of SET OF).</param>
+    public static CmsAttribute Create(string oid, byte[] derValue)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(oid);
+        ArgumentNullException.ThrowIfNull(derValue);
+        return new CmsAttribute(oid, derValue);
+    }
 }

@@ -10,7 +10,7 @@ namespace SimpleSign.Core.Crypto;
 /// Parses CMS/PKCS#7 SignedData structures from raw DER bytes.
 /// Extracts signer info, certificates, signed attributes, and timestamp tokens.
 /// </summary>
-internal static class CmsParser
+public static class CmsParser
 {
 
     private record ParsedSignedAttributes(
@@ -36,7 +36,9 @@ internal static class CmsParser
         string? CommitmentTypeOid,
         string? SignaturePolicyOid,
         byte[]? ManifestJson,
-        string? ContentTypeOid);
+        string? ContentTypeOid,
+        IReadOnlyDictionary<string, byte[][]>? UnsignedAttributes,
+        byte[]? ArchiveTimestampToken);
 
     /// <summary>Parses a CMS/PKCS#7 SignedData structure.</summary>
     public static CmsSignedData Parse(byte[] cmsBytes, ILogger? logger = null)
@@ -88,7 +90,9 @@ internal static class CmsParser
             ContentTypeOid = signerInfo.ContentTypeOid,
             EContentTypeOid = eContentTypeOid,
             TstMessageImprintHashAlgOid = tstHashAlgOid,
-            TstMessageImprintHash = tstHashBytes
+            TstMessageImprintHash = tstHashBytes,
+            UnsignedAttributes = signerInfo.UnsignedAttributes,
+            ArchiveTimestampToken = signerInfo.ArchiveTimestampToken
         };
     }
 
@@ -180,6 +184,8 @@ internal static class CmsParser
         string? signaturePolicyOid = null;
         byte[]? manifestJson = null;
         string? contentTypeOid = null;
+        Dictionary<string, List<byte[]>>? unsignedAttrsDict = null;
+        byte[]? archiveTimestampToken = null;
 
         var signerInfosSet = signedData.ReadSetOf();
         if (signerInfosSet.HasData)
@@ -246,9 +252,10 @@ internal static class CmsParser
             // signature
             signature = si.ReadOctetString();
 
-            // unsignedAttrs [1] IMPLICIT OPTIONAL — loads timestamp token if present
+            // unsignedAttrs [1] IMPLICIT OPTIONAL — loads timestamp token and all attributes
             if (si.HasData && si.PeekTag() == new Asn1Tag(TagClass.ContextSpecific, 1, true))
             {
+                unsignedAttrsDict = new Dictionary<string, List<byte[]>>();
                 var unsignedAttrs = si.ReadSetOf(new Asn1Tag(TagClass.ContextSpecific, 1, true));
                 while (unsignedAttrs.HasData)
                 {
@@ -256,13 +263,27 @@ internal static class CmsParser
                     {
                         var uAttr = unsignedAttrs.ReadSequence();
                         string uOid = uAttr.ReadObjectIdentifier();
-                        if (uOid == Oids.SignatureTimestampToken && uAttr.HasData)
+                        if (!uAttr.HasData)
                         {
-                            var valSet = uAttr.ReadSetOf();
-                            if (valSet.HasData)
-                            {
-                                timestampToken = valSet.ReadEncodedValue().ToArray();
-                            }
+                            continue;
+                        }
+
+                        var valSet = uAttr.ReadSetOf();
+                        var values = new List<byte[]>();
+                        while (valSet.HasData)
+                        {
+                            values.Add(valSet.ReadEncodedValue().ToArray());
+                        }
+
+                        unsignedAttrsDict[uOid] = values;
+
+                        if (uOid == Oids.SignatureTimestampToken && values.Count > 0)
+                        {
+                            timestampToken = values[0];
+                        }
+                        else if (uOid == Oids.ArchiveTimeStamp && values.Count > 0)
+                        {
+                            archiveTimestampToken = values[0];
                         }
                     }
                     catch (AsnContentException ex) { logger?.UnsignedAttributeParsingFailed(ex.Message); }
@@ -270,8 +291,12 @@ internal static class CmsParser
             }
         }
 
+        IReadOnlyDictionary<string, byte[][]>? unsignedFinal = unsignedAttrsDict?.ToDictionary(
+            kvp => kvp.Key, kvp => kvp.Value.ToArray());
+
         return new ParsedSignerInfo(signerCert, messageDigest, signedAttrs, signature, signingTime, timestampToken,
-            signingCertHash, signingCertHashAlgOid, signatureAlgorithmOid, commitmentTypeOid, signaturePolicyOid, manifestJson, contentTypeOid);
+            signingCertHash, signingCertHashAlgOid, signatureAlgorithmOid, commitmentTypeOid, signaturePolicyOid, manifestJson, contentTypeOid,
+            unsignedFinal, archiveTimestampToken);
     }
 
     private static ParsedSignedAttributes ParseSignedAttributes(byte[] signedAttrs, ILogger? logger = null)

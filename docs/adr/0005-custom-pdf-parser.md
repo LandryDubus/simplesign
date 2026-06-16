@@ -29,9 +29,9 @@ It does **not** attempt to be a general-purpose PDF library — no rendering, no
 - Full control over byte-level operations (critical for `ByteRange` integrity)
 - MIT-licensed, no license restrictions for any use case
 - Native AOT compatible (no reflection, no risky dependencies)
-- Smaller deployment footprint (~50 KB vs ~2-5 MB for alternatives)
+- Smaller deployment footprint (minimal dependency, no third-party PDF library inclusion)
 - No CVE surface from third-party PDF libraries
-- Significant development investment (~4,000 lines of parser code)
+- Significant development investment (a dedicated parser project)
 - Must maintain parser correctness across PDF versions (1.0 through 2.0)
 - Edge cases from real-world PDFs require ongoing fixes (legacy Adobe, iText, Word, LibreOffice)
 - New PDF features require manual implementation

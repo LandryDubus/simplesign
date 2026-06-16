@@ -28,13 +28,13 @@ Root CA certificates are embedded as assembly resources (`Certs/*.crt` in `Simpl
 
 | Validator | Certificates |
 |---|---|
-| ICP-Brasil | 13 AC Raiz (v4 through v13), covering all active and legacy roots |
-| Gov.br | 3 certs: AC Raiz, AC Intermediaria, AC Final v1 (valid until Jun 2033) |
+| ICP-Brasil | Multiple AC Raiz versions, covering all active and legacy roots |
+| Gov.br | Three-tier hierarchy: AC Raiz, AC Intermediaria, AC Final v1 |
 
 **Strategy B — AIA chasing (online, fallback):**
 When the bundled roots are insufficient or the chain includes intermediate CAs not present in the CMS certificate bag, `CertificateChainUtility.DownloadAiaCertsAsync()` performs BFS-based AIA chasing:
 - Starts with the signer certificate's AIA extension
-- Max 20 certificates (`maxCerts` guard)
+- Hard limit on certificate count (`maxCerts` guard)
 - URL deduplication via `visited` hash set
 - Supports DER, PEM, PKCS#12, and PKCS#7 (.p7b/.p7c) response formats
 
@@ -81,10 +81,10 @@ Revocation unknown is a warning because:
 
 | Check | Implementation |
 |---|---|
-| Policy detection | Searches Certificate Policies extension (OID 2.5.29.32) for OIDs matching `2.16.76.1.7.1.{policy}.{certType}.{version}`; 6 OID variants per policy (3 versions × 2 cert types: natural person / legal entity) |
-| Key size | ≥2048 bits per DOC-ICP-04.01 → runtime warning if smaller |
+| Policy detection | Searches Certificate Policies extension for ICP-Brasil OID patterns; multiple variants per policy across cert versions/types |
+| Key size | Enforces minimum key size per DOC-ICP-04.01 → runtime warning if below threshold |
 | EKU validation | Must include Document Signing, Email Protection, or Client Auth |
-| CPF/CNPJ extraction | Parses Subject Alternative Name for DirName = `2.16.76.1.3.{cpf/cnpj}` with check-digit validation |
+| CPF/CNPJ extraction | Parses Subject Alternative Name with check-digit validation |
 | Chain building | AIA chasing + `X509Chain` with bundled AC Raiz roots |
 
 **Gov.br (`GovBrChainValidator`):**
@@ -92,9 +92,9 @@ Revocation unknown is a warning because:
 | Check | Implementation |
 |---|---|
 | Detection | Issuer DN contains `O=Gov-Br` or certificate policy OID arc `2.16.76.3` |
-| Assurance levels | Reads byte after `60 92 4C 03 02` in policy extension DER: 1=Bronze, 2=Silver, 3=Gold, 4=Level |
+| Assurance levels | Extracted from policy extension DER |
 | CPF extraction | Parses SAN for DirName matching Gov.br format |
-| Chain building | 3 bundled certs (Raiz + Intermediaria + Final v1) + AIA chasing |
+| Chain building | Bundled hierarchy + AIA chasing |
 
 ### 5. How validators are consumed
 
@@ -131,8 +131,8 @@ Used for searching certificates across multiple locations (file system, OS store
 - OCSP/CRL revocation handling is delegated to the separate LTV pipeline, not `X509Chain.Build()`
 - Country-specific validators can be invoked independently of the standard validation pipeline
 - Policy OID detection uses raw DER byte searching (not `X509Certificate2.Extensions` parsing) — more robust but fragile to schema changes
-- CPF/CNPJ check-digit validation follows ICP-Brasil rules (11-digit CPF, 14-digit CNPJ)
-- The 3-tier Gov.br hierarchy does not require AIA chasing in most cases — bundled certs cover the full chain
+- CPF/CNPJ check-digit validation follows ICP-Brasil rules
+- The Gov.br bundled hierarchy covers the full chain in most cases without AIA chasing
 
 **Alternatives considered:**
 

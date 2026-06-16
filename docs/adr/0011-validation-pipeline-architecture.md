@@ -13,17 +13,11 @@ Design requirements:
 - The whole pipeline must be AOT-compatible
 
 **Decision:**
-A sequential 8-phase validation pipeline that accumulates results rather than failing fast, returning structured result objects (not exceptions) for all expected outcomes.
+A sequential multi-phase validation pipeline that accumulates results rather than failing fast, returning structured result objects (not exceptions) for all expected outcomes.
 
 ### 1. Core orchestrator: `PdfSignatureValidator`
 
-Entry points:
-
-| Method | Input | Output |
-|---|---|---|
-| `ValidateAsync` | PDF stream | `IReadOnlyList<SignatureValidationResult>` |
-| `ValidateFieldAsync` | PDF stream + field name | `SignatureValidationResult?` |
-| `ValidateBatchAsync` | `IReadOnlyList<(Stream, Identifier)>` | `IReadOnlyList<BatchValidationResult>` |
+Entry points include single-PDF (`ValidateAsync`), single-field (`ValidateFieldAsync`), and batch (`ValidateBatchAsync`) overloads — all returning structured result objects (never throwing for expected failures).
 
 ### 2. Validation phases (executed sequentially per signature)
 
@@ -115,13 +109,7 @@ Also merges `ValidationOptions.TrustedRoots` and (if `TrustSystemRoots = true`) 
 
 ### 5. Revocation fallback chain
 
-Priority (checked in order, first definitive result wins):
-
-1. **Embedded DSS OCSPs** → `OcspClient.CheckEmbeddedOcspResponse()`
-2. **Embedded DSS CRLs** → `CrlClient.IsSerialInCrl()`
-3. **Online OCSP** → `OcspClient.CheckOcspWithChainAsync()`
-4. **Online CRL** → `CrlClient.CheckCrlAsync()`
-5. No URL found → `RevocationCheckException` → `RevocationSource.Indeterminate`
+Checked in priority order (embedded DSS OCSPs → embedded DSS CRLs → online OCSP → online CRL → indeterminate). First definitive result wins; ambiguous results fall through to the next step.
 
 At each step: if the result is definitive (revoked or not revoked), return immediately. If ambiguous (stale CRL, mismatched serial), fall through to the next step.
 
@@ -159,14 +147,7 @@ All properties use `init`-only setters (immutable). `IsValid` is a computed prop
 
 ### 8. Configuration
 
-**`ValidationOptions`** — immutable (`init`-only), with a `Default` static instance:
-
-| Property | Type | Default | Purpose |
-|---|---|---|---|
-| `CheckRevocation` | `bool` | `true` | Gate entire revocation phase |
-| `TrustSystemRoots` | `bool` | `true` | Include OS root CA store |
-| `TrustedRoots` | `IReadOnlyList<X509Certificate2>?` | `null` | Additional custom roots |
-| `NetworkTimeout` | `TimeSpan` | 10s | HTTP timeout for OCSP/CRL/AIA |
+**`ValidationOptions`** — immutable (`init`-only), with a `Default` static instance. Properties include revocation gating, trust anchor configuration, and network timeout.
 
 **Consequences:**
 - All validation outcomes are inspectable — consumers see every error, warning, and informational message across all phases
@@ -187,4 +168,4 @@ All properties use `init`-only setters (immutable). `IsValid` is a computed prop
 | **Event/callback per phase** | Decoupled pipeline evolution | Hard to trace, no single result | Rejected |
 | **Plugin-based validator discovery** | Zero-config extensibility | Reflection, AOT incompatible | Rejected |
 
-**Status:** Accepted. The 8-phase accumulating pipeline is the canonical validation architecture. Region-specific chain validation (`IChainValidationProvider`) integration into the built-in pipeline is deferred — currently invoked independently by consumers. `IChainValidationProvider` may be wired into the pipeline in a future version.
+**Status:** Accepted. The multi-phase accumulating pipeline is the canonical validation architecture. Region-specific chain validation (`IChainValidationProvider`) integration into the built-in pipeline is deferred — currently invoked independently by consumers. `IChainValidationProvider` may be wired into the pipeline in a future version.

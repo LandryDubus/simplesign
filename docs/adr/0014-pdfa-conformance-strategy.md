@@ -63,13 +63,7 @@ if (ms.Length > 0 && ms.GetBuffer()[ms.Length - 1] is not (byte)'\n' and not (by
     ms.WriteByte((byte)'\n');
 ```
 
-Called by all three incremental writers before writing the first new object:
-
-| Writer | Location |
-|---|---|
-| `PdfSignatureWriter.PrepareAsync` | Line ~462 |
-| `LtvEmbedder.EmbedLtvDataAsync` | Line ~370 |
-| `DocTimeStampWriter.AppendDocTimeStampAsync` | Line ~131 |
+Called by all three incremental writers (`PdfSignatureWriter`, `LtvEmbedder`, `DocTimeStampWriter`) before writing the first new object.
 
 Satisfies ISO 32000 §7.3.10 (VeraPDF rule `spacingCompliesPDFA`).
 
@@ -91,7 +85,7 @@ Because the original PDF bytes are never modified, the XMP metadata containing `
 
 PDF/A-1 requires all fonts to be embedded, including the standard 14. When a visible signature appearance is rendered using Helvetica (the typical case), SimpleSign embeds LiberationSans — a metric-compatible, OFL-licensed substitute.
 
-**Font file:** `LiberationSans-subset.ttf` (embedded as assembly resource, ~200 WinAnsi glyphs from position 32 to 255)
+**Font file:** `LiberationSans-subset.ttf` (embedded as assembly resource, WinAnsi subset)
 
 **Font embedding workflow in `PdfSignatureWriter.PrepareAsync`:**
 
@@ -108,7 +102,7 @@ For invisible signatures or non-Helvetica fonts, Type1 Base14 references are use
 
 ### 5. Cross-platform verification
 
-PDF/A conformance after signing is verified against 11 veraPDF corpus files covering PDF/A-1b, A-2b, and A-3b variants, using Docker-based veraPDF:
+PDF/A conformance after signing is verified against veraPDF corpus files covering PDF/A-1b, A-2b, and A-3b variants, using Docker-based veraPDF:
 
 | Test | Scenario |
 |---|---|
@@ -120,13 +114,7 @@ Also verified with dockerized pdfbox (parse succeeds) and pyHanko/DSS (signature
 
 ### 6. API surface
 
-| Layer | API | Activated by |
-|---|---|---|
-| **Detection** | `PdfStructureReader.DetectPdfALevel()` | Automatic during validation |
-| **Pre-signing check** | `PdfAPreservationValidator.ValidateAsync()` | `SignerBuilder.WithPdfAPreservation()` |
-| **Widget flags** | Hardcoded `/F 132` | Always (all signatures) |
-| **EOL guard** | `EnsureTrailingEol()` | Always (all incremental updates) |
-| **Font embedding** | Automatic in appearance renderer | When visible signature requested |
+Five layers: automatic PDF/A level detection (during validation), pre-signing validation (`.WithPdfAPreservation()`), widget flags (`/F 132` — always set), EOL guard (always applied), and automatic font embedding (for visible signatures).
 
 CLI: `--preserve-pdf-a` flag
 HostSigner: `preservePdfA` JSON config option
@@ -134,7 +122,7 @@ HostSigner: `preservePdfA` JSON config option
 **Consequences:**
 - PDF/A conformance is preserved through all signing operations — B-B, B-T, B-LT, and B-LTA
 - No OutputIntent or ICCProfile management — existing color profiles are preserved via incremental save
-- LiberationSans is ~200 glyphs (WinAnsi subset) → ~80 KB compressed, vs full TTF at ~500 KB
+- LiberationSans is subset to WinAnsi (smaller than the full TTF)
 - ZLibStream (RFC 1950) is used for compression, not raw DeflateStream — matches PDF expectations for `/FlateDecode`
 - Widths array in 1000 UPM (ISO 32000-1 §9.2.2), scaled from LiberationSans' native 2048 UPM
 - PDF/A-1 documents require a visible signature appearance (to provide `/AP` dictionary) and `adbe.pkcs7.detached` SubFilter
@@ -146,7 +134,7 @@ HostSigner: `preservePdfA` JSON config option
 
 | Approach | Pros | Cons | Verdict |
 |---|---|---|---|
-| **Fully embedded TrueType (LiberationSans, chosen)** | PDF/A-1 compliant, OFL-licensed | Binary size increase (~80 KB) | **Chosen** |
+| **Fully embedded TrueType (LiberationSans, chosen)** | PDF/A-1 compliant, OFL-licensed | Binary size increase (subset TTF embedded) | **Chosen** |
 | **Base14 Type1 references only** | No binary size increase | Non-compliant for PDF/A-1 (must embed) | Rejected |
 | **Custom subtype font** | Full control | Reader compatibility risk | Rejected |
 | **PNG-forced for PDF/A-1** | Simpler code path | Transparent PNG rejected by VeraPDF | Rejected |

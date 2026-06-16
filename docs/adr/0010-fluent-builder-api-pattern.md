@@ -28,48 +28,27 @@ All three return a `new SignerBuilder(...)` wrapping the PDF in a `MemoryStream`
 
 ### 2. Immutable builder pattern
 
-`SignerBuilder` holds 20 configuration items (19 private readonly fields + 1 public auto-property `CountryExtensions`). Every `With*` method returns a **new instance** via a private copy constructor.
+`SignerBuilder` holds configuration items as `private readonly` fields. Every `With*` method returns a **new instance** via a private copy constructor.
 
-**Copy constructor pattern:**
+**Copy constructor pattern (simplified — actual fields may differ):**
 
 ```csharp
 public sealed class SignerBuilder
 {
     private readonly Stream _inputPdf;
     private readonly X509Certificate2? _certificate;
-    private readonly IReadOnlyList<X509Certificate2>? _chain;
     private readonly string? _tsaUrl;
-    private readonly HashAlgorithmName _hashAlgorithm;
-    private readonly bool _hashAlgorithmExplicitlySet;
-    private readonly SignatureFieldOptions _fieldOptions;
-    private readonly HttpClient? _httpClient;
-    private readonly HttpClient? _tsaHttpClient;
-    private readonly IHttpClientProvider _httpClientProvider;
-    private readonly ILogger _logger;
-    private readonly Func<byte[], Task<byte[]>>? _externalSigner;
-    private readonly string? _signatureAlgorithmOid;
-    private readonly bool _enableLtv;
-    private readonly string? _archivalTsaUrl;
-    private readonly string? _operationId;
-    private readonly bool _enforcePdfA;
-    private readonly SignatureMetadata? _metadata;
-    private readonly bool _padesAttributes;
+    // ... more private readonly fields
+
     public IReadOnlyList<ICountryExtension> CountryExtensions { get; }
 
-    // Public constructor — called by SimpleSigner.Document()
     internal SignerBuilder(Stream inputPdf, ILogger? logger) { ... }
 
     // Private copy constructor — called by With(...)
     private SignerBuilder(
         Stream inputPdf, X509Certificate2? certificate,
-        IReadOnlyList<X509Certificate2>? chain, string? tsaUrl,
-        HashAlgorithmName hashAlgorithm, bool hashAlgorithmExplicitlySet,
-        SignatureFieldOptions fieldOptions, HttpClient? httpClient,
-        HttpClient? tsaHttpClient, IHttpClientProvider? httpClientProvider,
-        ILogger logger, Func<byte[], Task<byte[]>>? externalSigner,
-        string? signatureAlgorithmOid, bool enableLtv, string? archivalTsaUrl,
-        string? operationId, bool enforcePdfA, SignatureMetadata? metadata,
-        bool padesAttributes, IReadOnlyList<ICountryExtension>? countryExtensions) { ... }
+        // ... all fields passed explicitly ...
+        IReadOnlyList<ICountryExtension>? countryExtensions) { ... }
 
     // Private helper — creates new instance carrying forward unchanged fields
     private SignerBuilder With(
@@ -92,28 +71,13 @@ var signed = SimpleSigner.Document(pdf)
 
 ### 3. Configuration methods (all on `SignerBuilder`, not extensions)
 
-| Category | Methods |
-|---|---|
-| **Certificate** | `WithCertificate(cert)`, `WithCertificate(cert, chain)` |
-| **Timestamp** | `WithTimestamp(url)`, `WithTimestamp(url, httpClient)` |
-| **HTTP** | `WithHttpClient(client)`, `WithHttpClientProvider(provider)` |
-| **Signing** | `WithHashAlgorithm(name)`, `WithSignatureAlgorithm(oid)`, `WithExternalSigner(fn)` |
-| **Metadata** | `WithSignerName(name)`, `WithFieldName(name)`, `WithMetadata(metadata)` |
-| **Appearance** | `WithAppearance(appearance)`, `AsCertification(level)` |
-| **PAdES level** | `WithLtv()`, `WithArchivalTimestamp(url)` |
-| **PDF/A** | `WithPdfAPreservation()` |
-| **SubFilter** | `WithSubFilter(filter)`, `WithLegacyCms()` |
-| **Advanced** | `WithExistingField(name)`, `WithOperationId(id)` |
+Methods are grouped by concern: certificate, timestamp, HTTP, signing algorithm, metadata, appearance, PAdES level (B-T, B-LT, B-LTA), PDF/A conformance, SubFilter selection, and advanced options (existing field targeting, operation IDs).
 
 The only extension method in a separate assembly is `SignerBuilderBrasilExtensions.WithAdvancedSignature()` in `SimpleSign.Brasil`.
 
 ### 4. Terminal methods
 
-| Method | Returns |
-|---|---|
-| `SignAsync(stream, ct)` | `Task` — writes signed PDF to stream |
-| `SignAsync(ct)` | `Task<byte[]>` — returns signed PDF bytes |
-| `SignWithDetailsAsync(ct)` | `Task<PdfSigningResult>` — bytes + warnings + DSS flag |
+Three overloads: stream-target (`SignAsync(stream, ct)` returns `Task`), byte-array (`SignAsync(ct)` returns `Task<byte[]>`), and detailed (`SignWithDetailsAsync(ct)` returns `Task<PdfSigningResult>` with metadata).
 
 ### 5. Local vs. external signing
 
@@ -149,24 +113,16 @@ var signedPdf = await DeferredSigner.CompleteAsync(sessionData, rawSig);
 
 ### 7. Validation upfront
 
-Before any PDF modification, `SignCoreAsync` validates:
-
-| Check | Error |
-|---|---|
-| Certificate present and has private key (or external signer set) | `InvalidOperationException` |
-| Certificate not expired | `ArgumentException` |
-| DocMDP lock (prior certification forbids modification) | `InvalidOperationException` |
-| PDF/A preservation enabled → `PdfAPreservationValidator` checks pass | `SigningException` |
-| PAdES level sequence respected (timestamp before LTV before archival) | `InvalidOperationException` |
+Before any PDF modification, `SignCoreAsync` validates: certificate presence/availability, certificate expiry, DocMDP lock, PDF/A compatibility (when enabled), and PAdES level sequencing.
 
 **Consequences:**
 - Thread-safe by construction: all builder state is `readonly`, shared across threads safely
 - Immutable pattern prevents stale-read bugs: each `With*` starts from the previous state
 - AOT compatible: callbacks use `Func<>` delegates, no dynamic invocation, no `Expression` trees
 - Single obvious way to create a signer: `SimpleSigner.Document()` → `SignerBuilder` → terminal method
-- Allocation overhead per `With*` call (20-item copy per operation) — negligible for typical usage (<10 calls)
+- Allocation overhead per `With*` call (full fields copy per operation) — negligible for typical usage
 - Validation upfront prevents late failures after PDF modification
-- `DeferredSigner` requires session state management; opaque blob approach avoids server-side storage but blobs can be large (~100 KB)
+- `DeferredSigner` requires session state management; opaque blob approach avoids server-side storage but blobs can be large
 - `BatchSigner` uses a mutable inner builder (`BatchSignerBuilder` returning `this`) — optimised for performance, not thread-safety
 
 **Alternatives considered:**

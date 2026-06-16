@@ -33,19 +33,11 @@ Single-method interface — intentionally minimal to be AOT-safe and trimmable.
 
 ### 2. Two built-in implementations
 
-| Implementation | Use case |
-|----------------|----------|
-| `DefaultHttpClientProvider` | Static singleton for simple console/app scenarios. Uses shared `HttpClient` with `SocketsHttpHandler` |
-| `HttpClientFactoryProvider` | ASP.NET Core DI. Wraps `IHttpClientFactory.CreateClient(name)`. Uses `SimpleSignOptions.HttpClientName` |
+Two built-in implementations are provided: `DefaultHttpClientProvider` (static singleton for simple scenarios) and `HttpClientFactoryProvider` (ASP.NET Core DI, wraps `IHttpClientFactory`).
 
 ### 3. Per-operation client slots
 
-| Operation | Client source | Method |
-|-----------|--------------|--------|
-| TSA (signature timestamp) | TSA-specific `HttpClient` | `WithTimestamp(url, httpClient)` |
-| Revocation (OCSP/CRL/AIA) | Provider or default | `WithHttpClient(client)` or `WithHttpClientProvider(provider)` |
-| TSA (archival DocTimeStamp) | TSA-specific `HttpClient` | Same as signature timestamp |
-| TSA fallback | Provider or default | When no TSA-specific client configured |
+TSA operations get a dedicated `HttpClient` (via `WithTimestamp(url, httpClient)`). Revocation (OCSP/CRL/AIA) uses the general provider or default. This separation prevents TSA authentication from leaking to revocation calls.
 
 ### Lazy resolution
 

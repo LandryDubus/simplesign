@@ -63,7 +63,7 @@ The `sessionData` is an opaque blob that encodes the PDF state between phases. T
 | Approach | Pros | Cons | Verdict |
 |----------|------|------|---------|
 | **Session IDs + server storage** | Simpler API | Requires persistent storage, cleanup complexity, scaling issues | Rejected |
-| **Opaque blob (chosen)** | Stateless, no server storage | Blob can be large (~100 KB with full PDF state) | **Chosen** |
+| **Opaque blob (chosen)** | Stateless, no server storage | Blob can be large (includes full PDF state) | **Chosen** |
 | **SignedInfo for pre-signed CMS** | Standards-compliant (RFC 5652) | More complex implementation, not supported by all HSMs | Rejected |
 
 **Status:** This decision is accepted. Both patterns will remain the primary way to sign with external/remote keys.

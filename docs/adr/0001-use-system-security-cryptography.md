@@ -3,7 +3,7 @@
 **Status:** Accepted (permanent)
 
 **Context:**
-Digital signature libraries in .NET traditionally depend on BouncyCastle (Org.BouncyCastle) for cryptographic operations, ASN.1 parsing, and CMS/PKCS#7 construction. This dependency adds ~2 MB to the deployment footprint, creates version conflicts with other libraries, and introduces AOT compatibility challenges.
+Digital signature libraries in .NET traditionally depend on BouncyCastle (Org.BouncyCastle) for cryptographic operations, ASN.1 parsing, and CMS/PKCS#7 construction. This dependency adds significant size to the deployment footprint, creates version conflicts with other libraries, and introduces AOT compatibility challenges.
 
 **Decision:**
 SimpleSign uses exclusively `System.Security.Cryptography` from the .NET BCL. This includes:

@@ -36,14 +36,7 @@ Two sub-interfaces (in `SimpleSign.Core.Extensions`):
 
 ### 2. BrasilExtension — reference implementation
 
-`BrasilExtension` bundles 4 internal classes:
-
-| Class | Interface | Responsibility |
-|---|---|---|
-| `IcpBrasilTrustAnchorProvider` | `ITrustAnchorProvider` | Loads 13 AC Raiz certificates (v4–v13) from assembly resources |
-| `GovBrTrustAnchorProvider` | `ITrustAnchorProvider` | Loads Gov.br AC Raiz + Intermediaria + Final from resources |
-| `IcpBrasilChainValidationProvider` | `IChainValidationProvider` | Detects ICP-Brasil policy OIDs (AD-RB → AD-RA), extracts CPF/CNPJ from SAN |
-| `GovBrChainValidationProvider` | `IChainValidationProvider` | Detects Gov.br assurance levels (Bronze/Silver/Gold/Level), extracts CPF |
+`BrasilExtension` bundles 4 internal classes: two `ITrustAnchorProvider` implementations (one per PKI hierarchy) loading bundled root certificates, and two `IChainValidationProvider` implementations for ICP-Brasil and Gov.br policy detection and identity extraction.
 
 ### 3. Registration
 
@@ -76,7 +69,7 @@ SimpleSigner.Document(pdf)
 - Trust anchors can be offline (embedded resources) or online (AIA chasing or downloaded lists)
 - `IChainValidationProvider` is wired into `PdfSignatureValidator`'s built-in validation pipeline. After standard `X509Chain.Build()`, the first matching provider (via `CanValidate`) enriches the result. If the standard chain fails but a country provider trusts it, chain errors are demoted to warnings (`IsChainTrustWarning = true`).
 - `SignatureMetadata` is the canonical signer metadata type; `AdvancedSignatureInfo` is the Brazil-specific DTO that maps to it.
-- The manifest OID (`2.16.76.1.12.1.1`) is hard-coded in the CMS parser; manifest format is not extensible at runtime.
+- The manifest OID is hard-coded in the CMS parser; manifest format is not extensible at runtime.
 
 **Alternatives considered:**
 

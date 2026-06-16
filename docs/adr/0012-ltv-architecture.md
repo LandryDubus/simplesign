@@ -25,7 +25,7 @@ EmbedLtvDataAsync (input chain + optional timestamp token)
    │     ├─ Input chain → allCerts
    │     └─ Timestamp token → TSA certificates (via TsaCertificateExtractor)
    │
-   └─► Phase 2: Stabilisation Loop (max 10 iterations)
+   └─► Phase 2: Stabilisation Loop (bounded iterations)
          │
          └─► For each cert in workingSet:
                ├─ OcspNoCheck extension? → skip
@@ -36,18 +36,11 @@ EmbedLtvDataAsync (input chain + optional timestamp token)
          └─► Newly discovered certs → nextRound → workingSet for next iteration
 ```
 
-Limits:
-- **Max iterations:** 10 (prevents infinite loops from cyclic certificate references)
-- **Max AIA certs:** 20 (prevents certificate chain enumeration attacks)
-- **Parallelism:** All HTTP requests are sequential per certificate (OCSP before CRL before AIA)
+Limits include iteration and certificate count guards (prevents infinite loops from cyclic references) and sequential HTTP per certificate (OCSP before CRL before AIA).
 
 ### 2. OCSP → CRL → AIA fallback
 
-| Priority | Source | Method | Responder cert chase |
-|---|---|---|---|
-| 1 | OCSP | `OcspClient.FetchOcspResponseAsync()` | ✓ responder certs from OCSP response |
-| 2 | CRL | `CrlClient.GetCrlUrl()` + download | ✓ indirect CRL issuer via AIA caIssuers |
-| 3 | AIA | `CertificateChainUtility.DownloadAiaCertsAsync()` | ✓ (via chain building, not directly) |
+Revocation data is collected with OCSP as the preferred source (smaller, faster, more current), falling back to CRL, then AIA certificate discovery. Each source chases responder/issuer certificates transitively.
 
 OCSP is preferred because responses are smaller (typically <1 KB vs >10 KB for CRLs), faster (round-trip for a single cert vs downloading a full CRL), and more current (nextUpdate typically 7 days vs 30-90 days for CRLs).
 
@@ -111,7 +104,7 @@ The DSS is appended as an incremental PDF update:
 - LTV embedding is **stateful** (depends on HTTP responses from OCSP responders and CRL distribution points)
 - Network failures are non-fatal — failed fetches simply skip that revocation source; the DSS includes whatever was collected
 - The stabilisation loop ensures transitive dependencies are resolved (responder certs → their revocation data → their responders → ...)
-- `MaxIterations = 10` bounds worst-case runtime while allowing reasonably deep chains
+- Iteration bounds prevent infinite loops while allowing reasonably deep chains
 - VRI hash computation must correctly strip zero-padding bytes (a subtle but critical detail for signatures that share identical CMS data but different padding)
 - Multi-signature PDFs preserve prior DSS references and VRI entries, merging new data on top
 - Timestamp token certificates are included in the DSS certificate collection, enabling long-term verification of archive timestamps

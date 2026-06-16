@@ -23,7 +23,7 @@
 
 ## What is SimpleSign?
 
-SimpleSign is a .NET library for creating and validating **PAdES** digital signatures (ETSI EN 319 142) in PDF documents. All cryptography uses `System.Security.Cryptography` — no BouncyCastle, no third-party crypto dependencies.
+SimpleSign is a .NET library for creating and validating **PAdES** (ETSI EN 319 142) and **CAdES** (ETSI EN 319 122) digital signatures. All cryptography uses `System.Security.Cryptography` — no BouncyCastle, no third-party crypto dependencies.
 
 ---
 
@@ -39,7 +39,7 @@ SimpleSign is a .NET library for creating and validating **PAdES** digital signa
 
 ## What's New in v0.5.0
 
-SHA-3 hash + signature algorithms, EdDSA (Ed25519) external signer, QR code on visible signatures, DocMDP certification enforcement, client-side SHA-3/EdDSA compatibility with graceful fallback, `HttpClientFactoryProvider` + per-operation HTTP client slots, and CLI validate command. See the [full changelog](CHANGELOG.md) for details.
+**CAdES** — New standalone CMS/PKCS#7 signing library (ETSI EN 319 122) with B-B, B-T, B-LT, and B-LTA conformance levels, plus `cades sign`/`cades validate` CLI commands. Also: SHA-3 hash + signature algorithms, EdDSA (Ed25519) external signer, QR code on visible signatures, DocMDP certification enforcement, client-side SHA-3/EdDSA compatibility with graceful fallback, `HttpClientFactoryProvider` + per-operation HTTP client slots, and CLI validate command. See the [full changelog](CHANGELOG.md) for details.
 
 ---
 
@@ -110,6 +110,63 @@ foreach (var r in results)
     Console.WriteLine($"  Timestamp={r.HasValidTimestamp}");
     Console.WriteLine($"  Signer: {r.SignerName} at {r.SigningTime}");
 }
+```
+
+---
+
+### CAdES — Standalone CMS Signatures
+
+Create and validate detached CAdES signatures (CMS/PKCS#7 SignedData) for any binary data:
+
+```csharp
+using SimpleSign.CAdES;
+
+var data = File.ReadAllBytes("document.pdf");
+var cms = await CadesSigner.SignAsync(data, certificate);
+
+// CAdES-B-T (with timestamp)
+var cmsBt = await CadesSigner.SignAsync(data, certificate, new CadesSigningOptions
+{
+    TsaUrl = "http://timestamp.digicert.com",
+    Level = CadesLevel.Timestamped
+});
+
+// CAdES-B-LT (long-term with LTV data)
+var cmsBlt = await CadesSigner.SignAsync(data, certificate, new CadesSigningOptions
+{
+    TsaUrl = "http://timestamp.digicert.com",
+    Level = CadesLevel.LongTerm,
+    ExtraCertificates = chain
+});
+
+// CAdES-B-LTA (archival timestamp)
+var cmsBlta = await CadesSigner.SignAsync(data, certificate, new CadesSigningOptions
+{
+    TsaUrl = "http://timestamp.digicert.com",
+    Level = CadesLevel.Archive
+});
+
+File.WriteAllBytes("document.pdf.p7s", cms);
+```
+
+### Validate CAdES Signatures
+
+```csharp
+using SimpleSign.CAdES;
+
+var validator = new CadesSignatureValidator(
+    new ValidationOptions { CheckRevocation = false });
+
+var result = validator.Validate(cmsBytes, originalData, trustAnchors);
+
+Console.WriteLine($"Signer: {result.SignerCertificate?.Subject}");
+Console.WriteLine($"Integrity: {result.IsIntegrityValid}");
+Console.WriteLine($"Signature: {result.IsSignatureValid}");
+Console.WriteLine($"Chain: {result.IsCertificateChainValid}");
+Console.WriteLine($"Timestamp: {result.HasValidTimestamp}");
+Console.WriteLine($"LTV: {result.IsLtvDataValid}");
+Console.WriteLine($"Archive TS: {result.HasValidArchiveTimestamp}");
+Console.WriteLine($"Valid: {result.IsValid}");
 ```
 
 ---
@@ -347,6 +404,8 @@ var options = new ValidationOptions
 
 ## CLI Tool
 
+### PDF Signatures
+
 ```bash
 # Sign a PDF
 simplesign sign contract.pdf --cert mycert.pfx --password secret --timestamp
@@ -357,11 +416,33 @@ simplesign validate signed.pdf
 # Inspect
 simplesign inspect signed.pdf
 
-# Batch sign
-simplesign batch-sign ./documents/ --cert mycert.pfx --parallel 8
-
 # Extract CMS from signed PDF
 simplesign extract signed.pdf --output signature.p7s
+```
+
+### CAdES Signatures
+
+```bash
+# CAdES-B-B (basic)
+simplesign cades sign document.pdf --cert mycert.pfx
+
+# CAdES-B-T (with timestamp)
+simplesign cades sign document.pdf --cert mycert.pfx \
+    --tsa http://timestamp.digicert.com --level timestamped
+
+# CAdES-B-LT (long-term with LTV)
+simplesign cades sign document.pdf --cert mycert.pfx \
+    --tsa http://timestamp.digicert.com --level longterm --chain chain.pem
+
+# CAdES-B-LTA (with archival timestamp)
+simplesign cades sign document.pdf --cert mycert.pfx \
+    --tsa http://timestamp.digicert.com --level archive
+
+# Validate a CAdES detached signature
+simplesign cades validate document.pdf.p7s --data document.pdf
+
+# Validate with custom trust anchors
+simplesign cades validate document.pdf.p7s --data document.pdf --trust root-ca.pem
 ```
 
 ### Validation Output

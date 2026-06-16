@@ -42,7 +42,7 @@ internal static class ExtractOutputRenderer
 
         var firstSafe = SanitizeFieldName(signatures[0].FieldName);
         sb.AppendLine();
-        sb.AppendLine($"Tip: Validate with: simplesign cades-validate {firstSafe}.p7s --data {firstSafe}.bin");
+        sb.AppendLine($"Tip: Validate with: openssl smime -verify -in {firstSafe}.p7s -inform DER -content {firstSafe}.bin -noverify");
 
         return sb.ToString();
     }

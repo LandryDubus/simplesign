@@ -1,0 +1,207 @@
+using System.ComponentModel;
+using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
+using SimpleSign.CAdES;
+using SimpleSign.Core.Signing;
+using Spectre.Console;
+using Spectre.Console.Cli;
+
+namespace SimpleSign.Cli.Commands;
+
+[Description("Sign data with CAdES (CMS/PKCS#7 detached signature)")]
+internal sealed class CadesSignCommand : AsyncCommand<CadesSignCommand.Settings>
+{
+    internal sealed class Settings : CommonSettings
+    {
+        [CommandArgument(0, "<input>")]
+        [Description("Input data file to sign")]
+        public string InputPath { get; init; } = null!;
+
+        [CommandOption("--cert|-c <PATH>")]
+        [Description("PKCS#12 certificate file (.pfx/.p12)")]
+        public string? CertPath { get; init; }
+
+        [CommandOption("--password|-p <PASSWORD>")]
+        [Description("Certificate password (omit for interactive prompt)")]
+        public string? Password { get; init; }
+
+        [CommandOption("--output|-o <PATH>")]
+        [Description("Output signature file (default: <input>.p7s)")]
+        public string? OutputPath { get; init; }
+
+        [CommandOption("--tsa <URL>")]
+        [Description("TSA URL for timestamp (CAdES-B-T or higher)")]
+        public string? TsaUrl { get; init; }
+
+        [CommandOption("--level <LEVEL>")]
+        [Description("CAdES conformance level: basic, timestamped, longterm, archive (default: basic)")]
+        public string? Level { get; init; }
+
+        [CommandOption("--hash|-H <ALGO>")]
+        [Description("Hash algorithm: SHA256, SHA384, SHA512 (default: SHA256)")]
+        public string? HashAlgorithm { get; init; }
+
+        [CommandOption("--commitment <TYPE>")]
+        [Description("Commitment type: ProofOfOrigin, ProofOfApproval")]
+        public string? Commitment { get; init; }
+
+        [CommandOption("--policy-oid <OID>")]
+        [Description("Signature policy OID")]
+        public string? PolicyOid { get; init; }
+
+        [CommandOption("--policy-uri <URI>")]
+        [Description("Signature policy URI")]
+        public string? PolicyUri { get; init; }
+
+        [CommandOption("--chain <PATH>")]
+        [Description("PEM/DER file with intermediate CA certificates")]
+        public string? ChainPath { get; init; }
+
+        public override ValidationResult Validate()
+        {
+            if (!File.Exists(InputPath))
+            {
+                return ValidationResult.Error($"File not found: {InputPath}");
+            }
+
+            if (CertPath is not null && !File.Exists(CertPath))
+            {
+                return ValidationResult.Error($"Certificate file not found: {CertPath}");
+            }
+
+            if (Level is not null && !ParseLevel(Level).HasValue)
+            {
+                return ValidationResult.Error($"Invalid level: {Level}. Valid: basic, timestamped, longterm, archive");
+            }
+
+            if (HashAlgorithm is not null && !ParseHashAlgorithm(HashAlgorithm).HasValue)
+            {
+                return ValidationResult.Error($"Invalid hash algorithm: {HashAlgorithm}. Valid: SHA256, SHA384, SHA512");
+            }
+
+            return ValidationResult.Success();
+        }
+    }
+
+    protected override async Task<int> ExecuteAsync(
+        CommandContext context, Settings settings, CancellationToken cancellationToken)
+    {
+        byte[] data = await File.ReadAllBytesAsync(settings.InputPath, cancellationToken);
+
+        using X509Certificate2 cert = await LoadCertificateAsync(settings, cancellationToken);
+
+        var level = ParseLevel(settings.Level) ?? CadesLevel.Basic;
+        var hashAlg = ParseHashAlgorithm(settings.HashAlgorithm) ?? HashAlgorithmName.SHA256;
+        var commitment = settings.Commitment is not null ? ParseCommitment(settings.Commitment) : null;
+
+        var options = new CadesSigningOptions
+        {
+            Level = level,
+            HashAlgorithm = hashAlg,
+            TsaUrl = settings.TsaUrl,
+            CommitmentType = commitment,
+            SignaturePolicyOid = settings.PolicyOid,
+            SignaturePolicyUri = settings.PolicyUri,
+            ExtraCertificates = settings.ChainPath is not null ? LoadChainCertificates(settings.ChainPath) : null
+        };
+
+        var logger = settings.CreateLogger<CadesSignCommand>();
+        byte[] cms = await CadesSigner.SignAsync(data, cert, options, logger, cancellationToken);
+
+        string outputPath = settings.OutputPath ?? settings.InputPath + ".p7s";
+        await File.WriteAllBytesAsync(outputPath, cms, cancellationToken);
+
+        AnsiConsole.MarkupLine($"[green]CAdES signature saved to:[/] {outputPath}");
+
+        return 0;
+    }
+
+    private static async Task<X509Certificate2> LoadCertificateAsync(Settings settings, CancellationToken ct)
+    {
+        if (settings.CertPath is not null)
+        {
+            string? password = settings.Password;
+            password ??= await PasswordResolver.ResolveAsync(password, isInteractive: true);
+
+            return new X509Certificate2(settings.CertPath, password, X509KeyStorageFlags.Exportable);
+        }
+
+        // Fallback: try current user store
+        using var store = new X509Store(StoreName.My, StoreLocation.CurrentUser);
+        store.Open(OpenFlags.ReadOnly);
+        var certs = store.Certificates
+            .Find(X509FindType.FindByTimeValid, DateTimeOffset.UtcNow, validOnly: true)
+            .Find(X509FindType.FindByKeyUsage, X509KeyUsageFlags.DigitalSignature, validOnly: false);
+
+        return certs.Count > 0
+            ? certs[0]
+            : throw new InvalidOperationException("No certificate found. Use --cert to specify a PFX file.");
+    }
+
+    private static IReadOnlyList<X509Certificate2> LoadChainCertificates(string chainPath)
+    {
+        var certs = new List<X509Certificate2>();
+        byte[] raw = File.ReadAllBytes(chainPath);
+
+        try
+        {
+            var single = new X509Certificate2(raw);
+            certs.Add(single);
+            return certs.AsReadOnly();
+        }
+        catch
+        {
+            // Try as PEM bundle
+        }
+
+        var text = System.Text.Encoding.ASCII.GetString(raw);
+        var reader = new StringReader(text);
+        var pemBuilder = new System.Text.StringBuilder();
+        bool inCert = false;
+
+        while (reader.ReadLine() is { } line)
+        {
+            if (line.Contains("BEGIN CERTIFICATE"))
+            {
+                inCert = true;
+                pemBuilder.Clear();
+            }
+            else if (line.Contains("END CERTIFICATE") && inCert)
+            {
+                inCert = false;
+                byte[] der = Convert.FromBase64String(pemBuilder.ToString());
+                certs.Add(new X509Certificate2(der));
+            }
+            else if (inCert)
+            {
+                pemBuilder.Append(line);
+            }
+        }
+
+        return certs.AsReadOnly();
+    }
+
+    private static CadesLevel? ParseLevel(string? level) => level?.ToLowerInvariant() switch
+    {
+        "basic" or "b-b" => CadesLevel.Basic,
+        "timestamped" or "b-t" => CadesLevel.Timestamped,
+        "longterm" or "b-lt" => CadesLevel.LongTerm,
+        "archive" or "b-lta" => CadesLevel.Archive,
+        _ => null
+    };
+
+    private static HashAlgorithmName? ParseHashAlgorithm(string? algo) => algo?.ToUpperInvariant() switch
+    {
+        "SHA256" => HashAlgorithmName.SHA256,
+        "SHA384" => HashAlgorithmName.SHA384,
+        "SHA512" => HashAlgorithmName.SHA512,
+        _ => null
+    };
+
+    private static CommitmentType? ParseCommitment(string? type) => type?.ToLowerInvariant() switch
+    {
+        "proofoforigin" or "origin" => CommitmentType.ProofOfOrigin,
+        "proofofapproval" or "approval" => CommitmentType.ProofOfApproval,
+        _ => null
+    };
+}

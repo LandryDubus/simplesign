@@ -17,6 +17,12 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleTo">
+      <_Parameter1>SimpleSign.HostSigner.Tests</_Parameter1>
+    </AssemblyAttribute>
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\SimpleSign.PAdES\SimpleSign.PAdES.csproj" />
     <ProjectReference Include="..\SimpleSign.Brasil\SimpleSign.Brasil.csproj" />
   </ItemGroup>

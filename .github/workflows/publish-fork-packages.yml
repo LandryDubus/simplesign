@@ -1,0 +1,110 @@
+name: Publish Fork Packages
+
+on:
+  workflow_dispatch:
+    inputs:
+      prerelease_label:
+        description: Prerelease label appended to the package version
+        required: false
+        default: fork
+        type: string
+      skip_tests:
+        description: Skip unit tests before packing
+        required: false
+        default: false
+        type: boolean
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    name: Build, Pack, and Publish
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: |
+            8.0.x
+            10.0.x
+
+      - name: Compute package version
+        id: version
+        shell: bash
+        run: |
+          base_version=$(sed -n 's|.*<Version>\(.*\)</Version>.*|\1|p' Directory.Build.props | head -n 1)
+          if [ -z "$base_version" ]; then
+            echo "Unable to determine base version from Directory.Build.props" >&2
+            exit 1
+          fi
+
+          label=$(echo "${{ inputs.prerelease_label }}" | tr '[:upper:]' '[:lower:]' | sed 's/[^0-9a-z-]/-/g; s/-\{2,\}/-/g; s/^-//; s/-$//')
+          branch=$(echo "${GITHUB_REF_NAME}" | tr '[:upper:]' '[:lower:]' | sed 's/[^0-9a-z-]/-/g; s/-\{2,\}/-/g; s/^-//; s/-$//' | cut -c1-20)
+
+          if [ -z "$label" ]; then
+            label=fork
+          fi
+
+          if [ -z "$branch" ]; then
+            branch=manual
+          fi
+
+          version="${base_version}-${label}.${branch}.${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}"
+          feed_url="https://nuget.pkg.github.com/${GITHUB_REPOSITORY_OWNER}/index.json"
+
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "feed_url=$feed_url" >> "$GITHUB_OUTPUT"
+
+      - name: Restore
+        run: dotnet restore SimpleSign.sln
+
+      - name: Build
+        run: dotnet build SimpleSign.sln --no-restore --configuration Release -p:Version=${{ steps.version.outputs.version }}
+
+      - name: Test
+        if: ${{ !inputs.skip_tests }}
+        run: dotnet test tests/unit/ --no-build --configuration Release --filter "Category!=Stress" --verbosity quiet
+
+      - name: Pack libraries
+        shell: bash
+        run: |
+          mkdir -p nupkgs
+          for proj in \
+            src/SimpleSign/SimpleSign.csproj \
+            src/SimpleSign.Core/SimpleSign.Core.csproj \
+            src/SimpleSign.Pdf/SimpleSign.Pdf.csproj \
+            src/SimpleSign.PAdES/SimpleSign.PAdES.csproj \
+            src/SimpleSign.CAdES/SimpleSign.CAdES.csproj \
+            src/SimpleSign.Brasil/SimpleSign.Brasil.csproj \
+            src/SimpleSign.HtmlToPdf/SimpleSign.HtmlToPdf.csproj; do
+            dotnet pack "$proj" --configuration Release --no-build --output ./nupkgs -p:Version=${{ steps.version.outputs.version }}
+          done
+
+      - name: Publish to GitHub Packages
+        run: >-
+          dotnet nuget push "nupkgs/*.nupkg"
+          --api-key "${{ secrets.GITHUB_TOKEN }}"
+          --source "${{ steps.version.outputs.feed_url }}"
+          --skip-duplicate
+
+      - name: Upload package artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: nupkgs-${{ steps.version.outputs.version }}
+          path: nupkgs/*.nupkg
+
+      - name: Write workflow summary
+        run: |
+          echo "Published version: ${{ steps.version.outputs.version }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "Feed: ${{ steps.version.outputs.feed_url }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "Install source: dotnet nuget add source ${{ steps.version.outputs.feed_url }} --name github-${{ github.repository_owner }} --username ${{ github.repository_owner }} --password <PAT-with-read:packages> --store-password-in-clear-text" >> "$GITHUB_STEP_SUMMARY"

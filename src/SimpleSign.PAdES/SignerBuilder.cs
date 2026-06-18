@@ -736,14 +736,7 @@ public sealed class SignerBuilder
         where T : ICountryExtension, new()
     {
         var extension = new T();
-        var newExtensions = new List<ICountryExtension>(CountryExtensions.Count + 1);
-        newExtensions.AddRange(CountryExtensions);
-        newExtensions.Add(extension);
-        return new(
-            _inputPdf, _certificate, _chain, _tsaUrl, _hashAlgorithm,
-            _hashAlgorithmExplicitlySet, _fieldOptions, _httpClient, _tsaHttpClient, _httpClientProvider, _logger, _externalSigner,
-            _signatureAlgorithmOid, _enableLtv, _archivalTsaUrl, _operationId, _enforcePdfA,
-            _metadata, _padesAttributes, newExtensions.AsReadOnly());
+        return AddCountryExtension(extension);
     }
 
     /// <summary>
@@ -753,6 +746,11 @@ public sealed class SignerBuilder
     public SignerBuilder WithCountryExtension(ICountryExtension extension)
     {
         ArgumentNullException.ThrowIfNull(extension);
+        return AddCountryExtension(extension);
+    }
+
+    private SignerBuilder AddCountryExtension(ICountryExtension extension)
+    {
         var newExtensions = new List<ICountryExtension>(CountryExtensions.Count + 1);
         newExtensions.AddRange(CountryExtensions);
         newExtensions.Add(extension);

@@ -156,6 +156,7 @@ public sealed class CadesSignerBuilder
         ArgumentNullException.ThrowIfNull(certificate);
         ArgumentNullException.ThrowIfNull(externalSigner);
         string sigAlgOid = CryptoUtility.DetectSignatureAlgorithmOid(certificate, _hashAlgorithm);
+        CmsSignatureBuilder.ValidateSignatureAlgorithmCompatibility(certificate, sigAlgOid);
         return With(certificate: certificate, externalSigner: externalSigner,
             signatureAlgorithmOid: sigAlgOid);
     }
@@ -204,7 +205,7 @@ public sealed class CadesSignerBuilder
     /// </summary>
     public CadesSignerBuilder WithOperationId(string operationId)
     {
-        ArgumentNullException.ThrowIfNull(operationId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(operationId);
         return With(operationId: operationId);
     }
 
@@ -277,7 +278,14 @@ public sealed class CadesSignerBuilder
             cms = await SignLocalCoreAsync(warnings, cancellationToken).ConfigureAwait(false);
         }
 
-        return new CadesSigningResult { Cms = cms, Warnings = warnings };
+        return new CadesSigningResult
+        {
+            Cms = cms,
+            TimestampApplied = _level >= CadesLevel.Timestamped && _tsaUrl is not null,
+            LtvDataEmbedded = _level >= CadesLevel.LongTerm,
+            ArchiveTimestampApplied = _level >= CadesLevel.Archive && _tsaUrl is not null,
+            Warnings = warnings
+        };
     }
 
     private async Task<byte[]> SignLocalCoreAsync(
@@ -461,7 +469,7 @@ public sealed class CadesSignerBuilder
         var httpClient = _tsaHttpClient ?? DefaultHttpClientProvider.Instance.GetClient();
         var tsaClient = new TimestampClient(httpClient, _tsaUrl!, _logger);
 
-        byte[] cmsHash = ComputeCmsDigest(cms, hashAlg);
+        byte[] cmsHash = CryptoUtility.ComputeHash(cms, hashAlg);
         byte[] tsToken = await tsaClient.GetTimestampAsync(cmsHash, hashAlg, ct).ConfigureAwait(false);
 
         return CmsSignatureBuilder.AddUnsignedAttributes(cms,
@@ -470,17 +478,4 @@ public sealed class CadesSignerBuilder
         ]);
     }
 
-    private static byte[] ComputeCmsDigest(byte[] cms, HashAlgorithmName hashAlg)
-    {
-        return hashAlg.Name switch
-        {
-            nameof(HashAlgorithmName.SHA256) => SHA256.HashData(cms),
-            nameof(HashAlgorithmName.SHA384) => SHA384.HashData(cms),
-            nameof(HashAlgorithmName.SHA512) => SHA512.HashData(cms),
-            nameof(HashAlgorithmName.SHA3_256) => SHA3_256.HashData(cms),
-            nameof(HashAlgorithmName.SHA3_384) => SHA3_384.HashData(cms),
-            nameof(HashAlgorithmName.SHA3_512) => SHA3_512.HashData(cms),
-            _ => SHA256.HashData(cms)
-        };
-    }
 }

@@ -239,14 +239,7 @@ public sealed class LtvEmbedder
             // with an EOL marker so any downstream incremental update is LF-preceded.
             // Avoid a full double-copy: check the last byte and only allocate when
             // the trailing EOL is actually missing.
-            if (signedPdf.Length > 0 && signedPdf[^1] != (byte)'\n' && signedPdf[^1] != (byte)'\r')
-            {
-                byte[] result = new byte[signedPdf.Length + 1];
-                signedPdf.CopyTo(result, 0);
-                result[^1] = (byte)'\n';
-                return result;
-            }
-
+            signedPdf = EnsureTrailingEol(signedPdf);
             return signedPdf;
         }
 
@@ -264,14 +257,7 @@ public sealed class LtvEmbedder
             // the EOL invariant the same way the "no data at all" path does.
             if (signatureHashPairs.Count == 0)
             {
-                if (signedPdf.Length > 0 && signedPdf[^1] != (byte)'\n' && signedPdf[^1] != (byte)'\r')
-                {
-                    byte[] result = new byte[signedPdf.Length + 1];
-                    signedPdf.CopyTo(result, 0);
-                    result[^1] = (byte)'\n';
-                    return result;
-                }
-
+                signedPdf = EnsureTrailingEol(signedPdf);
                 return signedPdf;
             }
         }
@@ -280,6 +266,18 @@ public sealed class LtvEmbedder
         var existingDss = Validation.DssExtractor.ParseExistingDss(signedPdf);
 
         return AppendDssDictionary(signedPdf, crlData, ocspData, allCerts, signatureHashPairs, existingDss, timestampTokenBytes);
+    }
+
+    private static byte[] EnsureTrailingEol(byte[] data)
+    {
+        if (data.Length > 0 && data[^1] != (byte)'\n' && data[^1] != (byte)'\r')
+        {
+            byte[] result = new byte[data.Length + 1];
+            data.CopyTo(result, 0);
+            result[^1] = (byte)'\n';
+            return result;
+        }
+        return data;
     }
 
     /// <summary>

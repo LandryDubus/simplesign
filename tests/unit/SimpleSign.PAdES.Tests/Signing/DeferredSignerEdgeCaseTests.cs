@@ -95,7 +95,7 @@ public sealed class DeferredSignerEdgeCaseTests
         };
 
         Func<Task> act = () => DeferredSigner.PrepareAsync(TestPdfFactory.CreateMinimalPdf(), cert, options);
-        (await Should.ThrowAsync<NotSupportedException>(act)).Message.ShouldContain("Cannot detect signature OID");
+        (await Should.ThrowAsync<NotSupportedException>(act)).Message.ShouldContain("detect signature OID");
     }
 
     // ── Extra certificates in chain ──────────────────────────────────────────

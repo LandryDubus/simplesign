@@ -847,36 +847,7 @@ public sealed class SignerBuilder
             CountryExtensions);
 
     private static string DetectSignatureAlgorithmOid(X509Certificate2 cert, HashAlgorithmName hashAlg)
-    {
-        string keyAlg = cert.PublicKey.Oid.Value ?? string.Empty;
-
-        // RSA-PSS: check SPKI OID (RFC 4055 §4) then signature algorithm (self-signed)
-        if (cert.PublicKey.Oid.Value == Oids.RsaPss || cert.SignatureAlgorithm.Value == Oids.RsaPss)
-        {
-            return Oids.RsaPss;
-        }
-
-        return (keyAlg, hashAlg) switch
-        {
-            (Oids.RsaEncryption, _) when hashAlg == HashAlgorithmName.SHA256 => Oids.RsaSha256,
-            (Oids.RsaEncryption, _) when hashAlg == HashAlgorithmName.SHA384 => Oids.RsaSha384,
-            (Oids.RsaEncryption, _) when hashAlg == HashAlgorithmName.SHA512 => Oids.RsaSha512,
-            (Oids.RsaEncryption, _) when hashAlg == HashAlgorithmName.SHA3_256 => Oids.RsaSha3_256,
-            (Oids.RsaEncryption, _) when hashAlg == HashAlgorithmName.SHA3_384 => Oids.RsaSha3_384,
-            (Oids.RsaEncryption, _) when hashAlg == HashAlgorithmName.SHA3_512 => Oids.RsaSha3_512,
-            (Oids.EcPublicKey, _) when hashAlg == HashAlgorithmName.SHA256 => Oids.EcdsaSha256,
-            (Oids.EcPublicKey, _) when hashAlg == HashAlgorithmName.SHA384 => Oids.EcdsaSha384,
-            (Oids.EcPublicKey, _) when hashAlg == HashAlgorithmName.SHA512 => Oids.EcdsaSha512,
-            (Oids.EcPublicKey, _) when hashAlg == HashAlgorithmName.SHA3_256 => Oids.EcdsaSha3_256,
-            (Oids.EcPublicKey, _) when hashAlg == HashAlgorithmName.SHA3_384 => Oids.EcdsaSha3_384,
-            (Oids.EcPublicKey, _) when hashAlg == HashAlgorithmName.SHA3_512 => Oids.EcdsaSha3_512,
-            (Oids.Ed25519, _) => Oids.Ed25519,
-            (Oids.Ed448, _) => Oids.Ed448,
-            _ => throw new NotSupportedException(
-                $"Cannot auto-detect signature OID for key '{cert.PublicKey.Oid.FriendlyName}' + hash '{hashAlg.Name}'. " +
-                "Use the overload that accepts signatureAlgorithmOid explicitly.")
-        };
-    }
+        => CryptoUtility.DetectSignatureAlgorithmOid(cert, hashAlg);
 
     private SignatureFieldOptions CloneOptions(
         string? fieldName = null,

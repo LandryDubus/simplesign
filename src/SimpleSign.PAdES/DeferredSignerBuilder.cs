@@ -158,7 +158,7 @@ public sealed class DeferredSignerBuilder
     }
 
     /// <summary>Specifies a custom signature algorithm OID. Default: auto-detected from certificate.</summary>
-    public DeferredSignerBuilder WithSignatureAlgorithmOid(string oid)
+    public DeferredSignerBuilder WithSignatureAlgorithm(string oid)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(oid);
         return With(signatureAlgorithmOid: oid);

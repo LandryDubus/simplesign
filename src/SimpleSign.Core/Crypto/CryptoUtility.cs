@@ -22,6 +22,40 @@ internal static class CryptoUtility
     }
 
     /// <summary>
+    /// Detects the CMS signature algorithm OID for a given certificate and hash algorithm.
+    /// Maps RSA+hash → PKCS#1 OIDs (RSA-SHA*), EC+hash → ECDSA OIDs, and handles PSS.
+    /// </summary>
+    internal static string DetectSignatureAlgorithmOid(X509Certificate2 cert, HashAlgorithmName hashAlg)
+    {
+        string keyAlg = cert.PublicKey.Oid.Value ?? string.Empty;
+
+        if (cert.PublicKey.Oid.Value == Oids.RsaPss || cert.SignatureAlgorithm.Value == Oids.RsaPss)
+        {
+            return Oids.RsaPss;
+        }
+
+        return (keyAlg, hashAlg) switch
+        {
+            (Oids.RsaEncryption, _) when hashAlg == HashAlgorithmName.SHA256 => Oids.RsaSha256,
+            (Oids.RsaEncryption, _) when hashAlg == HashAlgorithmName.SHA384 => Oids.RsaSha384,
+            (Oids.RsaEncryption, _) when hashAlg == HashAlgorithmName.SHA512 => Oids.RsaSha512,
+            (Oids.RsaEncryption, _) when hashAlg == HashAlgorithmName.SHA3_256 => Oids.RsaSha3_256,
+            (Oids.RsaEncryption, _) when hashAlg == HashAlgorithmName.SHA3_384 => Oids.RsaSha3_384,
+            (Oids.RsaEncryption, _) when hashAlg == HashAlgorithmName.SHA3_512 => Oids.RsaSha3_512,
+            (Oids.EcPublicKey, _) when hashAlg == HashAlgorithmName.SHA256 => Oids.EcdsaSha256,
+            (Oids.EcPublicKey, _) when hashAlg == HashAlgorithmName.SHA384 => Oids.EcdsaSha384,
+            (Oids.EcPublicKey, _) when hashAlg == HashAlgorithmName.SHA512 => Oids.EcdsaSha512,
+            (Oids.EcPublicKey, _) when hashAlg == HashAlgorithmName.SHA3_256 => Oids.EcdsaSha3_256,
+            (Oids.EcPublicKey, _) when hashAlg == HashAlgorithmName.SHA3_384 => Oids.EcdsaSha3_384,
+            (Oids.EcPublicKey, _) when hashAlg == HashAlgorithmName.SHA3_512 => Oids.EcdsaSha3_512,
+            (Oids.Ed25519, _) => Oids.Ed25519,
+            (Oids.Ed448, _) => Oids.Ed448,
+            _ => throw new NotSupportedException(
+                $"Cannot auto-detect signature OID for key '{cert.PublicKey.Oid.FriendlyName}' + hash '{hashAlg.Name}'.")
+        };
+    }
+
+    /// <summary>
     /// Computes a hash of the given data using the specified algorithm.
     /// </summary>
     internal static byte[] ComputeHash(ReadOnlySpan<byte> data, HashAlgorithmName algorithm) => algorithm switch

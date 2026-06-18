@@ -29,11 +29,9 @@ internal static class CryptoUtility
         _ when algorithm == HashAlgorithmName.SHA256 => SHA256.HashData(data),
         _ when algorithm == HashAlgorithmName.SHA384 => SHA384.HashData(data),
         _ when algorithm == HashAlgorithmName.SHA512 => SHA512.HashData(data),
-#if NET9_0_OR_GREATER
         _ when algorithm == HashAlgorithmName.SHA3_256 => SHA3_256.HashData(data),
         _ when algorithm == HashAlgorithmName.SHA3_384 => SHA3_384.HashData(data),
         _ when algorithm == HashAlgorithmName.SHA3_512 => SHA3_512.HashData(data),
-#endif
         _ => throw new NotSupportedException($"Hash algorithm '{algorithm.Name}' is not supported.")
     };
 

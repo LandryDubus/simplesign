@@ -178,6 +178,9 @@ internal static class IntegrityVerifier
             Oids.Sha256 => HashAlgorithmName.SHA256,
             Oids.Sha384 => HashAlgorithmName.SHA384,
             Oids.Sha512 => HashAlgorithmName.SHA512,
+            Oids.Sha3_256 => HashAlgorithmName.SHA3_256,
+            Oids.Sha3_384 => HashAlgorithmName.SHA3_384,
+            Oids.Sha3_512 => HashAlgorithmName.SHA3_512,
             Oids.Sha1 => HashAlgorithmName.SHA1,
             _ => throw new NotSupportedException($"Timestamp digest OID '{tstHashAlgOid}' not supported.")
         };
@@ -251,6 +254,9 @@ internal static class IntegrityVerifier
             Oids.Sha256 => HashAlgorithmName.SHA256,
             Oids.Sha384 => HashAlgorithmName.SHA384,
             Oids.Sha512 => HashAlgorithmName.SHA512,
+            Oids.Sha3_256 => HashAlgorithmName.SHA3_256,
+            Oids.Sha3_384 => HashAlgorithmName.SHA3_384,
+            Oids.Sha3_512 => HashAlgorithmName.SHA3_512,
             Oids.Sha1 => HashAlgorithmName.SHA1,
             _ => throw new NotSupportedException($"Digest OID '{cmsData.DigestAlgorithmOid}' not supported.")
         };
@@ -333,6 +339,15 @@ internal static class IntegrityVerifier
                 break;
             case Oids.Sha512:
                 SHA512.TryHashData(signedBytes, actualHash, out hashSize);
+                break;
+            case Oids.Sha3_256:
+                SHA3_256.TryHashData(signedBytes, actualHash, out hashSize);
+                break;
+            case Oids.Sha3_384:
+                SHA3_384.TryHashData(signedBytes, actualHash, out hashSize);
+                break;
+            case Oids.Sha3_512:
+                SHA3_512.TryHashData(signedBytes, actualHash, out hashSize);
                 break;
             case Oids.Sha1:
                 warnings.Add("Document uses SHA-1 digest (deprecated since 2016). " +

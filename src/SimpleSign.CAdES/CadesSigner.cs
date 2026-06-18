@@ -253,11 +253,9 @@ public static class CadesSigner
             nameof(HashAlgorithmName.SHA256) => SHA256.HashData(cms),
             nameof(HashAlgorithmName.SHA384) => SHA384.HashData(cms),
             nameof(HashAlgorithmName.SHA512) => SHA512.HashData(cms),
-#if NET9_0_OR_GREATER
             nameof(HashAlgorithmName.SHA3_256) => SHA3_256.HashData(cms),
             nameof(HashAlgorithmName.SHA3_384) => SHA3_384.HashData(cms),
             nameof(HashAlgorithmName.SHA3_512) => SHA3_512.HashData(cms),
-#endif
             _ => SHA256.HashData(cms)
         };
     }

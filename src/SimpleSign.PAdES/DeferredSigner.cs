@@ -280,6 +280,9 @@ public static class DeferredSigner
         Oids.Sha256 => HashAlgorithmName.SHA256,
         Oids.Sha384 => HashAlgorithmName.SHA384,
         Oids.Sha512 => HashAlgorithmName.SHA512,
+        Oids.Sha3_256 => HashAlgorithmName.SHA3_256,
+        Oids.Sha3_384 => HashAlgorithmName.SHA3_384,
+        Oids.Sha3_512 => HashAlgorithmName.SHA3_512,
         Oids.Sha1 => HashAlgorithmName.SHA1,
         _ => throw new NotSupportedException(
             $"Unsupported digest OID '{digestOid}' in deferred signing session.")

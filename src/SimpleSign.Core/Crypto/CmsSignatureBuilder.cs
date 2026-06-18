@@ -598,11 +598,17 @@ public sealed class CmsSignatureBuilder
             (Oids.RsaEncryption, Oids.RsaSha256)
                 or (Oids.RsaEncryption, Oids.RsaSha384)
                 or (Oids.RsaEncryption, Oids.RsaSha512)
-                or (Oids.RsaEncryption, Oids.RsaPss) => true,
+                or (Oids.RsaEncryption, Oids.RsaPss)
+                or (Oids.RsaEncryption, Oids.RsaSha3_256)
+                or (Oids.RsaEncryption, Oids.RsaSha3_384)
+                or (Oids.RsaEncryption, Oids.RsaSha3_512) => true,
             (Oids.RsaPss, Oids.RsaPss) => true,
             (Oids.EcPublicKey, Oids.EcdsaSha256)
                 or (Oids.EcPublicKey, Oids.EcdsaSha384)
-                or (Oids.EcPublicKey, Oids.EcdsaSha512) => true,
+                or (Oids.EcPublicKey, Oids.EcdsaSha512)
+                or (Oids.EcPublicKey, Oids.EcdsaSha3_256)
+                or (Oids.EcPublicKey, Oids.EcdsaSha3_384)
+                or (Oids.EcPublicKey, Oids.EcdsaSha3_512) => true,
             (Oids.Ed25519, Oids.Ed25519) => true,
             (Oids.Ed448, Oids.Ed448) => true,
             _ => false

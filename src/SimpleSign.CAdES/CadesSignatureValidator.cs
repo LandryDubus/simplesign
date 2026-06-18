@@ -168,11 +168,9 @@ public sealed class CadesSignatureValidator
             Oids.Sha256 => SHA256.HashData(originalData),
             Oids.Sha384 => SHA384.HashData(originalData),
             Oids.Sha512 => SHA512.HashData(originalData),
-#if NET9_0_OR_GREATER
             Oids.Sha3_256 => SHA3_256.HashData(originalData),
             Oids.Sha3_384 => SHA3_384.HashData(originalData),
             Oids.Sha3_512 => SHA3_512.HashData(originalData),
-#endif
             _ => SHA256.HashData(originalData)
         };
 

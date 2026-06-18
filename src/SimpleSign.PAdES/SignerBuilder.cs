@@ -437,11 +437,13 @@ public sealed class SignerBuilder
 
         // Resolve the effective hash and signature OID:
         //  - If the user explicitly called WithHashAlgorithm(), the user's choice wins.
+        //  - If an explicit signature OID was provided (e.g. via WithExternalSigner), infer hash
+        //    from it (RS512 → SHA512, etc.) before falling back to cert-based inference.
         //  - Otherwise, infer from the cert (PSS params for PSS certs, key size for RSA PKCS#1).
         //  - If the user called WithSignatureAlgorithm(oid), use it (validated at CMS build time).
         //  - Otherwise, auto-detect the OID from the cert + effective hash.
         HashAlgorithmName effectiveHash = AlgorithmInference.ResolveEffectiveHashAlgorithm(
-            _certificate, _hashAlgorithm, _hashAlgorithmExplicitlySet);
+            _certificate, _hashAlgorithm, _hashAlgorithmExplicitlySet, _signatureAlgorithmOid);
 
         var sw = System.Diagnostics.Stopwatch.StartNew();
 

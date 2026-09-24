@@ -1,7 +1,5 @@
 using Shouldly;
-using SimpleSign.Core.Validation;
 using SimpleSign.PAdES;
-using SimpleSign.PAdES.Validation;
 using SimpleSign.Pdf;
 using SimpleSign.TestHelpers;
 using Xunit;
@@ -36,7 +34,7 @@ public sealed class GovBrIntegrationTests(ITestOutputHelper output)
 
         var field = fields[0];
         field.IsSigned.ShouldBeTrue();
-        field.FieldName.ShouldBe("Signature_144");
+        field.FieldName.ShouldBe("Signature1");
         field.SubFilter.ShouldBe("adbe.pkcs7.detached");
         field.ByteRange.ShouldNotBeNull();
         field.ByteRange!.IsValid.ShouldBeTrue();
@@ -61,7 +59,7 @@ public sealed class GovBrIntegrationTests(ITestOutputHelper output)
     {
         Skip.IfNot(FixtureExists(Fixture), "Gov.br fixture not available");
 
-        var validator = new PdfSignatureValidator(new ValidationOptions { CheckRevocation = false });
+        var validator = OfflinePdfValidator.Create();
         using var stream = File.OpenRead(FixturePath(Fixture));
         var results = await validator.ValidateAsync(stream);
 
@@ -76,7 +74,7 @@ public sealed class GovBrIntegrationTests(ITestOutputHelper output)
     {
         Skip.IfNot(FixtureExists(Fixture), "Gov.br fixture not available");
 
-        var validator = new PdfSignatureValidator(new ValidationOptions { CheckRevocation = false });
+        var validator = OfflinePdfValidator.Create();
         using var stream = File.OpenRead(FixturePath(Fixture));
         var results = await validator.ValidateAsync(stream);
 
@@ -91,7 +89,7 @@ public sealed class GovBrIntegrationTests(ITestOutputHelper output)
     {
         Skip.IfNot(FixtureExists(Fixture), "Gov.br fixture not available");
 
-        var validator = new PdfSignatureValidator(new ValidationOptions { CheckRevocation = false });
+        var validator = OfflinePdfValidator.Create();
         using var stream = File.OpenRead(FixturePath(Fixture));
         var results = await validator.ValidateAsync(stream);
 
@@ -114,7 +112,7 @@ public sealed class GovBrIntegrationTests(ITestOutputHelper output)
             .WithFieldName("Sig2")
             .SignAsync();
 
-        var validator = new PdfSignatureValidator(new ValidationOptions { CheckRevocation = false });
+        var validator = OfflinePdfValidator.Create();
         using var stream = new MemoryStream(signedPdf);
         var results = await validator.ValidateAsync(stream);
 

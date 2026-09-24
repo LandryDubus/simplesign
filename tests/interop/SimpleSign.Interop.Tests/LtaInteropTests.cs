@@ -69,7 +69,10 @@ public sealed class LtaInteropTests(ITestOutputHelper output)
             if (!string.IsNullOrEmpty(stderr))
                 output.WriteLine($"STDERR: {stderr}");
             exitCode.ShouldBe(0, "pyHanko should validate LTA output");
-            (stdout + stderr).ShouldContain("intact=True");
+            stdout.ShouldContain("Signature 0: type=/Sig");
+            stdout.ShouldContain("Document timestamp 1: type=/DocTimeStamp");
+            stdout.ShouldContain("intact=True");
+            stdout.ShouldContain("RESULT: VALID");
         }
         finally
         {

@@ -22,7 +22,7 @@ namespace SimpleSign.Interop.Tests;
 public sealed class VeraPdfInteropTests(ITestOutputHelper output)
 {
     private const string ResourcePrefix = "SimpleSign.Interop.Tests.corpus.verapdf.";
-    private const string VeraPdfImage = "verapdf/cli";
+    private const string VeraPdfImage = "verapdf/cli@sha256:d5ee329657cf9bc4b2400392dd54c7d0a0ce9980ff6fa2da5590eebeec007cdb";
 
     private sealed record VeraPdfCorpusFile(string ResourceName, string Flavour);
 

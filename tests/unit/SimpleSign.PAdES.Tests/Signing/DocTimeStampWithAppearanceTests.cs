@@ -124,6 +124,15 @@ public sealed class DocTimeStampWithAppearanceTests
         fields.ShouldContain(f => f.SubFilter == "ETSI.RFC3161",
             "must contain a DocTimeStamp field");
 
+        int timestampDictStart = resultText.LastIndexOf("<< /Type /DocTimeStamp", StringComparison.Ordinal);
+        timestampDictStart.ShouldBeGreaterThan(-1,
+            "the timestamp value must use the ETSI document timestamp dictionary type");
+        int timestampDictEnd = resultText.IndexOf("endobj", timestampDictStart, StringComparison.Ordinal);
+        timestampDictEnd.ShouldBeGreaterThan(timestampDictStart);
+        string timestampDictionary = resultText[timestampDictStart..timestampDictEnd];
+        timestampDictionary.ShouldContain("/SubFilter /ETSI.RFC3161");
+        timestampDictionary.ShouldNotContain("/M ");
+
         // All ByteRanges must be valid (non-zero, within file bounds)
         foreach (var field in fields)
         {

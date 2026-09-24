@@ -535,7 +535,9 @@ public sealed class XadesSignatureValidator : IXadesSignatureValidator
 
         foreach (XmlElement t in transforms)
         {
-            if (t.GetAttribute("Algorithm") == XmlDSigUrls.EnvelopedSignatureTransform)
+            string algorithm = t.GetAttribute("Algorithm");
+            if (algorithm == XmlDSigUrls.EnvelopedSignatureTransform
+                || algorithm == XmlDSigUrls.XPathTransform)
             {
                 return true;
             }

@@ -1,5 +1,4 @@
 using Shouldly;
-using SimpleSign.Core.Validation;
 using SimpleSign.Integration.Tests.Helpers;
 using SimpleSign.PAdES.Validation;
 using Xunit;
@@ -11,7 +10,7 @@ namespace SimpleSign.Integration.Tests;
 public sealed class SignatureValidationTests(ITestOutputHelper output)
 {
     private static PdfSignatureValidator CreateValidator() =>
-        new(new ValidationOptions { CheckRevocation = false });
+        OfflinePdfValidator.Create();
 
     [SkippableFact(DisplayName = "Valid signature should pass integrity check")]
     public async Task ValidSignature_PassesIntegrityAndSignatureCheck()

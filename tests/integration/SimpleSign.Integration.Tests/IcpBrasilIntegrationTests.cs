@@ -1,7 +1,5 @@
 using Shouldly;
-using SimpleSign.Core.Validation;
 using SimpleSign.PAdES;
-using SimpleSign.PAdES.Validation;
 using SimpleSign.Pdf;
 using SimpleSign.TestHelpers;
 using Xunit;
@@ -60,7 +58,7 @@ public sealed class IcpBrasilIntegrationTests
     {
         Skip.IfNot(FixtureExists(Fixture), "ICP-Brasil fixture not available");
 
-        var validator = new PdfSignatureValidator(new ValidationOptions { CheckRevocation = false });
+        var validator = OfflinePdfValidator.Create();
         using var stream = File.OpenRead(FixturePath(Fixture));
         var results = await validator.ValidateAsync(stream);
 
@@ -77,7 +75,7 @@ public sealed class IcpBrasilIntegrationTests
     {
         Skip.IfNot(FixtureExists(Fixture), "ICP-Brasil fixture not available");
 
-        var validator = new PdfSignatureValidator(new ValidationOptions { CheckRevocation = false });
+        var validator = OfflinePdfValidator.Create();
         using var stream = File.OpenRead(FixturePath(Fixture));
         var results = await validator.ValidateAsync(stream);
 
@@ -99,7 +97,7 @@ public sealed class IcpBrasilIntegrationTests
             .WithCertificate(cert)
             .SignAsync();
 
-        var validator = new PdfSignatureValidator(new ValidationOptions { CheckRevocation = false });
+        var validator = OfflinePdfValidator.Create();
         using var stream = new MemoryStream(signedPdf);
         var results = await validator.ValidateAsync(stream);
 
@@ -115,7 +113,7 @@ public sealed class IcpBrasilIntegrationTests
         const string fixture = "AD-RB.pdf";
         Skip.IfNot(FixtureExists(fixture), $"Fixture {fixture} not found");
 
-        var validator = new PdfSignatureValidator(new ValidationOptions { CheckRevocation = false });
+        var validator = OfflinePdfValidator.Create();
         using var stream = File.OpenRead(FixturePath(fixture));
         var results = await validator.ValidateAsync(stream);
 

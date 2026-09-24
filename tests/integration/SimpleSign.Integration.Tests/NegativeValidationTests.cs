@@ -1,5 +1,4 @@
 using Shouldly;
-using SimpleSign.Core.Validation;
 using SimpleSign.Integration.Tests.Helpers;
 using SimpleSign.PAdES.Validation;
 using SimpleSign.Pdf.Exceptions;
@@ -12,7 +11,7 @@ namespace SimpleSign.Integration.Tests;
 public sealed class NegativeValidationTests(ITestOutputHelper output)
 {
     private static PdfSignatureValidator CreateValidator() =>
-        new(new ValidationOptions { CheckRevocation = false });
+        OfflinePdfValidator.Create();
 
     [SkippableFact(DisplayName = "PDF with wrong digest should fail integrity on all")]
     public async Task WrongDigestAlgo_AllIntegrityFalse()

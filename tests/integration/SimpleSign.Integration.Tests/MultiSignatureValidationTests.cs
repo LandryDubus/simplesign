@@ -1,5 +1,4 @@
 using Shouldly;
-using SimpleSign.Core.Validation;
 using SimpleSign.Integration.Tests.Helpers;
 using SimpleSign.PAdES.Validation;
 using Xunit;
@@ -11,7 +10,7 @@ namespace SimpleSign.Integration.Tests;
 public sealed class MultiSignatureValidationTests(ITestOutputHelper output)
 {
     private static PdfSignatureValidator CreateValidator() =>
-        new(new ValidationOptions { CheckRevocation = false });
+        OfflinePdfValidator.Create();
 
     [SkippableFact(DisplayName = "PDF with 5 signatures and 1 timestamp should return 6 results")]
     public async Task FiveSignaturesAndTimestamp_AllParsed()

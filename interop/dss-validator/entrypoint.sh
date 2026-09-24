@@ -77,7 +77,7 @@ case "$CMD" in
     echo "=== PAdES Signature Validation (pyHanko) ==="
     python3 -c "
 import sys
-from pyhanko.sign.validation import validate_pdf_signature
+from pyhanko.sign.validation import validate_pdf_signature, validate_pdf_timestamp
 from pyhanko.pdf_utils.reader import PdfFileReader
 
 with open('$PDF', 'rb') as f:
@@ -89,10 +89,16 @@ with open('$PDF', 'rb') as f:
     all_valid = True
     for i, sig in enumerate(sigs):
         try:
-            status = validate_pdf_signature(sig, signer_validation_context=None)
+            is_timestamp = str(sig.sig_object.get('/Type')) == '/DocTimeStamp'
+            if is_timestamp:
+                status = validate_pdf_timestamp(sig, validation_context=None)
+                label = 'Document timestamp'
+            else:
+                status = validate_pdf_signature(sig, signer_validation_context=None)
+                label = 'Signature'
             intact = status.intact
-            valid = status.valid
-            print(f'Signature {i}: intact={intact}, valid={valid}, coverage={status.coverage}')
+            valid = getattr(status, 'valid', True)
+            print(f'{label} {i}: intact={intact}, valid={valid}, coverage={status.coverage}')
             if not intact:
                 all_valid = False
         except Exception as e:
@@ -338,6 +344,7 @@ XMLEOF
     echo "  sign-xml <template> <key> <cert> <output>       Sign XML with xmlsec1"
     echo "  verify-ocsp <cert> <issuer> <url>              Check OCSP revocation status"
     echo "  sign-pades <pdf> <key> <cert> <out>             Sign PDF with pyHanko"
+    echo "  sign-pades-field <pdf> <key> <cert> <out> <field> Sign PDF with a named field"
     echo "  sign-pades-with-reason <pdf> <key> <cert> <out> <reason> <loc>  Sign with metadata"
     echo "  help                                           Show this help"
     ;;

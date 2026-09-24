@@ -1281,6 +1281,58 @@ public sealed class XadesSignerTests
     }
 
     [Fact]
+    public async Task SignAsync_DetachedForm_UsesXmlDsigOrderAndRfc5035IssuerSerial()
+    {
+        string xml = "<?xml version=\"1.0\"?><doc><item>data</item></doc>";
+        byte[] signed = await XadesSigner.Document(System.Text.Encoding.UTF8.GetBytes(xml))
+            .WithCertificate(s_cert)
+            .WithForm(XadesForm.Detached)
+            .WithDataUri("document.xml")
+            .SignAsync();
+
+        var doc = new System.Xml.XmlDocument();
+        doc.Load(new MemoryStream(signed));
+        var namespaces = new System.Xml.XmlNamespaceManager(doc.NameTable);
+        namespaces.AddNamespace("xades", XadesUris.XadesNamespace);
+
+        doc.DocumentElement!.ChildNodes
+            .OfType<System.Xml.XmlElement>()
+            .Select(element => element.LocalName)
+            .ShouldBe(["SignedInfo", "SignatureValue", "KeyInfo", "Object"]);
+
+        var issuerSerial = doc.SelectSingleNode(
+            "//xades:SigningCertificateV2/xades:Cert/xades:IssuerSerialV2", namespaces)!;
+        var reader = new AsnReader(Convert.FromBase64String(issuerSerial.InnerText), AsnEncodingRules.DER);
+        var issuerAndSerial = reader.ReadSequence();
+        var generalNames = issuerAndSerial.ReadSequence();
+        generalNames.ReadEncodedValue().Span[0].ShouldBe((byte)0xA4);
+        generalNames.ThrowIfNotEmpty();
+        issuerAndSerial.ReadIntegerBytes();
+        issuerAndSerial.ThrowIfNotEmpty();
+        reader.ThrowIfNotEmpty();
+    }
+
+    [Fact]
+    public async Task SignAsync_EnvelopedForm_ExcludesAllSignaturesFromDocumentReference()
+    {
+        string xml = "<?xml version=\"1.0\"?><doc><item>data</item></doc>";
+        byte[] signed = await XadesSigner.Document(System.Text.Encoding.UTF8.GetBytes(xml))
+            .WithCertificate(s_cert)
+            .SignAsync();
+
+        var doc = new System.Xml.XmlDocument();
+        doc.Load(new MemoryStream(signed));
+        var namespaces = new System.Xml.XmlNamespaceManager(doc.NameTable);
+        namespaces.AddNamespace("ds", XmlDSigUrls.DsNamespace);
+
+        var xpath = doc.SelectSingleNode(
+            $"//ds:Reference[@URI='']/ds:Transforms/ds:Transform[@Algorithm='{XmlDSigUrls.XPathTransform}']/ds:XPath",
+            namespaces);
+        xpath.ShouldNotBeNull();
+        xpath!.InnerText.ShouldBe("not(ancestor-or-self::ds:Signature)");
+    }
+
+    [Fact]
     public async Task SignAsync_EnvelopingForm_ProducesValidSignature()
     {
         string xml = "<?xml version=\"1.0\"?><doc><item>data</item></doc>";

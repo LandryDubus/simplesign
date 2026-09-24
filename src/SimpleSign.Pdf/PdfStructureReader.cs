@@ -1623,9 +1623,11 @@ public sealed class PdfStructureReader
         string? contactInfo = ExtractPdfString(dictSpan, "/ContactInfo"u8);
         string? signerName = ExtractPdfString(dictSpan, "/Name"u8);
 
+        string fieldName = FindSignatureFieldName(objNumber, fullData) ?? $"Signature_{objNumber}";
+
         return new PdfSignatureField
         {
-            FieldName = $"Signature_{objNumber}",
+            FieldName = fieldName,
             ByteRange = byteRange,
             ContentsBytes = contentsBytes,
             SigDictObjectNumber = objNumber,
@@ -1636,6 +1638,30 @@ public sealed class PdfStructureReader
             ContactInfo = contactInfo,
             SignerName = signerName,
         };
+    }
+
+    private static string? FindSignatureFieldName(int signatureObjectNumber, ReadOnlySpan<byte> fullData)
+    {
+        byte[] signatureReference = Encoding.ASCII.GetBytes($"/V {signatureObjectNumber} 0 R");
+        int referencePosition = 0;
+
+        while ((referencePosition = IndexOf(fullData, signatureReference, referencePosition)) >= 0)
+        {
+            int dictStart = FindDictStart(fullData, referencePosition);
+            int dictEnd = dictStart >= 0 ? FindMatchingDictEnd(fullData, dictStart) : -1;
+            if (dictEnd >= 0)
+            {
+                string? fieldName = ExtractPdfString(fullData[dictStart..(dictEnd + 2)], "/T "u8);
+                if (!string.IsNullOrWhiteSpace(fieldName))
+                {
+                    return fieldName;
+                }
+            }
+
+            referencePosition += signatureReference.Length;
+        }
+
+        return null;
     }
 
     /// <summary>

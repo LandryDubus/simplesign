@@ -617,7 +617,16 @@ internal static class XadesSignatureBuilder
     {
         var writer = new AsnWriter(AsnEncodingRules.DER);
         writer.PushSequence();
+
+        // IssuerSerial.issuer is GeneralNames, whose only entry for an X.509
+        // certificate must be the issuer DN in the directoryName choice.
+        writer.PushSequence();
+        var directoryNameTag = new Asn1Tag(TagClass.ContextSpecific, 4, isConstructed: true);
+        writer.PushSequence(directoryNameTag);
         writer.WriteEncodedValue(certificate.IssuerName.RawData);
+        writer.PopSequence(directoryNameTag);
+        writer.PopSequence();
+
         var serial = certificate.GetSerialNumber();
         Array.Reverse(serial);
         writer.WriteInteger(serial);
@@ -643,7 +652,7 @@ internal static class XadesSignatureBuilder
     {
         // Ensure QualifyingProperties/UnsignedProperties exists
         if (signature.SelectSingleNode(
-                "xades:QualifyingProperties/xades:UnsignedProperties", ns) is not XmlElement unsignedProps)
+                "ds:Object/xades:QualifyingProperties/xades:UnsignedProperties", ns) is not XmlElement unsignedProps)
         {
             if (signature.SelectSingleNode(
                 "ds:Object/xades:QualifyingProperties", ns) is not XmlElement qp)
@@ -802,6 +811,17 @@ internal static class XadesSignatureBuilder
             var t1 = doc.CreateElement("Transform", XmlDSigUrls.DsNamespace);
             t1.SetAttribute("Algorithm", XmlDSigUrls.EnvelopedSignatureTransform);
             transforms.AppendChild(t1);
+
+            // The enveloped transform excludes only the signature currently
+            // being verified. Exclude all signatures as well so adding a
+            // second signature does not invalidate the first one.
+            var xpathTransform = doc.CreateElement("Transform", XmlDSigUrls.DsNamespace);
+            xpathTransform.SetAttribute("Algorithm", XmlDSigUrls.XPathTransform);
+            var xpath = doc.CreateElement("XPath", XmlDSigUrls.DsNamespace);
+            xpath.SetAttribute("xmlns:ds", XmlDSigUrls.DsNamespace);
+            xpath.InnerText = "not(ancestor-or-self::ds:Signature)";
+            xpathTransform.AppendChild(xpath);
+            transforms.AppendChild(xpathTransform);
         }
         var t2 = doc.CreateElement("Transform", XmlDSigUrls.DsNamespace);
         t2.SetAttribute("Algorithm", XmlDSigUrls.ExcC14N);
@@ -916,11 +936,12 @@ internal static class XadesSignatureBuilder
         byte[] signedInfoHash = HashData(hashAlgorithm, signedInfoCanonical);
         byte[] signatureValueBytes = SignHash(signedInfoHash, hashAlgorithm, signatureAlgorithmOid, certificate);
 
-        sigEl.InsertBefore(outDoc.ImportNode(signedInfo, true), sigEl.FirstChild);
+        XmlNode signedInfoNode = outDoc.ImportNode(signedInfo, true);
+        sigEl.InsertBefore(signedInfoNode, sigEl.FirstChild);
 
         var sigValueEl = outDoc.CreateElement("SignatureValue", XmlDSigUrls.DsNamespace);
         sigValueEl.InnerText = Convert.ToBase64String(signatureValueBytes);
-        sigEl.InsertBefore(sigValueEl, sigEl.FirstChild);
+        sigEl.InsertAfter(sigValueEl, signedInfoNode);
 
         var keyInfo = outDoc.CreateElement("KeyInfo", XmlDSigUrls.DsNamespace);
         var x509Data = outDoc.CreateElement("X509Data", XmlDSigUrls.DsNamespace);
@@ -937,7 +958,7 @@ internal static class XadesSignatureBuilder
             }
         }
         keyInfo.AppendChild(x509Data);
-        sigEl.InsertBefore(keyInfo, sigEl.FirstChild);
+        sigEl.InsertAfter(keyInfo, sigValueEl);
 
         using var ms = new MemoryStream();
         outDoc.Save(ms);
@@ -1083,11 +1104,11 @@ internal static class XadesSignatureBuilder
 
         var siElement = outDoc.CreateElement("SignedInfo", XmlDSigUrls.DsNamespace);
         siElement.InnerXml = Encoding.UTF8.GetString(signedInfoBytes);
-        sigEl.AppendChild(siElement);
+        sigEl.InsertBefore(siElement, sigEl.FirstChild);
 
         var sigValueElement = outDoc.CreateElement("SignatureValue", XmlDSigUrls.DsNamespace);
         sigValueElement.InnerText = Convert.ToBase64String(signatureValue);
-        sigEl.AppendChild(sigValueElement);
+        sigEl.InsertAfter(sigValueElement, siElement);
 
         var keyInfo = new KeyInfo();
         var x509Data = new KeyInfoX509Data(certificate);
@@ -1102,7 +1123,7 @@ internal static class XadesSignatureBuilder
         var kiXml = keyInfo.GetXml();
         if (kiXml is not null)
         {
-            sigEl.AppendChild(outDoc.ImportNode(kiXml, true));
+            sigEl.InsertAfter(outDoc.ImportNode(kiXml, true), sigValueElement);
         }
 
         var signedProperties = CreateSignedProperties(outDoc, certificate, hashAlgorithm, signingTime,

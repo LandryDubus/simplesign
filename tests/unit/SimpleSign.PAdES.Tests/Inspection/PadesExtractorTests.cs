@@ -88,7 +88,7 @@ public sealed class PadesExtractorTests : IDisposable
 
         signatures.Count().ShouldBe(1);
         signatures[0].FieldName.ShouldNotBeNullOrEmpty();
-        signatures[0].FieldName.ShouldStartWith("Signature_");
+        signatures[0].FieldName.ShouldBe("Signature1");
     }
 
     // ── 6. SubFilter preserved ───────────────────────────────────────

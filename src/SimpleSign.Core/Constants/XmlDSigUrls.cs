@@ -26,6 +26,9 @@ public static class XmlDSigUrls
     /// <summary>Enveloped Signature Transform — removes the Signature element before hashing.</summary>
     public const string EnvelopedSignatureTransform = "http://www.w3.org/2000/09/xmldsig#enveloped-signature";
 
+    /// <summary>XPath Transform used to filter an XML signature reference node set.</summary>
+    public const string XPathTransform = "http://www.w3.org/TR/1999/REC-xpath-19991116";
+
     #endregion
 
     #region Digest Methods

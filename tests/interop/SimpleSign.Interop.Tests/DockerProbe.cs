@@ -1,16 +1,28 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 
 namespace SimpleSign.Interop.Tests;
 
 internal static class DockerProbe
 {
-    /// <summary>Returns true if <c>docker info</c> succeeds within 5 seconds.</summary>
-    public static bool IsDockerAvailable() => RunProbe("docker", "info");
+    private static readonly Lazy<bool> Availability = new(
+        () => RunProbe("docker", "info"),
+        LazyThreadSafetyMode.ExecutionAndPublication);
+
+    private static readonly ConcurrentDictionary<string, Lazy<bool>> ImageProbes =
+        new(StringComparer.Ordinal);
+
+    /// <summary>Returns true if <c>docker info</c> succeeds within 30 seconds.</summary>
+    public static bool IsDockerAvailable() => Availability.Value;
 
     /// <summary>Returns true if the named Docker image is locally available.</summary>
-    public static bool ImageExists(string image) => RunProbe("docker", $"image inspect {image}");
+    public static bool ImageExists(string image) => ImageProbes.GetOrAdd(
+        image,
+        static imageName => new Lazy<bool>(
+            () => RunProbe("docker", $"image inspect {imageName}"),
+            LazyThreadSafetyMode.ExecutionAndPublication)).Value;
 
-    private static bool RunProbe(string command, string args, int timeoutMs = 10_000)
+    private static bool RunProbe(string command, string args, int timeoutMs = 30_000)
     {
         try
         {
@@ -29,6 +41,11 @@ internal static class DockerProbe
             var stdoutTask = Task.Run(() => p.StandardOutput.ReadToEnd());
             var stderrTask = Task.Run(() => p.StandardError.ReadToEnd());
             bool exited = p.WaitForExit(timeoutMs);
+            if (!exited)
+            {
+                p.Kill(entireProcessTree: true);
+                p.WaitForExit();
+            }
             Task.WaitAll(stdoutTask, stderrTask);
 
             return exited && p.ExitCode == 0;

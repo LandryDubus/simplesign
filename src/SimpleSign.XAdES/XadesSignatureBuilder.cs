@@ -629,7 +629,7 @@ internal static class XadesSignatureBuilder
 
         var serial = certificate.GetSerialNumber();
         Array.Reverse(serial);
-        writer.WriteInteger(serial);
+        writer.WriteIntegerUnsigned(serial);
         writer.PopSequence();
         return writer.Encode();
     }

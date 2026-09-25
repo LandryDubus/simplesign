@@ -268,6 +268,8 @@ public class InspectMapperTests
         Assert.Equal(2, certs.Count);
         Assert.Equal("CN=Signer", certs[0].Subject);
         Assert.Equal("CN=CA1", certs[1].Subject);
+        Assert.Equal(DateTimeOffset.MinValue, certs[0].NotBefore);
+        Assert.Equal(DateTimeOffset.MinValue, certs[0].NotAfter);
     }
 
     [Fact]

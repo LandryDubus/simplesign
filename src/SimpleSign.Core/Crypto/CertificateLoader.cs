@@ -10,6 +10,11 @@ namespace SimpleSign.Core.Crypto;
 /// </summary>
 internal static class CertificateLoader
 {
+    private static X509KeyStorageFlags Pkcs12KeyStorageFlags =>
+        OperatingSystem.IsMacOS()
+            ? X509KeyStorageFlags.Exportable
+            : X509KeyStorageFlags.EphemeralKeySet | X509KeyStorageFlags.Exportable;
+
     /// <summary>Loads a DER-encoded X.509 certificate from a byte array.</summary>
     internal static X509Certificate2 LoadCertificate(byte[] data) =>
 #if NET9_0_OR_GREATER
@@ -31,10 +36,16 @@ internal static class CertificateLoader
     /// <summary>Loads a PKCS#12 (PFX) file from disk.</summary>
     internal static X509Certificate2 LoadPkcs12FromFile(string path, string? password) =>
 #if NET9_0_OR_GREATER
-        X509CertificateLoader.LoadPkcs12FromFile(path, password);
+        X509CertificateLoader.LoadPkcs12FromFile(
+            path,
+            password,
+            Pkcs12KeyStorageFlags);
 #else
         // On macOS + .NET 8, Apple Crypto rejects null password — use empty string.
-        new X509Certificate2(path, password ?? string.Empty);
+        new X509Certificate2(
+            path,
+            password ?? string.Empty,
+            Pkcs12KeyStorageFlags);
 #endif
 
 
@@ -45,16 +56,22 @@ internal static class CertificateLoader
     internal static X509Certificate2Collection LoadPkcs12CollectionFromFile(string path, string? password)
     {
         var bytes = File.ReadAllBytes(path);
-        return LoadPkcs12Collection(bytes, password);
+        return LoadPkcs12Collection(bytes, password, Pkcs12KeyStorageFlags);
     }
 
     /// <summary>Loads a PKCS#12 (PFX) from a byte array.</summary>
     internal static X509Certificate2 LoadPkcs12(byte[] data, string? password) =>
 #if NET9_0_OR_GREATER
-        X509CertificateLoader.LoadPkcs12(data, password);
+        X509CertificateLoader.LoadPkcs12(
+            data,
+            password,
+            Pkcs12KeyStorageFlags);
 #else
 #pragma warning disable SYSLIB0057
-        new X509Certificate2(data, password ?? string.Empty);
+        new X509Certificate2(
+            data,
+            password ?? string.Empty,
+            Pkcs12KeyStorageFlags);
 #pragma warning restore SYSLIB0057
 #endif
 

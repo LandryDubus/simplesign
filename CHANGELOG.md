@@ -5,7 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.8.0] - UNRELEASED
+## [0.8.1] - UNRELEASED
+
+### Improved
+
+- **PAdES-B-LTA timestamp interoperability** — the pyHanko Docker validator now dispatches `/Type /DocTimeStamp` objects to its document-timestamp validation API, pins pyHanko 0.37.0 for reproducibility, and asserts both regular and archival signatures; generated document timestamp dictionaries omit the non-recommended `/M` entry.
+- **Reproducible dependency and interop toolchain** — upgraded the external validators to current stable releases (EU DSS 6.5, iText 9.7.1, PDFBox 3.0.8, pyHanko 0.37.0), replaced floating NuGet versions throughout the repository with exact versions, pinned Docker images by digest, locked the Python graph, checksum-verified PDFBox, and pinned GitHub Actions to immutable commit SHAs.
+- **XAdES ETSI interoperability** — corrected XMLDSIG element ordering, ESS `IssuerSerialV2` encoding, unsigned-property reuse, and co-signature transforms so all XAdES baseline forms validate under EU DSS.
+- **Signature inspection accuracy** — report the signature field's real AcroForm `/T` value instead of a synthetic object-number name.
+- **Deterministic validation tests** — use offline TSA/AIA fixtures, make Docker availability probes concurrency-safe, and avoid persistent Windows key-store imports for in-memory PKCS#12 data.
+
+## [0.8.0] - 2026-09-02
 
 ### Added
 

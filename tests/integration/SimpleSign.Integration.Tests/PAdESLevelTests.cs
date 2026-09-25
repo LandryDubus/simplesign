@@ -1,5 +1,4 @@
 using Shouldly;
-using SimpleSign.Core.Validation;
 using SimpleSign.Integration.Tests.Helpers;
 using SimpleSign.PAdES.Validation;
 using SimpleSign.Pdf;
@@ -12,7 +11,7 @@ namespace SimpleSign.Integration.Tests;
 public sealed class PAdESLevelTests(ITestOutputHelper output)
 {
     private static PdfSignatureValidator CreateValidator() =>
-        new(new ValidationOptions { CheckRevocation = false });
+        OfflinePdfValidator.Create();
 
     [SkippableFact(DisplayName = "PAdES-LTA with DSS dictionary should validate integrity")]
     public async Task PadesLta_HasDssAndValidIntegrity()

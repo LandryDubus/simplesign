@@ -54,7 +54,7 @@ public sealed class ConcurrencyTests
                 else
                 {
                     // Use a fresh cert instance per Set to avoid disposing a shared object
-                    using var freshCert = System.Security.Cryptography.X509Certificates.X509CertificateLoader.LoadPkcs12(certBytes, pfxPassword);
+                    using var freshCert = CertificateLoader.LoadPkcs12(certBytes, pfxPassword);
                     cache.Set(freshCert);
                 }
             });

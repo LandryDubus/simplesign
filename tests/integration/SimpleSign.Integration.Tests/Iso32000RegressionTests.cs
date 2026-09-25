@@ -1,5 +1,4 @@
 using Shouldly;
-using SimpleSign.Core.Validation;
 using SimpleSign.Integration.Tests.Helpers;
 using SimpleSign.PAdES.Inspection;
 using SimpleSign.PAdES.Validation;
@@ -18,7 +17,7 @@ namespace SimpleSign.Integration.Tests;
 public sealed class Iso32000RegressionTests(ITestOutputHelper output)
 {
     private static PdfSignatureValidator CreateValidator() =>
-        new(new ValidationOptions { CheckRevocation = false });
+        OfflinePdfValidator.Create();
 
     // ── Multiline /Fields parsing (whitespace split fix) ────────────────────
 

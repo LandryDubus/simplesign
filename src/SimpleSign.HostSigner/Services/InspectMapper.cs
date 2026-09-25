@@ -84,8 +84,8 @@ internal static class InspectMapper
                 SerialNumber = c.SerialNumber,
                 KeyAlgorithm = c.KeyAlgorithm,
                 KeySizeBits = c.KeySizeBits,
-                NotBefore = c.NotBefore,
-                NotAfter = c.NotAfter,
+                NotBefore = AsUtc(c.NotBefore),
+                NotAfter = AsUtc(c.NotAfter),
                 IsExpired = c.IsExpired
             })]
         };
@@ -106,8 +106,8 @@ internal static class InspectMapper
             Thumbprint = cert.Thumbprint,
             KeyAlgorithm = cert.KeyAlgorithm,
             KeySizeBits = cert.KeySizeBits,
-            NotBefore = cert.NotBefore,
-            NotAfter = cert.NotAfter,
+            NotBefore = AsUtc(cert.NotBefore),
+            NotAfter = AsUtc(cert.NotAfter),
             IsExpired = cert.IsExpired,
             HasNonRepudiation = cert.HasNonRepudiation,
             KeyUsages = full ? [.. cert.KeyUsages] : [],
@@ -167,6 +167,9 @@ internal static class InspectMapper
         PAdESConformanceLevel.BaselineLTA => "PAdES B-LTA",
         _ => level.ToString()
     };
+
+    private static DateTimeOffset AsUtc(DateTime value) =>
+        new(DateTime.SpecifyKind(value, DateTimeKind.Utc));
 
     private static string FormatPdfA(SimpleSign.Pdf.Enums.PdfALevel level) => level switch
     {

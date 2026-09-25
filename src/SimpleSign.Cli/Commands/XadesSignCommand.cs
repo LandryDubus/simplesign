@@ -186,14 +186,14 @@ internal sealed class XadesSignCommand : AsyncCommand<XadesSignCommand.Settings>
         return 0;
     }
 
-    private static async Task<X509Certificate2> LoadCertificateAsync(Settings settings, CancellationToken ct)
+    private async Task<X509Certificate2> LoadCertificateAsync(Settings settings, CancellationToken ct)
     {
         if (settings.CertPath is not null)
         {
             string? password = settings.Password;
             password ??= await PasswordResolver.ResolveAsync(password, isInteractive: true);
 
-            return new X509Certificate2(settings.CertPath, password, X509KeyStorageFlags.Exportable);
+            return _certChainService.LoadPkcs12FromFile(settings.CertPath, password);
         }
 
         using var store = new X509Store(StoreName.My, StoreLocation.CurrentUser);

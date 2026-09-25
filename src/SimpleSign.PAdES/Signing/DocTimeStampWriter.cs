@@ -71,7 +71,6 @@ public static class DocTimeStampWriter
         sigDict.Append("   /SubFilter /ETSI.RFC3161\n");
         sigDict.Append("   /ByteRange [0000000000 0000000000 0000000000 0000000000]\n");
         sigDict.Append($"   /Contents <{contentsPlaceholder}>\n");
-        sigDict.Append($"   /M (D:{sigNow:yyyyMMddHHmmss}+00'00')\n");
         sigDict.Append(">>\nendobj\n");
         string sigDictText = sigDict.ToString();
 

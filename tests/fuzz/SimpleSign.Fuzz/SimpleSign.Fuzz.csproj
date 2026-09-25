@@ -12,7 +12,7 @@
        Run: dotnet run -c Release   pdf
        Instrumented: dotnet publish -c Release; sharpfuzz on the published dll. -->
   <ItemGroup>
-    <PackageReference Include="SharpFuzz" Version="2.*" />
+    <PackageReference Include="SharpFuzz" Version="2.3.0" />
   </ItemGroup>
 
   <ItemGroup>

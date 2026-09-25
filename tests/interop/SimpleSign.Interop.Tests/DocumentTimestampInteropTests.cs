@@ -38,8 +38,10 @@ public sealed class DocumentTimestampInteropTests(ITestOutputHelper output)
             if (!string.IsNullOrEmpty(stderr))
                 output.WriteLine($"STDERR: {stderr}");
 
-            // pyHanko should at least recognize the structure
-            (stdout + stderr).ShouldContain("Timestamp");
+            exitCode.ShouldBe(0, "pyHanko should validate the document timestamp");
+            stdout.ShouldContain("Document timestamp 0: type=/DocTimeStamp");
+            stdout.ShouldContain("intact=True");
+            stdout.ShouldContain("RESULT: VALID");
         }
         finally
         {

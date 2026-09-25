@@ -136,6 +136,7 @@ public sealed class SimpleSignerEndToEndTests
         _ = new PdfStructureReader();
         IReadOnlyList<PdfSignatureField> readOnlyList = await PdfStructureReader.ReadSignatureFieldsAsync(stream);
         readOnlyList.Count().ShouldBe(2);
+        readOnlyList.Select(f => f.FieldName).ShouldBe(["SigA", "SigB"]);
         var objNumbers = readOnlyList.Select(f => f.SigDictObjectNumber).ToList();
         objNumbers.Distinct().Count().ShouldBe(objNumbers.Count);
     }

@@ -2,6 +2,7 @@ using Shouldly;
 using SimpleSign.Core.Validation;
 using SimpleSign.PAdES.Inspection;
 using SimpleSign.PAdES.Validation;
+using SimpleSign.TestHelpers;
 using Xunit;
 using Xunit.Abstractions;
 
@@ -40,6 +41,8 @@ public sealed class EtsiCorpusTests(ITestOutputHelper output)
         TrustSystemRoots = false,
         NetworkTimeout = TimeSpan.FromSeconds(1),
     };
+
+    private static readonly HttpClient NoNetworkHttpClient = MockHttpHandler.Failing();
 
     // ── Inspector: smoke tests (must not crash, must find at least 1 signature) ──────────
 
@@ -139,7 +142,7 @@ public sealed class EtsiCorpusTests(ITestOutputHelper output)
     public async Task Validator_SingleSignatureDoc_AllIntegrityValid(string filename)
     {
         var bytes = LoadEmbedded(filename);
-        var validator = new PdfSignatureValidator(NoNetworkOptions);
+        var validator = CreateOfflineValidator();
         var results = await validator.ValidateAsync(new MemoryStream(bytes));
 
         output.WriteLine($"[{filename}] {results.Count} result(s):");
@@ -172,7 +175,7 @@ public sealed class EtsiCorpusTests(ITestOutputHelper output)
     public async Task Validator_MultiRevisionDoc_PrimarySignatureIntegrityValid(string filename)
     {
         var bytes = LoadEmbedded(filename);
-        var validator = new PdfSignatureValidator(NoNetworkOptions);
+        var validator = CreateOfflineValidator();
         var results = await validator.ValidateAsync(new MemoryStream(bytes));
 
         output.WriteLine($"[{filename}] {results.Count} result(s):");
@@ -192,7 +195,7 @@ public sealed class EtsiCorpusTests(ITestOutputHelper output)
     public async Task Validator_Dss1683_DoesNotThrow()
     {
         var bytes = LoadEmbedded("DSS-1683.pdf");
-        var validator = new PdfSignatureValidator(NoNetworkOptions);
+        var validator = CreateOfflineValidator();
 
         var ex = await Record.ExceptionAsync(() => validator.ValidateAsync(new MemoryStream(bytes)));
         ex.ShouldBeNull("the validator must handle known-problematic corpus files gracefully without throwing");
@@ -207,7 +210,7 @@ public sealed class EtsiCorpusTests(ITestOutputHelper output)
     public async Task Validator_BadEncodedCMS_DoesNotThrow()
     {
         var bytes = LoadEmbedded("BadEncodedCMS.pdf");
-        var validator = new PdfSignatureValidator(NoNetworkOptions);
+        var validator = CreateOfflineValidator();
 
         var ex = await Record.ExceptionAsync(() => validator.ValidateAsync(new MemoryStream(bytes)));
         ex.ShouldBeNull("the validator must handle malformed CMS gracefully without throwing");
@@ -280,7 +283,7 @@ public sealed class EtsiCorpusTests(ITestOutputHelper output)
             return;
         }
 
-        var validator = new PdfSignatureValidator(NoNetworkOptions);
+        var validator = CreateOfflineValidator();
         var results = await validator.ValidateAsync(new MemoryStream(bytes));
 
         output.WriteLine($"[{filename}] {results.Count} result(s):");
@@ -293,6 +296,9 @@ public sealed class EtsiCorpusTests(ITestOutputHelper output)
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────────────────────
+
+    private static PdfSignatureValidator CreateOfflineValidator() =>
+        new(NoNetworkOptions, NoNetworkHttpClient);
 
     private static byte[] LoadEmbedded(string filename)
     {

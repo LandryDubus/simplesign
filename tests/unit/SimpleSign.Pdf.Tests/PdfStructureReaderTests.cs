@@ -153,6 +153,25 @@ public sealed class PdfStructureReaderTests
         fields[0].IsSigned.ShouldBeTrue();
     }
 
+    [Fact(DisplayName = "Signature field name resolves with alternate PDF whitespace")]
+    public async Task ReadSignatureFields_FieldReferenceWithAlternateWhitespace_ResolvesName()
+    {
+        byte[] pdf = BuildSignedPdf(out _, out _, out _, out _, out _);
+        string pdfText = Encoding.Latin1.GetString(pdf);
+        int xrefPosition = pdfText.IndexOf("xref\n", StringComparison.Ordinal);
+        xrefPosition.ShouldBeGreaterThan(0);
+        const string fieldObject =
+            "5 0 obj\n<< /FT /Sig /T(Signature1) /V\r\n  3\t0 R >>\nendobj\n";
+        byte[] pdfWithField = Encoding.Latin1.GetBytes(
+            pdfText.Insert(xrefPosition, fieldObject));
+        using var stream = new MemoryStream(pdfWithField);
+
+        var fields = await PdfStructureReader.ReadSignatureFieldsAsync(stream);
+
+        fields.Count().ShouldBe(1);
+        fields[0].FieldName.ShouldBe("Signature1");
+    }
+
     [Fact(DisplayName = "Signed PDF ByteRange is valid and correct")]
     public async Task ReadSignatureFields_SignedPdf_ByteRangeIsValid()
     {

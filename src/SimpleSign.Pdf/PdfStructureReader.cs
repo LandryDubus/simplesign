@@ -1623,7 +1623,8 @@ public sealed class PdfStructureReader
         string? contactInfo = ExtractPdfString(dictSpan, "/ContactInfo"u8);
         string? signerName = ExtractPdfString(dictSpan, "/Name"u8);
 
-        string fieldName = FindSignatureFieldName(objNumber, fullData) ?? $"Signature_{objNumber}";
+        string fieldName = ResolveSignatureFieldName(fullData, objNumber)
+            ?? $"Signature_{objNumber}";
 
         return new PdfSignatureField
         {
@@ -1640,25 +1641,57 @@ public sealed class PdfStructureReader
         };
     }
 
-    private static string? FindSignatureFieldName(int signatureObjectNumber, ReadOnlySpan<byte> fullData)
+    /// <summary>
+    /// Resolves the AcroForm field dictionary whose /V entry points at the
+    /// signature dictionary and returns its /T value.
+    /// </summary>
+    private static string? ResolveSignatureFieldName(
+        ReadOnlySpan<byte> data, int signatureObjectNumber)
     {
-        byte[] signatureReference = Encoding.ASCII.GetBytes($"/V {signatureObjectNumber} 0 R");
-        int referencePosition = 0;
-
-        while ((referencePosition = IndexOf(fullData, signatureReference, referencePosition)) >= 0)
+        int valuePos = 0;
+        while ((valuePos = IndexOf(data, "/V"u8, valuePos)) >= 0)
         {
-            int dictStart = FindDictStart(fullData, referencePosition);
-            int dictEnd = dictStart >= 0 ? FindMatchingDictEnd(fullData, dictStart) : -1;
-            if (dictEnd >= 0)
+            int pos = valuePos + 2;
+            while (pos < data.Length && IsWhitespace(data[pos]))
             {
-                string? fieldName = ExtractPdfString(fullData[dictStart..(dictEnd + 2)], "/T "u8);
-                if (!string.IsNullOrWhiteSpace(fieldName))
+                pos++;
+            }
+
+            if (TryParseDecimalLong(data, pos, out long referencedObject, out int afterObject)
+                && referencedObject == signatureObjectNumber)
+            {
+                pos = afterObject;
+                while (pos < data.Length && IsWhitespace(data[pos]))
                 {
-                    return fieldName;
+                    pos++;
+                }
+
+                if (TryParseDecimalLong(data, pos, out _, out int afterGeneration))
+                {
+                    pos = afterGeneration;
+                    while (pos < data.Length && IsWhitespace(data[pos]))
+                    {
+                        pos++;
+                    }
+
+                    if (pos < data.Length && data[pos] == 'R')
+                    {
+                        int dictStart = FindDictStart(data, valuePos);
+                        int dictEnd = dictStart >= 0 ? FindMatchingDictEnd(data, dictStart) : -1;
+                        if (dictEnd >= 0)
+                        {
+                            string? fieldName = ExtractPdfString(
+                                data[dictStart..(dictEnd + 2)], "/T"u8);
+                            if (!string.IsNullOrEmpty(fieldName))
+                            {
+                                return fieldName;
+                            }
+                        }
+                    }
                 }
             }
 
-            referencePosition += signatureReference.Length;
+            valuePos += 2;
         }
 
         return null;
@@ -1716,7 +1749,22 @@ public sealed class PdfStructureReader
     /// </summary>
     private static string? ExtractPdfString(ReadOnlySpan<byte> dictSpan, ReadOnlySpan<byte> key)
     {
-        int keyPos = IndexOf(dictSpan, key, 0);
+        int searchPos = 0;
+        int keyPos;
+        while ((keyPos = IndexOf(dictSpan, key, searchPos)) >= 0)
+        {
+            int afterKey = keyPos + key.Length;
+            if (afterKey >= dictSpan.Length
+                || IsWhitespace(dictSpan[afterKey])
+                || dictSpan[afterKey] == '(')
+            {
+                break;
+            }
+
+            // A short key such as /T must not match /Type.
+            searchPos = afterKey;
+        }
+
         if (keyPos < 0)
         {
             return null;

@@ -30,11 +30,12 @@ public sealed class XadesEuDssInteropTests(ITestOutputHelper output)
     {
         SkipIfDockerUnavailable();
         using var cert = TestCertificateFactory.CreateSelfSignedCert("CN=XAdES B-T EU DSS");
+        using var tsaClient = MockTimestampAuthority.CreateClient();
         string xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?><doc><data>test</data></doc>";
         var result = await XadesSigner.Document(System.Text.Encoding.UTF8.GetBytes(xml))
             .WithCertificate(cert)
             .WithLevel(AdesBaselineProfile.Timestamped(
-                new TimestampOptions(new Uri("http://timestamp.digicert.com"))))
+                new TimestampOptions(new Uri("http://mock-tsa.example.com"), new SingleClientProvider(tsaClient))))
             .SignWithDetailsAsync();
         await ValidateXmlWithEuDss(result.SignedArtifact, "xades-b-t");
     }
@@ -45,11 +46,12 @@ public sealed class XadesEuDssInteropTests(ITestOutputHelper output)
         SkipIfDockerUnavailable();
         using var pki = new SyntheticPki(crlDistributionPoint: "http://crl.example.com/test-ca.crl");
         using var crlClient = TestRevocation.BuildCrlClient(pki.BuildLeafCrl());
+        using var tsaClient = MockTimestampAuthority.CreateClient();
         string xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?><doc><ltv>yes</ltv></doc>";
         var result = await XadesSigner.Document(System.Text.Encoding.UTF8.GetBytes(xml))
             .WithCertificate(pki.Leaf, pki.IntermediatesAndRoot())
             .WithLevel(AdesBaselineProfile.LongTerm(
-                new TimestampOptions(new Uri("http://timestamp.digicert.com")),
+                new TimestampOptions(new Uri("http://mock-tsa.example.com"), new SingleClientProvider(tsaClient)),
                 new LongTermValidationOptions(new SingleClientProvider(crlClient))))
             .SignWithDetailsAsync();
         await ValidateXmlWithEuDss(result.SignedArtifact, "xades-b-lt");
@@ -88,6 +90,7 @@ public sealed class XadesEuDssInteropTests(ITestOutputHelper output)
     {
         SkipIfDockerUnavailable();
         using var cert = TestCertificateFactory.CreateSelfSignedCert("CN=XAdES B-T Detached EU DSS");
+        using var tsaClient = MockTimestampAuthority.CreateClient();
         string xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?><doc><data>timestamped</data></doc>";
         byte[] xmlBytes = System.Text.Encoding.UTF8.GetBytes(xml);
         var result = await XadesSigner.Document(xmlBytes)
@@ -95,7 +98,7 @@ public sealed class XadesEuDssInteropTests(ITestOutputHelper output)
             .WithForm(XadesForm.Detached)
             .WithDataUri("data.xml")
             .WithLevel(AdesBaselineProfile.Timestamped(
-                new TimestampOptions(new Uri("http://timestamp.digicert.com"))))
+                new TimestampOptions(new Uri("http://mock-tsa.example.com"), new SingleClientProvider(tsaClient))))
             .SignWithDetailsAsync();
         await ValidateXmlWithEuDssDetached(result.SignedArtifact, xmlBytes, "xades-bt-detached");
     }
@@ -106,6 +109,7 @@ public sealed class XadesEuDssInteropTests(ITestOutputHelper output)
         SkipIfDockerUnavailable();
         using var pki = new SyntheticPki(crlDistributionPoint: "http://crl.example.com/test-ca.crl");
         using var crlClient = TestRevocation.BuildCrlClient(pki.BuildLeafCrl());
+        using var tsaClient = MockTimestampAuthority.CreateClient();
         string xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?><doc><ltv>detached</ltv></doc>";
         byte[] xmlBytes = System.Text.Encoding.UTF8.GetBytes(xml);
         var result = await XadesSigner.Document(xmlBytes)
@@ -113,7 +117,7 @@ public sealed class XadesEuDssInteropTests(ITestOutputHelper output)
             .WithForm(XadesForm.Detached)
             .WithDataUri("data.xml")
             .WithLevel(AdesBaselineProfile.LongTerm(
-                new TimestampOptions(new Uri("http://timestamp.digicert.com")),
+                new TimestampOptions(new Uri("http://mock-tsa.example.com"), new SingleClientProvider(tsaClient)),
                 new LongTermValidationOptions(new SingleClientProvider(crlClient))))
             .SignWithDetailsAsync();
         await ValidateXmlWithEuDssDetached(result.SignedArtifact, xmlBytes, "xades-blt-detached");
@@ -138,13 +142,14 @@ public sealed class XadesEuDssInteropTests(ITestOutputHelper output)
     {
         SkipIfDockerUnavailable();
         using var cert = TestCertificateFactory.CreateSelfSignedCert("CN=XAdES B-T Enveloping EU DSS");
+        using var tsaClient = MockTimestampAuthority.CreateClient();
         string xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?><doc><data>ts env</data></doc>";
         byte[] xmlBytes = System.Text.Encoding.UTF8.GetBytes(xml);
         var result = await XadesSigner.Document(xmlBytes)
             .WithCertificate(cert)
             .WithForm(XadesForm.Enveloping)
             .WithLevel(AdesBaselineProfile.Timestamped(
-                new TimestampOptions(new Uri("http://timestamp.digicert.com"))))
+                new TimestampOptions(new Uri("http://mock-tsa.example.com"), new SingleClientProvider(tsaClient))))
             .SignWithDetailsAsync();
         await ValidateXmlWithEuDss(result.SignedArtifact, "xades-bt-enveloping");
     }
@@ -155,13 +160,14 @@ public sealed class XadesEuDssInteropTests(ITestOutputHelper output)
         SkipIfDockerUnavailable();
         using var pki = new SyntheticPki(crlDistributionPoint: "http://crl.example.com/test-ca.crl");
         using var crlClient = TestRevocation.BuildCrlClient(pki.BuildLeafCrl());
+        using var tsaClient = MockTimestampAuthority.CreateClient();
         string xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?><doc><ltv>env</ltv></doc>";
         byte[] xmlBytes = System.Text.Encoding.UTF8.GetBytes(xml);
         var result = await XadesSigner.Document(xmlBytes)
             .WithCertificate(pki.Leaf, pki.IntermediatesAndRoot())
             .WithForm(XadesForm.Enveloping)
             .WithLevel(AdesBaselineProfile.LongTerm(
-                new TimestampOptions(new Uri("http://timestamp.digicert.com")),
+                new TimestampOptions(new Uri("http://mock-tsa.example.com"), new SingleClientProvider(tsaClient)),
                 new LongTermValidationOptions(new SingleClientProvider(crlClient))))
             .SignWithDetailsAsync();
         await ValidateXmlWithEuDss(result.SignedArtifact, "xades-blt-enveloping");

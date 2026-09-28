@@ -99,6 +99,9 @@ public static class Oids
     /// <summary>id-signedData — CMS content type for signed data.</summary>
     public const string SignedData = "1.2.840.113549.1.7.2";
 
+    /// <summary>id-ct-TSTInfo — encapsulated content type of an RFC 3161 timestamp token.</summary>
+    public const string TimestampInfoContentType = "1.2.840.113549.1.9.16.1.4";
+
     #endregion
 
     #region CMS Signed Attributes
@@ -217,8 +220,11 @@ public static class Oids
     /// <summary>id-aa-ets-revocationValues (RFC 5126 §5.5.2) — CAdES-XL.</summary>
     public const string RevocationValues = "1.2.840.113549.1.9.16.2.24";
 
-    /// <summary>id-aa-ets-archiveTimeStamp (RFC 5126 §6.3) — CAdES-A.</summary>
-    public const string ArchiveTimeStamp = "1.2.840.113549.1.9.16.2.48";
+    /// <summary>id-aa-ets-archiveTimestampV3 (ETSI EN 319 122-1 §5.5.3).</summary>
+    public const string ArchiveTimeStamp = "0.4.0.1733.2.4";
+
+    /// <summary>id-aa-ATSHashIndex-v3 (ETSI EN 319 122-1 §5.5.2).</summary>
+    public const string AtsHashIndexV3 = "0.4.0.19122.1.5";
 
     #endregion
 

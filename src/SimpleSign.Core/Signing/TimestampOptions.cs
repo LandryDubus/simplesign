@@ -30,6 +30,10 @@ public sealed record TimestampOptions
         {
             throw new ArgumentException("TSA endpoint must be absolute.", nameof(endpoint));
         }
+        if (endpoint.Scheme != Uri.UriSchemeHttp && endpoint.Scheme != Uri.UriSchemeHttps)
+        {
+            throw new ArgumentException("TSA endpoint must use HTTP or HTTPS.", nameof(endpoint));
+        }
 
         Endpoint = endpoint;
         HttpClientProvider = httpClientProvider;

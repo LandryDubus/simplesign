@@ -13,6 +13,7 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="SimpleSign.Contracts.Tests" />
+    <InternalsVisibleTo Include="SimpleSign.XAdES.Tests" />
   </ItemGroup>
 
   <ItemGroup>

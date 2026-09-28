@@ -10,10 +10,16 @@ namespace SimpleSign.Core.Signing;
 public class SigningException : SimpleSignException
 {
     /// <summary>Creates a new instance with the specified message.</summary>
-    public SigningException(string message) : base(message) { }
+    public SigningException(string message) : base(message)
+    {
+        Reason = SigningErrorReason.Unspecified;
+    }
 
     /// <summary>Creates a new instance with the specified message and inner exception.</summary>
-    public SigningException(string message, Exception innerException) : base(message, innerException) { }
+    public SigningException(string message, Exception innerException) : base(message, innerException)
+    {
+        Reason = SigningErrorReason.Unspecified;
+    }
 
     /// <summary>Creates a new instance with the specified message and reason code.</summary>
     /// <param name="message">The error message.</param>

@@ -36,6 +36,14 @@ public sealed record ArchiveTimestampOptions
                 "Archive TSA endpoint must be absolute.",
                 nameof(endpoint));
         }
+        if (endpoint is not null
+            && endpoint.Scheme != Uri.UriSchemeHttp
+            && endpoint.Scheme != Uri.UriSchemeHttps)
+        {
+            throw new ArgumentException(
+                "Archive TSA endpoint must use HTTP or HTTPS.",
+                nameof(endpoint));
+        }
 
         Endpoint = endpoint;
         HttpClientProvider = httpClientProvider;

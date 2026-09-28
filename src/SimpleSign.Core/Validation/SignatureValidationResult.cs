@@ -19,7 +19,11 @@ public sealed class SignatureValidationResult
     /// <summary>The certificate chain is valid and trusted.</summary>
     public bool IsCertificateChainValid { get; init; }
 
-    /// <summary>The certificate was not revoked at the time of signing.</summary>
+    /// <summary>
+    /// True when no revocation was established. When <see cref="RevocationSource"/> is
+    /// <see cref="global::SimpleSign.Core.Validation.RevocationSource.Indeterminate"/>,
+    /// the status is unknown rather than confirmed good.
+    /// </summary>
     public bool IsNotRevoked { get; init; }
 
     /// <summary>How the revocation status was determined.</summary>
@@ -110,9 +114,13 @@ public sealed class SignatureValidationResult
     /// </summary>
     public IReadOnlyDictionary<string, string>? ChainValidationMetadata { get; init; }
 
-    /// <summary>Indicates whether the signature is considered valid as a whole.</summary>
+    /// <summary>
+    /// Indicates whether the signature is considered valid as a whole.
+    /// An attempted revocation check with an indeterminate result cannot establish validity.
+    /// </summary>
     public bool IsValid =>
-        IsIntegrityValid && IsSignatureValid && (IsCertificateChainValid || IsChainTrustWarning) && IsNotRevoked;
+        IsIntegrityValid && IsSignatureValid && (IsCertificateChainValid || IsChainTrustWarning)
+        && IsNotRevoked && RevocationSource != global::SimpleSign.Core.Validation.RevocationSource.Indeterminate;
 
     /// <summary>Errors found during validation.</summary>
     public IReadOnlyList<string> Errors { get; init; } = [];

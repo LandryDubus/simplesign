@@ -1,9 +1,12 @@
+using System.Diagnostics;
 using System.Net;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
+using Moq;
 using Shouldly;
 using SimpleSign.Core.Crypto;
+using SimpleSign.Core.Http;
 using SimpleSign.Core.Revocation;
 using SimpleSign.Core.Validation;
 using SimpleSign.PAdES.Validation;
@@ -114,6 +117,105 @@ public sealed class ValidationEdgeCaseTests
             NetworkTimeout = TimeSpan.FromMilliseconds(1.0)
         };
         validationOptions.NetworkTimeout.ShouldBe(TimeSpan.FromMilliseconds(1.0), "");
+    }
+
+    [Fact(DisplayName = "NetworkTimeout cancels AIA retrieval")]
+    public async Task ValidateAsync_NetworkTimeout_CancelsAiaRetrieval()
+    {
+        using X509Certificate2 cert = TestCertificateFactory.CreateSelfSignedCert();
+        byte[] signedPdf = await PadesSigner.Document(BuildMinimalPdf()).WithCertificate(cert).SignAsync();
+
+        var httpProvider = new Mock<IHttpClientProvider>();
+        using var httpClient = new HttpClient();
+        httpProvider.Setup(p => p.GetClient()).Returns(httpClient);
+
+        var revocationChecker = new Mock<IRevocationChecker>();
+        var chainService = new Mock<ICertificateChainService>();
+        chainService
+            .Setup(s => s.DownloadAiaCertsAsync(
+                It.IsAny<HttpClient>(),
+                It.IsAny<X509Certificate2>(),
+                It.IsAny<IReadOnlyList<X509Certificate2>>(),
+                It.IsAny<List<string>>(),
+                It.IsAny<CancellationToken>()))
+            .Returns((HttpClient _, X509Certificate2 _, IReadOnlyList<X509Certificate2>? _,
+                List<string> _, CancellationToken ct) => WaitForCancellationAsync(ct));
+
+        var validator = new PdfSignatureValidator(
+            httpProvider.Object,
+            revocationChecker.Object,
+            new ValidationOptions
+            {
+                CheckRevocation = false,
+                NetworkTimeout = TimeSpan.FromMilliseconds(50)
+            },
+            certChainService: chainService.Object);
+
+        var stopwatch = Stopwatch.StartNew();
+        var results = await validator.ValidateAsync(new MemoryStream(signedPdf));
+        stopwatch.Stop();
+
+        results.ShouldHaveSingleItem();
+        stopwatch.Elapsed.ShouldBeLessThan(TimeSpan.FromSeconds(2));
+        chainService.VerifyAll();
+    }
+
+    private static async Task<List<X509Certificate2>> WaitForCancellationAsync(CancellationToken cancellationToken)
+    {
+        await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+        return [];
+    }
+
+    [Fact(DisplayName = "Timed out revocation check leaves overall validity unconfirmed")]
+    public async Task ValidateAsync_RevocationTimeout_IsNotValid()
+    {
+        using X509Certificate2 cert = TestCertificateFactory.CreateSelfSignedCert();
+        byte[] signedPdf = await PadesSigner.Document(BuildMinimalPdf()).WithCertificate(cert).SignAsync();
+
+        var httpProvider = new Mock<IHttpClientProvider>();
+        using var httpClient = new HttpClient();
+        httpProvider.Setup(p => p.GetClient()).Returns(httpClient);
+
+        var revocationChecker = new Mock<IRevocationChecker>();
+        revocationChecker
+            .Setup(s => s.CheckRevocationAsync(
+                It.IsAny<X509Certificate2>(),
+                It.IsAny<IReadOnlyList<X509Certificate2>>(),
+                It.IsAny<IReadOnlyList<byte[]>>(),
+                It.IsAny<IReadOnlyList<byte[]>>(),
+                It.IsAny<CancellationToken>(),
+                It.IsAny<DateTimeOffset?>()))
+            .Returns((X509Certificate2 _, IReadOnlyList<X509Certificate2> _,
+                IReadOnlyList<byte[]> _, IReadOnlyList<byte[]> _, CancellationToken ct,
+                DateTimeOffset? _) => WaitForRevocationCancellationAsync(ct));
+
+        var validator = new PdfSignatureValidator(
+            httpProvider.Object,
+            revocationChecker.Object,
+            new ValidationOptions
+            {
+                CheckRevocation = true,
+                TrustSystemRoots = false,
+                TrustedRoots = [cert],
+                NetworkTimeout = TimeSpan.FromMilliseconds(50)
+            });
+
+        var results = await validator.ValidateAsync(new MemoryStream(signedPdf));
+
+        var result = results.ShouldHaveSingleItem();
+        result.IsIntegrityValid.ShouldBeTrue();
+        result.IsSignatureValid.ShouldBeTrue();
+        result.IsCertificateChainValid.ShouldBeTrue();
+        result.RevocationSource.ShouldBe(RevocationSource.Indeterminate);
+        result.IsValid.ShouldBeFalse();
+        revocationChecker.VerifyAll();
+    }
+
+    private static async Task<(bool IsNotRevoked, RevocationSource Source)> WaitForRevocationCancellationAsync(
+        CancellationToken cancellationToken)
+    {
+        await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+        return (true, RevocationSource.OnlineOcsp);
     }
 
     [Fact(DisplayName = "Empty stream (0 bytes) throws InvalidDataException")]
@@ -361,22 +463,31 @@ public sealed class ValidationEdgeCaseTests
         crlUrl.ShouldBeNull("certificate has no CDP extension either");
     }
 
-    [Fact(DisplayName = "CheckRevocation=true with self-signed cert treats indeterminate as warning, not error")]
-    public async Task ValidateAsync_CheckRevocationTrue_IndeterminateIsWarningNotError()
+    [Fact(DisplayName = "CheckRevocation=true with unknown status does not report overall validity")]
+    public async Task ValidateAsync_CheckRevocationTrue_IndeterminateIsNotValid()
     {
         // Self-signed cert has no OCSP/CRL URLs → revocation is indeterminate.
-        // This MUST NOT make the signature invalid — indeterminate ≠ revoked.
+        // The cryptographic signature remains valid, but overall validity is unconfirmed.
         using X509Certificate2 cert = TestCertificateFactory.CreateSelfSignedCert();
         byte[] pdfBytes = BuildMinimalPdf();
         byte[] signed = await PadesSigner.Document(pdfBytes).WithCertificate(cert).SignAsync();
 
-        var validator = new PdfSignatureValidator(new ValidationOptions { CheckRevocation = true });
+        var validator = new PdfSignatureValidator(new ValidationOptions
+        {
+            CheckRevocation = true,
+            TrustSystemRoots = false,
+            TrustedRoots = [cert]
+        });
         var results = await validator.ValidateAsync(new MemoryStream(signed));
 
         results.Count().ShouldBe(1);
         var r = results[0];
         r.IsNotRevoked.ShouldBeTrue("indeterminate revocation (no OCSP/CRL URL) must NOT be treated as revoked");
         r.RevocationSource.ShouldBe(RevocationSource.Indeterminate);
+        r.IsIntegrityValid.ShouldBeTrue();
+        r.IsSignatureValid.ShouldBeTrue();
+        r.IsCertificateChainValid.ShouldBeTrue();
+        r.IsValid.ShouldBeFalse("revocation was attempted but never confirmed");
         r.Warnings.ShouldContain(w => w.Contains("Revocation check could not be completed"),
             "indeterminate revocation should produce a warning");
     }

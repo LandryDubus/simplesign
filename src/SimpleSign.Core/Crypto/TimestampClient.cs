@@ -6,6 +6,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using SimpleSign.Core.Constants;
 using SimpleSign.Core.Http;
 using SimpleSign.Core.Signing;
+using SimpleSign.Core.Validation;
 
 namespace SimpleSign.Core.Crypto;
 
@@ -64,7 +65,14 @@ public sealed class TimestampClient : ITimestampClient
         byte[] timestampResponse = await SendRequestAsync(timestampRequest, cancellationToken).ConfigureAwait(false);
         _logger.TimestampResponseReceived(timestampResponse.Length);
 
-        return ParseTimeStampResponse(timestampResponse, requestNonce, _logger);
+        byte[] token = ParseTimeStampResponse(timestampResponse, requestNonce, hashOid, hash);
+        var warnings = new List<string>();
+        if (TimestampValidator.Validate(token, dataToTimestamp.ToArray(), null, warnings) != true)
+        {
+            throw new TimestampException("TSA token signature or signed data is invalid: "
+                + string.Join("; ", warnings));
+        }
+        return token;
     }
 
     /// <summary>
@@ -150,7 +158,10 @@ public sealed class TimestampClient : ITimestampClient
                 using (writer.PushSequence()) // AlgorithmIdentifier
                 {
                     writer.WriteObjectIdentifier(hashOid);
-                    writer.WriteNull();
+                    if (hashOid is not (Oids.Sha3_256 or Oids.Sha3_384 or Oids.Sha3_512))
+                    {
+                        writer.WriteNull();
+                    }
                 }
                 writer.WriteOctetString(hash);
             }
@@ -194,117 +205,135 @@ public sealed class TimestampClient : ITimestampClient
 
     #region TimeStampResponse parsing (ASN.1 / RFC 3161)
 
-    private static byte[] ParseTimeStampResponse(byte[] timestampResponse, System.Numerics.BigInteger requestNonce, ILogger? logger = null)
-    {
-        // TimeStampResp ::= SEQUENCE {
-        //   status PKIStatusInfo,
-        //   timeStampToken TimeStampToken OPTIONAL
-        // }
-        // BER: some TSA servers (e.g. Gov.br ITI) may respond with BER encoding
-        var reader = new AsnReader(timestampResponse, AsnEncodingRules.BER);
-        var seq = reader.ReadSequence();
-
-        // status PKIStatusInfo
-        var statusSeq = seq.ReadSequence();
-        var statusInt = statusSeq.ReadInteger();
-        int status = (int)statusInt;
-
-        if (status != 0 && status != 1) // 0=granted, 1=grantedWithMods
-        {
-            string statusText = status switch
-            {
-                2 => "rejection",
-                3 => "waiting",
-                4 => "revocationWarning",
-                5 => "revocationNotification",
-                _ => $"unknown({status})"
-            };
-            throw new TimestampException($"TSA rejected the request: {statusText}");
-        }
-
-        // timeStampToken (CMS ContentInfo)
-        if (!seq.HasData)
-        {
-            throw new TimestampException("TSA response does not contain a TimeStampToken.");
-        }
-
-        byte[] tokenBytes = seq.ReadEncodedValue().ToArray();
-
-        // Verify nonce in TSTInfo
-        if (!VerifyNonce(tokenBytes, requestNonce, logger))
-        {
-            logger?.NonceVerificationSkipped("Nonce verification failed — continuing with timestamp (non-fatal).");
-        }
-
-        return tokenBytes;
-    }
-
-    private static bool VerifyNonce(byte[] timestampToken, System.Numerics.BigInteger requestNonce, ILogger? logger = null)
+    private static byte[] ParseTimeStampResponse(
+        byte[] timestampResponse,
+        System.Numerics.BigInteger requestNonce,
+        string expectedHashOid,
+        ReadOnlySpan<byte> expectedHash)
     {
         try
         {
-            var tokenReader = new AsnReader(timestampToken, AsnEncodingRules.BER);
-            var contentInfo = tokenReader.ReadSequence();
-            _ = contentInfo.ReadObjectIdentifier();
-            var wrapper = contentInfo.ReadSequence(new Asn1Tag(TagClass.ContextSpecific, 0, true));
-            var signedData = wrapper.ReadSequence();
-            _ = signedData.ReadInteger(); // version
-            _ = signedData.ReadSetOf();   // digestAlgorithms
-            var encap = signedData.ReadSequence();
-            _ = encap.ReadObjectIdentifier();
-            if (!encap.HasData)
-            {
-                logger?.NonceVerificationSkipped("No encapsulated content in timestamp token.");
-                return false;
-            }
-            var tstInfoWrapper = encap.ReadSequence(new Asn1Tag(TagClass.ContextSpecific, 0, true));
-            byte[] tstInfoBytes = tstInfoWrapper.ReadOctetString();
+            // BER: some TSA servers (e.g. Gov.br ITI) may respond with BER encoding.
+            var reader = new AsnReader(timestampResponse, AsnEncodingRules.BER);
+            var seq = reader.ReadSequence();
+            var statusSeq = seq.ReadSequence();
+            int status = (int)statusSeq.ReadInteger();
 
-            var tstInfo = new AsnReader(tstInfoBytes, AsnEncodingRules.BER).ReadSequence();
-            _ = tstInfo.ReadInteger();           // version
-            _ = tstInfo.ReadObjectIdentifier();  // policy
-            _ = tstInfo.ReadSequence();           // messageImprint
-            _ = tstInfo.ReadInteger();           // serialNumber
-            _ = tstInfo.ReadEncodedValue();      // genTime
-
-            // accuracy OPTIONAL
-            if (tstInfo.HasData && tstInfo.PeekTag() is { TagClass: TagClass.Universal, TagValue: (int)UniversalTagNumber.Sequence })
+            if (status != 0 && status != 1)
             {
-                tstInfo.ReadEncodedValue();
-            }
-
-            // ordering OPTIONAL (BOOLEAN, default FALSE)
-            if (tstInfo.HasData && tstInfo.PeekTag() is { TagClass: TagClass.Universal, TagValue: (int)UniversalTagNumber.Boolean })
-            {
-                tstInfo.ReadEncodedValue();
-            }
-
-            // nonce OPTIONAL (INTEGER)
-            if (tstInfo.HasData && tstInfo.PeekTag() is { TagClass: TagClass.Universal, TagValue: (int)UniversalTagNumber.Integer })
-            {
-                var responseNonce = tstInfo.ReadInteger();
-                if (responseNonce != requestNonce)
+                string statusText = status switch
                 {
-                    throw new InvalidOperationException(
-                        $"Timestamp nonce mismatch: expected {requestNonce}, got {responseNonce}. Possible replay attack.");
-                }
-                return true;
+                    2 => "rejection",
+                    3 => "waiting",
+                    4 => "revocationWarning",
+                    5 => "revocationNotification",
+                    _ => $"unknown({status})"
+                };
+                throw new TimestampException($"TSA rejected the request: {statusText}");
             }
 
-            // No nonce in response — TSA did not include it (some TSAs don't echo nonces)
-            logger?.NonceVerificationSkipped("Timestamp response did not include a nonce.");
-            return true; // acceptable per RFC 3161 — nonce is OPTIONAL in response
+            if (!seq.HasData)
+            {
+                throw new TimestampException("TSA response does not contain a TimeStampToken.");
+            }
+
+            byte[] tokenBytes = seq.ReadEncodedValue().ToArray();
+            ValidateTimestampTokenBinding(tokenBytes, requestNonce, expectedHashOid, expectedHash);
+            return tokenBytes;
         }
-        catch (InvalidOperationException) { throw; }
+        catch (TimestampException)
+        {
+            throw;
+        }
         catch (AsnContentException ex)
         {
-            logger?.NonceVerificationSkipped(ex.Message);
-            return false;
+            throw new TimestampException("TSA returned a malformed timestamp response.", ex);
         }
-        catch (InvalidDataException ex)
+    }
+
+    private static void ValidateTimestampTokenBinding(
+        byte[] timestampToken,
+        System.Numerics.BigInteger requestNonce,
+        string expectedHashOid,
+        ReadOnlySpan<byte> expectedHash)
+    {
+        var tokenReader = new AsnReader(timestampToken, AsnEncodingRules.BER);
+        var contentInfo = tokenReader.ReadSequence();
+        string contentType = contentInfo.ReadObjectIdentifier();
+        if (contentType != Oids.SignedData)
         {
-            logger?.NonceVerificationSkipped(ex.Message);
-            return false;
+            throw new TimestampException("TSA token is not CMS SignedData.");
+        }
+
+        var wrapper = contentInfo.ReadSequence(new Asn1Tag(TagClass.ContextSpecific, 0, true));
+        var signedData = wrapper.ReadSequence();
+        _ = signedData.ReadInteger();
+        _ = signedData.ReadSetOf();
+        var encap = signedData.ReadSequence();
+        string encapsulatedContentType = encap.ReadObjectIdentifier();
+        if (encapsulatedContentType != Oids.TimestampInfoContentType)
+        {
+            throw new TimestampException("TSA token does not encapsulate TSTInfo content.");
+        }
+
+        if (!encap.HasData)
+        {
+            throw new TimestampException("TSA token does not contain encapsulated TSTInfo bytes.");
+        }
+
+        var tstInfoWrapper = encap.ReadSequence(new Asn1Tag(TagClass.ContextSpecific, 0, true));
+        byte[] tstInfoBytes = tstInfoWrapper.ReadOctetString();
+        var tstInfoReader = new AsnReader(tstInfoBytes, AsnEncodingRules.BER);
+        var tstInfo = tstInfoReader.ReadSequence();
+        _ = tstInfo.ReadInteger();
+        _ = tstInfo.ReadObjectIdentifier();
+
+        var messageImprint = tstInfo.ReadSequence();
+        var hashAlgorithm = messageImprint.ReadSequence();
+        string actualHashOid = hashAlgorithm.ReadObjectIdentifier();
+        if (hashAlgorithm.HasData)
+        {
+            _ = hashAlgorithm.ReadEncodedValue();
+        }
+        byte[] actualHash = messageImprint.ReadOctetString();
+
+        if (actualHashOid != expectedHashOid)
+        {
+            throw new TimestampException(
+                $"TSA token messageImprint uses '{actualHashOid}', expected '{expectedHashOid}'.");
+        }
+
+        if (actualHash.Length != expectedHash.Length
+            || !CryptographicOperations.FixedTimeEquals(actualHash, expectedHash))
+        {
+            throw new TimestampException("TSA token messageImprint does not match the requested data.");
+        }
+
+        _ = tstInfo.ReadInteger();
+        _ = tstInfo.ReadEncodedValue();
+
+        if (tstInfo.HasData
+            && tstInfo.PeekTag() is { TagClass: TagClass.Universal, TagValue: (int)UniversalTagNumber.Sequence })
+        {
+            _ = tstInfo.ReadEncodedValue();
+        }
+
+        if (tstInfo.HasData
+            && tstInfo.PeekTag() is { TagClass: TagClass.Universal, TagValue: (int)UniversalTagNumber.Boolean })
+        {
+            _ = tstInfo.ReadBoolean();
+        }
+
+        if (!tstInfo.HasData
+            || tstInfo.PeekTag() is not { TagClass: TagClass.Universal, TagValue: (int)UniversalTagNumber.Integer })
+        {
+            throw new TimestampException("TSA token did not echo the request nonce.");
+        }
+
+        var responseNonce = tstInfo.ReadInteger();
+        if (responseNonce != requestNonce)
+        {
+            throw new TimestampException("TSA token nonce does not match the request nonce.");
         }
     }
     #endregion
@@ -416,20 +445,15 @@ public sealed class TimestampClient : ITimestampClient
         byte[] signature = siSeq.ReadEncodedValue().ToArray();
 
         // unsignedAttrs [1] IMPLICIT OPTIONAL — add or extend
-        var unsignedAttrs = new List<(string oid, byte[] val)>();
+        var unsignedAttrs = new List<byte[]>();
         if (siSeq.HasData && siSeq.PeekTag() == new Asn1Tag(TagClass.ContextSpecific, 1, true))
         {
             var existingAttrs = siSeq.ReadSequence(new Asn1Tag(TagClass.ContextSpecific, 1, true));
             while (existingAttrs.HasData)
             {
-                var attrSeq = existingAttrs.ReadSequence();
-                string oid = attrSeq.ReadObjectIdentifier();
-                byte[] val = attrSeq.ReadEncodedValue().ToArray();
-                unsignedAttrs.Add((oid, val));
+                unsignedAttrs.Add(existingAttrs.ReadEncodedValue().ToArray());
             }
         }
-
-        unsignedAttrs.Add((attrOid, attrValue));
 
         // Rebuilds the SignerInfo
         var writer = new AsnWriter(AsnEncodingRules.DER);
@@ -448,17 +472,18 @@ public sealed class TimestampClient : ITimestampClient
             writer.WriteEncodedValue(signature);
 
             // unsignedAttrs [1] IMPLICIT
-            using (writer.PushSequence(new Asn1Tag(TagClass.ContextSpecific, 1, true)))
+            using (writer.PushSetOf(new Asn1Tag(TagClass.ContextSpecific, 1, true)))
             {
-                foreach (var (oid, val) in unsignedAttrs)
+                foreach (byte[] attribute in unsignedAttrs)
                 {
-                    using (writer.PushSequence())
+                    writer.WriteEncodedValue(attribute);
+                }
+                using (writer.PushSequence())
+                {
+                    writer.WriteObjectIdentifier(attrOid);
+                    using (writer.PushSetOf())
                     {
-                        writer.WriteObjectIdentifier(oid);
-                        using (writer.PushSetOf())
-                        {
-                            writer.WriteEncodedValue(val);
-                        }
+                        writer.WriteEncodedValue(attrValue);
                     }
                 }
             }

@@ -34,9 +34,13 @@ internal static class JsonMapper
                     Integrity = r.IsIntegrityValid,
                     Signature = r.IsSignatureValid,
                     Chain = r.IsCertificateChainValid,
-                    Revoked = !r.IsNotRevoked,
+                    Revoked = r.RevocationSource is RevocationSource.None or RevocationSource.Indeterminate
+                        ? null
+                        : !r.IsNotRevoked,
+                    RevocationSource = r.RevocationSource.ToString(),
                     SigningTime = r.SigningTime,
-                    Errors = [.. r.Errors]
+                    Errors = [.. r.Errors],
+                    Warnings = [.. r.Warnings]
                 };
             })]
         };

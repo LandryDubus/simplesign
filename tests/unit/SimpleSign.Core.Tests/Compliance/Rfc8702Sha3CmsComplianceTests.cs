@@ -24,18 +24,8 @@ public sealed class Rfc8702Sha3CmsComplianceTests : IDisposable
     private readonly byte[] _cmsSha3_384;
     private readonly byte[] _cmsSha3_512;
 
-    private static bool IsSha3Available()
-    {
-        try
-        {
-            SHA3_256.HashData("test"u8);
-            return true;
-        }
-        catch (PlatformNotSupportedException)
-        {
-            return false;
-        }
-    }
+    private static bool IsSha3Available() =>
+        SHA3_256.IsSupported && SHA3_384.IsSupported && SHA3_512.IsSupported;
 
     public Rfc8702Sha3CmsComplianceTests()
     {
@@ -78,6 +68,27 @@ public sealed class Rfc8702Sha3CmsComplianceTests : IDisposable
             sd.ReadEncodedValue();
         var signerInfosSet = sd.ReadSetOf();
         return signerInfosSet.ReadSequence();
+    }
+
+    [SkippableFact]
+    public void Sha3DigestAlgorithmIdentifiers_OmitParameters()
+    {
+        foreach (byte[] cms in new[] { _cmsSha3_256, _cmsSha3_384, _cmsSha3_512 })
+        {
+            var signedData = OpenSignedData(cms);
+            _ = signedData.ReadInteger();
+            var digestAlgorithms = signedData.ReadSetOf();
+            var digestAlgorithm = digestAlgorithms.ReadSequence();
+            _ = digestAlgorithm.ReadObjectIdentifier();
+            digestAlgorithm.HasData.ShouldBeFalse();
+
+            var signerInfo = OpenSignerInfo(cms);
+            _ = signerInfo.ReadInteger();
+            _ = signerInfo.ReadEncodedValue();
+            var signerDigestAlgorithm = signerInfo.ReadSequence();
+            _ = signerDigestAlgorithm.ReadObjectIdentifier();
+            signerDigestAlgorithm.HasData.ShouldBeFalse();
+        }
     }
 
     private static void AssertOidInDigestAlgorithms(byte[] cms, string expectedOid)

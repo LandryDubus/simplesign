@@ -26,14 +26,14 @@ public sealed class PadesSigner
     public static PadesSignerBuilder Document(byte[] pdfBytes)
     {
         ArgumentNullException.ThrowIfNull(pdfBytes);
-        return new PadesSignerBuilder(new MemoryStream(pdfBytes));
+        return new PadesSignerBuilder(new MemoryStream((byte[])pdfBytes.Clone()));
     }
 
     /// <summary>Starts the signing pipeline from a seekable stream.</summary>
     /// <remarks>
-    /// The stream is retained by the builder. A builder created from a stream is
-    /// single-execution: it seeks the stream during signing and is not safe for
-    /// concurrent terminal calls.
+    /// The stream is retained by the builder. Terminal calls made through the builder
+    /// or any of its fluent clones are serialized, so sequential and concurrent reuse
+    /// cannot race while seeking the shared input stream.
     /// </remarks>
     /// <param name="pdfStream">The input PDF stream. Must be seekable and readable.</param>
     /// <returns>A new <see cref="PadesSignerBuilder"/> with default configuration.</returns>

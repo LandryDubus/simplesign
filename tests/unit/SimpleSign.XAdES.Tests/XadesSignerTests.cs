@@ -34,6 +34,8 @@ public sealed class XadesSignerTests
     private static X509Certificate2 CreateTsaCert(RSA key)
     {
         var req = new CertificateRequest("CN=Test TSA, O=Tests", key, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+        req.CertificateExtensions.Add(new X509EnhancedKeyUsageExtension(
+            new OidCollection { new Oid("1.3.6.1.5.5.7.3.8") }, critical: true));
         var cert = req.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddYears(1));
         return X509CertificateLoader.LoadCertificate(cert.RawData);
     }
@@ -244,7 +246,7 @@ public sealed class XadesSignerTests
         byte[] tsXml = EmbedSyntheticTimestamp(signed);
 
         var validator = new XadesSignatureValidator();
-        var result = validator.Validate(tsXml, trustAnchors: [s_cert]);
+        var result = validator.Validate(tsXml, trustAnchors: [s_cert, s_tsaCert]);
 
         string diag = "Errors: " + string.Join("; ", result.Errors) +
                        " | Warnings: " + string.Join("; ", result.Warnings);
@@ -265,7 +267,7 @@ public sealed class XadesSignerTests
         byte[] tsXml = EmbedSyntheticTimestamp(signed, tamperHash: true);
 
         var validator = new XadesSignatureValidator();
-        var result = validator.Validate(tsXml, trustAnchors: [s_cert]);
+        var result = validator.Validate(tsXml, trustAnchors: [s_cert, s_tsaCert]);
 
         string diag = "Errors: " + string.Join("; ", result.Errors) +
                        " | Warnings: " + string.Join("; ", result.Warnings);
@@ -304,7 +306,7 @@ public sealed class XadesSignerTests
         byte[] tsXml = EmbedMalformedTimestamp(signed);
 
         var validator = new XadesSignatureValidator();
-        var result = validator.Validate(tsXml, trustAnchors: [s_cert]);
+        var result = validator.Validate(tsXml, trustAnchors: [s_cert, s_tsaCert]);
 
         string diag = "Warnings: " + string.Join("; ", result.Warnings);
         result.HasValidSignatureTimeStamp.ShouldBe(false, diag);
@@ -508,6 +510,15 @@ public sealed class XadesSignerTests
                     using (w.PushSetOf())
                     { w.WriteOctetString(SHA256.HashData(tstInfoBytes)); }
                 }
+                using (w.PushSequence())
+                {
+                    w.WriteObjectIdentifier("1.2.840.113549.1.9.16.2.47");
+                    using (w.PushSetOf())
+                    using (w.PushSequence())
+                    using (w.PushSequence())
+                    using (w.PushSequence())
+                    { w.WriteOctetString(SHA256.HashData(signerCert.RawData)); }
+                }
             }
             signedAttrsBytes = w.Encode();
         }
@@ -583,7 +594,7 @@ public sealed class XadesSignerTests
         byte[] tsXml = EmbedSyntheticTimestamp(signed);
 
         var validator = new XadesSignatureValidator();
-        var result = validator.Validate(tsXml, trustAnchors: [s_cert]);
+        var result = validator.Validate(tsXml, trustAnchors: [s_cert, s_tsaCert]);
 
         string diag = "Errors: " + string.Join("; ", result.Errors) +
                        " | Warnings: " + string.Join("; ", result.Warnings);
@@ -706,7 +717,8 @@ public sealed class XadesSignerTests
             ltvXml = ms.ToArray();
         }
 
-        // Extract SignatureValue for the archive timestamp messageImprint
+        // Build the ETSI archive timestamp preimage over the signature and all
+        // qualifying properties that precede the ArchiveTimeStamp being added.
         var parseDoc = new System.Xml.XmlDocument { PreserveWhitespace = true };
         parseDoc.Load(new MemoryStream(ltvXml));
         var parseNs = new System.Xml.XmlNamespaceManager(parseDoc.NameTable);
@@ -714,14 +726,8 @@ public sealed class XadesSignerTests
         parseNs.AddNamespace("xades", XadesUris.XadesNamespace);
         parseNs.AddNamespace("xades141", XadesUris.Xades141Namespace);
 
-        var sigValEl = parseDoc.SelectSingleNode("//ds:Signature/ds:SignatureValue", parseNs) as System.Xml.XmlElement;
-        if (sigValEl is null)
-        {
-            throw new InvalidOperationException("No SignatureValue");
-        }
-
-        byte[] sigValueBytes = Convert.FromBase64String(sigValEl.InnerText.Trim());
-        byte[] preImageHash = SHA256.HashData(sigValueBytes);
+        byte[] archivePreimage = XadesSignatureBuilder.BuildArchiveTimeStampInput(ltvXml, xmlBytes);
+        byte[] preImageHash = SHA256.HashData(archivePreimage);
 
         // Build synthetic archive timestamp token
         byte[] archiveToken = BuildSyntheticTsaToken(s_tsaKey, s_tsaCert, preImageHash);
@@ -743,6 +749,9 @@ public sealed class XadesSignerTests
 
         var ats = parseDoc.CreateElement("ArchiveTimeStamp", XadesUris.Xades141Namespace);
         ats.SetAttribute("Id", "ATS-test");
+        var archiveMethod = parseDoc.CreateElement("CanonicalizationMethod", XmlDSigUrls.DsNamespace);
+        archiveMethod.SetAttribute("Algorithm", XmlDSigUrls.ExcC14N);
+        ats.AppendChild(archiveMethod);
         var encAts = parseDoc.CreateElement("EncapsulatedTimeStamp", XadesUris.Xades141Namespace);
         encAts.InnerText = Convert.ToBase64String(archiveToken);
         ats.AppendChild(encAts);
@@ -754,12 +763,46 @@ public sealed class XadesSignerTests
 
         // Validate
         var validator = new XadesSignatureValidator();
-        var result = validator.Validate(ltaXml, trustAnchors: [s_cert]);
+        var result = validator.Validate(ltaXml, trustAnchors: [s_cert, s_tsaCert]);
 
         string diag = "Errors: " + string.Join("; ", result.Errors) +
                        " | Warnings: " + string.Join("; ", result.Warnings);
         result.HasValidArchiveTimeStamp.ShouldBe(true, diag);
         result.DetectedLevel.ShouldBe(XadesLevel.Archive);
+    }
+
+    [Fact]
+    public async Task ArchiveInput_UnknownReferenceTransform_IsRejected()
+    {
+        byte[] original = "<doc>archive transform</doc>"u8.ToArray();
+        byte[] signed = await XadesSigner.Document(original).WithCertificate(s_cert).SignAsync();
+        var document = new System.Xml.XmlDocument { PreserveWhitespace = true };
+        document.Load(new MemoryStream(signed));
+        var namespaces = new System.Xml.XmlNamespaceManager(document.NameTable);
+        namespaces.AddNamespace("ds", XmlDSigUrls.DsNamespace);
+        var transform = (System.Xml.XmlElement)document.SelectSingleNode(
+            "//ds:SignedInfo/ds:Reference/ds:Transforms/ds:Transform[1]", namespaces)!;
+        transform.SetAttribute("Algorithm", "urn:unsupported-transform");
+        using var output = new MemoryStream();
+        document.Save(output);
+        Should.Throw<NotSupportedException>(() =>
+            XadesSignatureBuilder.BuildArchiveTimeStampInput(output.ToArray(), original));
+    }
+
+    [Fact]
+    public async Task ArchiveTimeStamp_DeclaresCanonicalizationMethod()
+    {
+        byte[] original = "<doc>archive method</doc>"u8.ToArray();
+        byte[] signed = await XadesSigner.Document(original).WithCertificate(s_cert).SignAsync();
+        byte[] archived = XadesSignatureBuilder.EmbedArchiveTimeStamp(signed, [0x30, 0x00]);
+        var document = new System.Xml.XmlDocument { PreserveWhitespace = true };
+        document.Load(new MemoryStream(archived));
+        var namespaces = new System.Xml.XmlNamespaceManager(document.NameTable);
+        namespaces.AddNamespace("ds", XmlDSigUrls.DsNamespace);
+        namespaces.AddNamespace("xades141", XadesUris.Xades141Namespace);
+        var method = (System.Xml.XmlElement)document.SelectSingleNode(
+            "//xades141:ArchiveTimeStamp/ds:CanonicalizationMethod", namespaces)!;
+        method.GetAttribute("Algorithm").ShouldBe(XmlDSigUrls.ExcC14N);
     }
 
     [Fact]

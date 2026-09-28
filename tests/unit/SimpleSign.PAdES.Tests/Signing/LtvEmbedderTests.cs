@@ -1,4 +1,3 @@
-using System.Formats.Asn1;
 using System.IO.Compression;
 using System.Net;
 using System.Security.Cryptography;
@@ -487,54 +486,23 @@ public sealed class LtvEmbedderTests
         return writer.Encode();
     }
 
-    private static byte[] BuildFakeTimestampToken(byte marker = 0x01)
+    private static HttpClient BuildLtvHttpClient(Action<byte[]> tokenObserver)
     {
-        var writer = new AsnWriter(AsnEncodingRules.DER);
-        using (writer.PushSequence())
-        {
-            writer.WriteObjectIdentifier("1.2.840.113549.1.7.2");
-            using (writer.PushSequence(new Asn1Tag(TagClass.ContextSpecific, 0, true)))
-            {
-                writer.WriteOctetString([marker, 0x02, 0x03]);
-            }
-        }
-
-        return writer.Encode();
-    }
-
-    private static byte[] BuildFakeTimestampResponse(byte[] timestampToken)
-    {
-        var writer = new AsnWriter(AsnEncodingRules.DER);
-        using (writer.PushSequence())
-        {
-            using (writer.PushSequence())
-            {
-                writer.WriteInteger(0);
-            }
-
-            writer.WriteEncodedValue(timestampToken);
-        }
-
-        return writer.Encode();
-    }
-
-    private static HttpClient BuildLtvHttpClient(byte[] timestampToken)
-    {
-        byte[] timestampResponse = BuildFakeTimestampResponse(timestampToken);
         byte[] crl = BuildFakeCrl();
-        return new HttpClient(new MockHttpHandler(request =>
+        HttpMessageHandler timestampHandler = MockTimestampAuthority.CreateHandler(tokenObserver);
+        return new HttpClient(new MockHttpHandler(async request =>
         {
-            var response = new HttpResponseMessage(HttpStatusCode.OK)
-            {
-                Content = new ByteArrayContent(request.Method == HttpMethod.Post ? timestampResponse : crl)
-            };
             if (request.Method == HttpMethod.Post)
             {
-                response.Content.Headers.ContentType =
-                    new System.Net.Http.Headers.MediaTypeHeaderValue("application/timestamp-reply");
+                using var invoker = new HttpMessageInvoker(timestampHandler, disposeHandler: false);
+                return await invoker.SendAsync(request, CancellationToken.None).ConfigureAwait(false);
             }
 
-            return Task.FromResult(response);
+            var response = new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new ByteArrayContent(crl)
+            };
+            return response;
         }));
     }
 
@@ -637,12 +605,12 @@ public sealed class LtvEmbedderTests
     [Fact(DisplayName = "Incremental B-LT signatures preserve their own VRI timestamp mappings")]
     public async Task SignAsync_IncrementalLongTermSignatures_PreserveHistoricalVriTimestampMappings()
     {
-        byte[] timestamp1 = BuildFakeTimestampToken(0x11);
-        byte[] timestamp2 = BuildFakeTimestampToken(0x22);
+        byte[]? timestamp1 = null;
+        byte[]? timestamp2 = null;
         using var signer = TestCertificateFactory.CreateSelfSignedCert("CN=Incremental B-LT Signer");
         using X509Certificate2 revocationCert = CreateCertWithCrlUrl(includePrivateKey: false);
-        using HttpClient httpClient1 = BuildLtvHttpClient(timestamp1);
-        using HttpClient httpClient2 = BuildLtvHttpClient(timestamp2);
+        using HttpClient httpClient1 = BuildLtvHttpClient(token => timestamp1 = token);
+        using HttpClient httpClient2 = BuildLtvHttpClient(token => timestamp2 = token);
         using HttpClient crlClient1 = MockHttpHandler.ForGetBytes(BuildFakeCrl(), HttpStatusCode.OK);
         using HttpClient crlClient2 = MockHttpHandler.ForGetBytes(BuildFakeCrl(), HttpStatusCode.OK);
 
@@ -653,17 +621,18 @@ public sealed class LtvEmbedderTests
             .WithLevel(AdesBaselineProfile.Timestamped(
                 new TimestampOptions(new Uri("http://tsa.example.com"), firstProvider)))
             .SignAsync();
+        byte[] firstToken = timestamp1.ShouldNotBeNull();
         var firstEmbedder = new LtvEmbedder(crlClient1);
         byte[] firstLongTerm = await firstEmbedder.EmbedLtvDataAsync(
             firstTimestamped,
             [revocationCert],
-            timestamp1);
+            firstToken);
 
         List<string> firstHashes = LtvEmbedder.ExtractSignatureContentHashes(firstLongTerm);
         firstHashes.Count.ShouldBe(1);
         ExistingDssData firstDss = DssExtractor.ParseExistingDss(firstLongTerm);
         int firstVriObjNum = firstDss.VriEntries[firstHashes[0]];
-        ExtractVriTimestamp(firstLongTerm, firstVriObjNum).ShouldBe(timestamp1);
+        ExtractVriTimestamp(firstLongTerm, firstVriObjNum).ShouldBe(firstToken);
 
         var secondProvider = new SingleClientProvider(httpClient2);
         byte[] secondTimestamped = await PadesSigner.Document(firstLongTerm)
@@ -672,11 +641,12 @@ public sealed class LtvEmbedderTests
             .WithLevel(AdesBaselineProfile.Timestamped(
                 new TimestampOptions(new Uri("http://tsa.example.com"), secondProvider)))
             .SignAsync();
+        byte[] secondToken = timestamp2.ShouldNotBeNull();
         var secondEmbedder = new LtvEmbedder(crlClient2);
         byte[] secondLongTerm = await secondEmbedder.EmbedLtvDataAsync(
             secondTimestamped,
             [revocationCert],
-            timestamp2);
+            secondToken);
 
         List<string> finalHashes = LtvEmbedder.ExtractSignatureContentHashes(secondLongTerm);
         finalHashes.Count.ShouldBe(2);
@@ -685,8 +655,8 @@ public sealed class LtvEmbedderTests
         finalDss.VriEntries[finalHashes[0]].ShouldBe(firstVriObjNum,
             "the active DSS must preserve the historical VRI object mapping");
         ExtractVriTimestamp(secondLongTerm, finalDss.VriEntries[finalHashes[0]])
-            .ShouldBe(timestamp1, "signature 1 must retain timestamp 1");
+            .ShouldBe(firstToken, "signature 1 must retain timestamp 1");
         ExtractVriTimestamp(secondLongTerm, finalDss.VriEntries[finalHashes[1]])
-            .ShouldBe(timestamp2, "signature 2 must reference only timestamp 2");
+            .ShouldBe(secondToken, "signature 2 must reference only timestamp 2");
     }
 }

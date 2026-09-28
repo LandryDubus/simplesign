@@ -327,17 +327,19 @@ public sealed class PdfADetectionAndRsaPssTests
         result.ShouldBe(HashAlgorithmName.SHA256);
     }
 
-    [Fact(DisplayName = "ParsePssHashAlgorithm with empty SEQUENCE (no hashAlgorithm field) returns SHA-256")]
-    public void ParsePssHashAlgorithm_EmptySequence_ReturnsSha256()
+    [Fact(DisplayName = "ParsePssHashAlgorithm with encoded empty SEQUENCE returns the RFC SHA-1 default")]
+    public void ParsePssHashAlgorithm_EmptySequence_ReturnsSha1()
     {
-        // RSASSA-PSS-params with no [0] element — all fields are RFC default (SHA-256)
+        // An encoded RSASSA-PSS-params SEQUENCE with no [0] hashAlgorithm uses the
+        // ASN.1 default SHA-1. This differs from an absent key-parameter field,
+        // for which SimpleSign applies its SHA-256 signing policy.
         var writer = new AsnWriter(AsnEncodingRules.DER);
         using (writer.PushSequence())
         {
             // empty
         }
         byte[] paramsBytes = writer.Encode();
-        CryptoUtility.ParsePssHashAlgorithm(paramsBytes).ShouldBe(HashAlgorithmName.SHA256);
+        CryptoUtility.ParsePssHashAlgorithm(paramsBytes).ShouldBe(HashAlgorithmName.SHA1);
     }
 
     [Fact(DisplayName = "CmsParser round-trips PSS signatures across all hash variants")]

@@ -8,7 +8,6 @@ using SimpleSign.Core.Validation;
 using SimpleSign.PAdES.Inspection;
 using SimpleSign.PAdES.Validation;
 using SimpleSign.TestHelpers;
-using SimpleSign.TestFixtures;
 using Xunit;
 
 namespace SimpleSign.PAdES.Tests.Signing;
@@ -34,17 +33,7 @@ public sealed class PadesTStandaloneTests
         });
     }
 
-    private static HttpClient BuildRecordedTsaClient() =>
-        new(new MockHttpHandler(_ => Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK)
-        {
-            Content = new ByteArrayContent(RecordedFixtures.FreeTsaResponse)
-            {
-                Headers =
-                {
-                    ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/timestamp-reply")
-                }
-            }
-        })));
+    private static HttpClient BuildRecordedTsaClient() => MockTimestampAuthority.CreateClient();
 
     [Fact(DisplayName = "PAdES-T (B-B + timestamp, no LTV) validates integrity and signature")]
     public async Task SignAsync_PadesT_ValidatesCorrectly()

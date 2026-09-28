@@ -140,8 +140,9 @@ public sealed class SignerBuilderEdgeCaseTests
             throw new InvalidOperationException("HSM offline");
         }));
         Func<Task<byte[]>> action = () => builder.SignAsync();
-        var ex = await Should.ThrowAsync<InvalidOperationException>(async () => await action());
-        ex.Message.ShouldContain("HSM offline");
+        var ex = await Should.ThrowAsync<SigningException>(async () => await action());
+        ex.Reason.ShouldBe(SigningErrorReason.Unspecified);
+        ex.InnerException.ShouldBeOfType<InvalidOperationException>().Message.ShouldContain("HSM offline");
     }
 
     [Fact(DisplayName = "WithExternalSigner with delegate returning empty bytes produces error or invalid CMS")]

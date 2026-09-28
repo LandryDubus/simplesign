@@ -109,7 +109,7 @@ public sealed class CmsSignedData
     public IReadOnlyDictionary<string, byte[][]>? UnsignedAttributes { get; init; }
 
     /// <summary>
-    /// Archive timestamp token (id-aa-ets-archiveTimeStampV3, OID 1.2.840.113549.1.9.16.2.48)
+    /// Archive timestamp token (id-aa-ets-archiveTimeStampV3, OID 0.4.0.1733.2.4)
     /// for CAdES-B-LTA. Null when not present.
     /// </summary>
     public byte[]? ArchiveTimestampToken { get; init; }

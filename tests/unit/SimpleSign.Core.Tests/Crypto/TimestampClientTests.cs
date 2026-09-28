@@ -19,41 +19,6 @@ public sealed class TimestampClientTests
 {
     // ── Helpers ────────────────────────────────────────────────────────────────
 
-    private static byte[] BuildFakeTimestampResponse()
-    {
-        // Builds a minimal TSR: SEQUENCE { PKIStatusInfo { status = 0 }, TimeStampToken (CMS) }
-        // We use a fake CMS for the token
-        var fakeCmsToken = BuildFakeCmsToken();
-
-        var writer = new System.Formats.Asn1.AsnWriter(System.Formats.Asn1.AsnEncodingRules.DER);
-        using (writer.PushSequence()) // TimeStampResp
-        {
-            // PKIStatusInfo
-            using (writer.PushSequence())
-                writer.WriteInteger(0); // status = granted
-
-            // TimeStampToken (ContentInfo)
-            writer.WriteEncodedValue(fakeCmsToken);
-        }
-        return writer.Encode();
-    }
-
-    private static byte[] BuildFakeCmsToken()
-    {
-        // Minimal ContentInfo to simulate a TimeStampToken
-        var writer = new System.Formats.Asn1.AsnWriter(System.Formats.Asn1.AsnEncodingRules.DER);
-        using (writer.PushSequence())
-        {
-            writer.WriteObjectIdentifier("1.2.840.113549.1.7.2"); // id-signedData
-            using (writer.PushSequence(new System.Formats.Asn1.Asn1Tag(
-                System.Formats.Asn1.TagClass.ContextSpecific, 0, true)))
-            {
-                writer.WriteOctetString([0x01, 0x02, 0x03]);
-            }
-        }
-        return writer.Encode();
-    }
-
     private static HttpClient BuildMockHttpClient(byte[] responseBytes, HttpStatusCode statusCode = HttpStatusCode.OK)
     {
         return new HttpClient(new MockHttpHandler(async _ =>
@@ -105,8 +70,7 @@ public sealed class TimestampClientTests
     [Fact(DisplayName = "Valid response returns timestamp token")]
     public async Task GetTimestampAsync_ValidResponse_ReturnsToken()
     {
-        var tsr = BuildFakeTimestampResponse();
-        var httpClient = BuildMockHttpClient(tsr);
+        var httpClient = MockTimestampAuthority.CreateClient();
         var client = new TimestampClient(httpClient, "http://tsa.example.com");
 
         var token = await client.GetTimestampAsync(
@@ -114,6 +78,78 @@ public sealed class TimestampClientTests
 
         token.ShouldNotBeNull();
         token.Length.ShouldBeGreaterThan(0);
+    }
+
+    [Fact]
+    public async Task GetTimestampAsync_InvalidTsaSignature_ThrowsTimestampException()
+    {
+        using var httpClient = BuildRequestAwareClient(request =>
+        {
+            byte[] response = MockTimestampAuthority.CreateResponse(request);
+            response[^1] ^= 0x01;
+            return response;
+        });
+        var client = new TimestampClient(httpClient, "http://tsa.example.com");
+        await Should.ThrowAsync<TimestampException>(() =>
+            client.GetTimestampAsync(new byte[] { 0x01, 0x02, 0x03 }, HashAlgorithmName.SHA256));
+    }
+
+    [Fact]
+    public async Task GetTimestampAsync_Sha3Request_OmitsAlgorithmParameters()
+    {
+        if (!SHA3_256.IsSupported)
+        {
+            return;
+        }
+        bool checkedParameters = false;
+        using var httpClient = BuildRequestAwareClient(request =>
+        {
+            var timeStampRequest = new System.Formats.Asn1.AsnReader(
+                request, System.Formats.Asn1.AsnEncodingRules.DER).ReadSequence();
+            _ = timeStampRequest.ReadInteger();
+            var imprint = timeStampRequest.ReadSequence();
+            var algorithm = imprint.ReadSequence();
+            algorithm.ReadObjectIdentifier().ShouldBe(SimpleSign.Core.Constants.Oids.Sha3_256);
+            algorithm.HasData.ShouldBeFalse();
+            checkedParameters = true;
+            return MockTimestampAuthority.CreateResponse(request);
+        });
+        var client = new TimestampClient(httpClient, "http://tsa.example.com");
+        _ = await client.GetTimestampAsync(new byte[] { 1, 2, 3 }, HashAlgorithmName.SHA3_256);
+        checkedParameters.ShouldBeTrue();
+    }
+
+    [Fact(DisplayName = "Wrong message imprint throws TimestampException")]
+    public async Task GetTimestampAsync_WrongMessageImprint_ThrowsTimestampException()
+    {
+        using var httpClient = BuildRequestAwareClient(request =>
+            MockTimestampAuthority.CreateResponse(request, hashedMessage: new byte[32]));
+        var client = new TimestampClient(httpClient, "http://tsa.example.com");
+
+        await Should.ThrowAsync<TimestampException>(() =>
+            client.GetTimestampAsync(new byte[] { 0x01, 0x02, 0x03 }, HashAlgorithmName.SHA256));
+    }
+
+    [Fact(DisplayName = "Wrong message imprint algorithm throws TimestampException")]
+    public async Task GetTimestampAsync_WrongMessageImprintAlgorithm_ThrowsTimestampException()
+    {
+        using var httpClient = BuildRequestAwareClient(request =>
+            MockTimestampAuthority.CreateResponse(request, hashAlgorithmOid: "2.16.840.1.101.3.4.2.3"));
+        var client = new TimestampClient(httpClient, "http://tsa.example.com");
+
+        await Should.ThrowAsync<TimestampException>(() =>
+            client.GetTimestampAsync(new byte[] { 0x01, 0x02, 0x03 }, HashAlgorithmName.SHA256));
+    }
+
+    [Fact(DisplayName = "Missing echoed nonce throws TimestampException")]
+    public async Task GetTimestampAsync_MissingNonce_ThrowsTimestampException()
+    {
+        using var httpClient = BuildRequestAwareClient(request =>
+            MockTimestampAuthority.CreateResponse(request, omitNonce: true));
+        var client = new TimestampClient(httpClient, "http://tsa.example.com");
+
+        await Should.ThrowAsync<TimestampException>(() =>
+            client.GetTimestampAsync(new byte[] { 0x01, 0x02, 0x03 }, HashAlgorithmName.SHA256));
     }
 
     [Fact(DisplayName = "Server error throws TimestampException")]
@@ -205,6 +241,16 @@ public sealed class TimestampClientTests
         // Token must appear in the result
         result.AsSpan().IndexOf(fakeToken).ShouldBeGreaterThan(0);
     }
+
+    private static HttpClient BuildRequestAwareClient(Func<byte[], byte[]> responseFactory) =>
+        new(new MockHttpHandler(async request =>
+        {
+            byte[] requestBytes = await request.Content!.ReadAsByteArrayAsync().ConfigureAwait(false);
+            var response = new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new ByteArrayContent(responseFactory(requestBytes))
+            };
+            response.Content.Headers.ContentType = new MediaTypeHeaderValue("application/timestamp-reply");
+            return response;
+        }));
 }
-
-

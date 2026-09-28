@@ -76,6 +76,7 @@ internal sealed class ValidateResultDto
     public bool IsSignatureValid { get; set; }
     public bool IsCertificateChainValid { get; set; }
     public bool IsNotRevoked { get; set; }
+    public string RevocationSource { get; set; } = string.Empty;
     public bool IsChainTrustWarning { get; set; }
     public bool? HasValidTimestamp { get; set; }
     public DateTimeOffset? SigningTime { get; set; }

@@ -5,7 +5,6 @@ using SimpleSign.CAdES;
 using SimpleSign.Core.Crypto;
 using SimpleSign.Core.Http;
 using SimpleSign.Core.Signing;
-using SimpleSign.Core.Validation;
 using SimpleSign.PAdES;
 using SimpleSign.PAdES.Signing;
 using SimpleSign.TestHelpers;
@@ -112,11 +111,12 @@ public sealed class DependencyAndLifecycleContractTests
             new TimestampOptions(new Uri("http://mock-tsa.example.com")),
             failureBehavior: SigningLevelFailureBehavior.ReturnLowerLevel);
 
-        await Should.ThrowAsync<CertificateValidationException>(() =>
+        var exception = await Should.ThrowAsync<SigningException>(() =>
             PadesSigner.Document(TestPdfFactory.CreateMinimalPdf())
                 .WithCertificate(cert)
                 .WithLevel(profile)
                 .SignWithDetailsAsync());
+        exception.Reason.ShouldBe(SigningErrorReason.CertificateExpired);
     }
 
     [Theory]
@@ -338,8 +338,9 @@ public sealed class DependencyAndLifecycleContractTests
     {
         using var cert = CreateExpiredCertificate();
 
-        await Should.ThrowAsync<CertificateValidationException>(
+        var exception = await Should.ThrowAsync<SigningException>(
             () => SignWithCertificateAsync(format, cert, AdesBaselineProfile.Basic()));
+        exception.Reason.ShouldBe(SigningErrorReason.CertificateExpired);
     }
 
     [Theory]
@@ -432,6 +433,70 @@ public sealed class DependencyAndLifecycleContractTests
         parsed.MessageDigest!.ShouldBe(expectedDigest);
     }
 
+    [Fact(DisplayName = "PAdES: mutating the input array after Document() does not affect signing")]
+    public async Task Pades_InputArraySnapshot_MutationAfterDocument_StillSigns()
+    {
+        using var cert = ContractFixtures.CreateSignerCertificate();
+        byte[] pdf = TestPdfFactory.CreateMinimalPdf();
+        var builder = PadesSigner.Document(pdf).WithCertificate(cert);
+        pdf[0] = (byte)'?';
+
+        byte[] signed = await builder.SignAsync();
+
+        System.Text.Encoding.Latin1.GetString(signed).ShouldStartWith("%PDF-");
+    }
+
+    [Fact(DisplayName = "PAdES: concurrent terminal calls through fluent clones are serialized safely")]
+    public async Task Pades_ConcurrentTerminalCalls_AreSerialized()
+    {
+        using var cert = ContractFixtures.CreateSignerCertificate();
+        var builder = PadesSigner.Document(new MemoryStream(TestPdfFactory.CreateMinimalPdf()))
+            .WithCertificate(cert);
+
+        Task<byte[]> first = builder.SignAsync();
+        Task<byte[]> second = builder.WithOperationId("parallel-clone").SignAsync();
+        byte[][] results = await Task.WhenAll(first, second);
+
+        results.ShouldAllBe(result => result.Length > 0);
+    }
+
+    [Fact(DisplayName = "PAdES: strict enrichment failure leaves caller output unchanged")]
+    public async Task Pades_StrictEnrichmentFailure_DoesNotModifyOutput()
+    {
+        using var cert = ContractFixtures.CreateSignerCertificate();
+        using var tsaClient = new HttpClient(new MockHttpHandler(_ => Task.FromResult(
+            new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+            {
+                Content = new ByteArrayContent([0x30, 0x00])
+            })));
+        byte[] original = [1, 2, 3, 4];
+        using var output = new MemoryStream();
+        await output.WriteAsync(original);
+
+        await Should.ThrowAsync<SigningException>(() =>
+            PadesSigner.Document(TestPdfFactory.CreateMinimalPdf())
+                .WithCertificate(cert)
+                .WithLevel(AdesBaselineProfile.Timestamped(new TimestampOptions(
+                    new Uri("http://tsa.example.com"), new SingleClientProvider(tsaClient))))
+                .SignAsync(output));
+
+        output.ToArray().ShouldBe(original);
+    }
+
+    [Theory]
+    [InlineData("pades")]
+    [InlineData("cades")]
+    [InlineData("xades")]
+    public async Task NotYetValidCertificate_FailsOnAllFormats(string format)
+    {
+        using var cert = CreateNotYetValidCertificate();
+
+        var exception = await Should.ThrowAsync<SigningException>(
+            () => SignWithCertificateAsync(format, cert, AdesBaselineProfile.Basic()));
+
+        exception.Reason.ShouldBe(SigningErrorReason.CertificateExpired);
+    }
+
     private static async Task<ISigningResult> SignWithExternalSignerAsync(
         string format, X509Certificate2 cert, IExternalSigner signer, CancellationToken cancellationToken)
     {
@@ -507,6 +572,24 @@ public sealed class DependencyAndLifecycleContractTests
         var cert = req.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-30), DateTimeOffset.UtcNow.AddDays(-1));
         const string password = "test-export";
         var pfx = cert.Export(X509ContentType.Pfx, password);
+#pragma warning disable SYSLIB0057
+        var flags = X509KeyStorageFlags.Exportable;
+        if (!OperatingSystem.IsMacOS())
+        {
+            flags |= X509KeyStorageFlags.EphemeralKeySet;
+        }
+
+        return new X509Certificate2(pfx, password, flags);
+#pragma warning restore SYSLIB0057
+    }
+
+    private static X509Certificate2 CreateNotYetValidCertificate()
+    {
+        using RSA key = RSA.Create(2048);
+        var req = new CertificateRequest("CN=Future, O=Tests", key, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+        using var cert = req.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(1), DateTimeOffset.UtcNow.AddDays(30));
+        const string password = "test-export";
+        byte[] pfx = cert.Export(X509ContentType.Pfx, password);
 #pragma warning disable SYSLIB0057
         var flags = X509KeyStorageFlags.Exportable;
         if (!OperatingSystem.IsMacOS())

@@ -197,13 +197,14 @@ public sealed class XadesSignatureValidator : IXadesSignatureValidator
         bool? archiveTsValid = null;
         if (extraction.HasArchiveTimeStamp)
         {
-            var sigValueEl = sigElement.SelectSingleNode("ds:SignatureValue", ns);
-            byte[] sigValueBytes = sigValueEl is not null
-                ? DecodeBase64(sigValueEl)
-                : [];
-
             archiveTsValid = ValidateArchiveTimeStamp(
-                sigElement, ns, sigValueBytes, extraction.SigningTime, trustAnchors, warnings);
+                signedXml,
+                originalData,
+                sigElement,
+                ns,
+                extraction.SigningTime,
+                trustAnchors,
+                warnings);
         }
 
         // Certificate chain validation
@@ -853,6 +854,10 @@ public sealed class XadesSignatureValidator : IXadesSignatureValidator
                 {
                     chain.ChainPolicy.CustomTrustStore.Add(anchor);
                 }
+                foreach (var embedded in embeddedCerts)
+                {
+                    chain.ChainPolicy.ExtraStore.Add(embedded);
+                }
 
                 if (chain.Build(tsaCert))
                 {
@@ -881,9 +886,10 @@ public sealed class XadesSignatureValidator : IXadesSignatureValidator
     }
 
     private bool? ValidateArchiveTimeStamp(
+        byte[] signedXml,
+        byte[]? originalData,
         XmlElement sigElement,
         XmlNamespaceManager ns,
-        byte[] signatureValueBytes,
         DateTimeOffset? signingTime,
         IEnumerable<X509Certificate2>? trustAnchors,
         List<string> warnings)
@@ -902,6 +908,13 @@ public sealed class XadesSignatureValidator : IXadesSignatureValidator
         if (atsEl is null)
         {
             return null;
+        }
+
+        if (atsEl.SelectSingleNode("ds:CanonicalizationMethod", ns) is not XmlElement method
+            || method.GetAttribute("Algorithm") != XmlDSigUrls.ExcC14N)
+        {
+            warnings.Add("ArchiveTimeStamp requires the supported exclusive canonicalization method.");
+            return false;
         }
 
         var encTs = atsEl.SelectSingleNode("xades141:EncapsulatedTimeStamp", ns);
@@ -948,6 +961,10 @@ public sealed class XadesSignatureValidator : IXadesSignatureValidator
                 {
                     chain.ChainPolicy.CustomTrustStore.Add(anchor);
                 }
+                foreach (var embedded in embeddedCerts)
+                {
+                    chain.ChainPolicy.ExtraStore.Add(embedded);
+                }
                 if (chain.Build(tsaCert))
                 {
                     return true;
@@ -960,18 +977,23 @@ public sealed class XadesSignatureValidator : IXadesSignatureValidator
             };
         }
 
-        // Hash match is best-effort: archive timestamp covers the full signature element
-        // before the archive timestamp was applied. Full verification requires
-        // reconstructing the pre-archive document state.
-        warnings.Add("ArchiveTimestamp hash verification is best-effort; TSA signature " +
-                     "is verified but full messageImprint check requires pre-archive document state.");
+        byte[] archiveInput;
+        try
+        {
+            archiveInput = XadesSignatureBuilder.BuildArchiveTimeStampInput(
+                signedXml,
+                originalData ?? signedXml,
+                atsEl.GetAttribute("Id"));
+        }
+        catch (Exception ex) when (ex is XmlException or InvalidOperationException or NotSupportedException)
+        {
+            warnings.Add($"ArchiveTimeStamp input reconstruction failed: {ex.Message}");
+            return false;
+        }
 
-        // Hash match is best-effort: archive timestamp covers the full signature element
-        // before the archive timestamp was applied. Full verification requires
-        // reconstructing the pre-archive document state.
         var tsResult = _timestampValidator.Validate(
             timestampToken,
-            signatureValueBytes,
+            archiveInput,
             signingTime,
             warnings,
             validateTsaChain,

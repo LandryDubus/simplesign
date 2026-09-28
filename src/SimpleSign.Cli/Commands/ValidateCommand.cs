@@ -312,7 +312,7 @@ internal sealed class ValidateCommand : AsyncCommand<ValidateCommand.Settings>
             valNode.AddNode($"Integrity:  {Check(result.IsIntegrityValid)}");
             valNode.AddNode($"Signature:  {Check(result.IsSignatureValid)}");
             valNode.AddNode($"Chain:      {Check(result.IsCertificateChainValid)}");
-            valNode.AddNode($"Revoked:    {Check(!result.IsNotRevoked, invert: true)}{FormatRevocationSource(result.RevocationSource)}");
+            valNode.AddNode($"Revoked:    {FormatRevocationStatus(result)}");
 
             if (result.HasValidTimestamp.HasValue)
             {
@@ -433,7 +433,7 @@ internal sealed class ValidateCommand : AsyncCommand<ValidateCommand.Settings>
                 tsNode.AddNode($"Chain:        {Check(result.IsCertificateChainValid)}");
             }
 
-            tsNode.AddNode($"Revoked:      {Check(!result.IsNotRevoked, invert: true)}{FormatRevocationSource(result.RevocationSource)}");
+            tsNode.AddNode($"Revoked:      {FormatRevocationStatus(result)}");
 
             if (result.SigningTime.HasValue)
             {
@@ -506,7 +506,13 @@ internal sealed class ValidateCommand : AsyncCommand<ValidateCommand.Settings>
         RevocationSource.EmbeddedOcsp => " [dim](embedded DSS OCSP — offline)[/]",
         RevocationSource.OnlineCrl => " [dim](online CRL)[/]",
         RevocationSource.OnlineOcsp => " [dim](online OCSP)[/]",
-        RevocationSource.Indeterminate => " [yellow](indeterminate)[/]",
         _ => string.Empty
+    };
+
+    private static string FormatRevocationStatus(SignatureValidationResult result) => result.RevocationSource switch
+    {
+        RevocationSource.None => "[dim]not checked[/]",
+        RevocationSource.Indeterminate => "[yellow]?[/] [yellow](indeterminate)[/]",
+        _ => $"{Check(!result.IsNotRevoked, invert: true)}{FormatRevocationSource(result.RevocationSource)}"
     };
 }

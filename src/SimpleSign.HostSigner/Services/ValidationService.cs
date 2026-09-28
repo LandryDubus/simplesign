@@ -43,6 +43,7 @@ internal static class ValidationService
             IsSignatureValid = r.IsSignatureValid,
             IsCertificateChainValid = r.IsCertificateChainValid,
             IsNotRevoked = r.IsNotRevoked,
+            RevocationSource = r.RevocationSource.ToString(),
             IsChainTrustWarning = r.IsChainTrustWarning,
             HasValidTimestamp = r.HasValidTimestamp,
             SigningTime = r.SigningTime,

@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using Shouldly;
 using SimpleSign.PAdES.Inspection;
 using SimpleSign.PAdES.Signing;
+using SimpleSign.TestHelpers;
 using Xunit;
 using Xunit.Abstractions;
 
@@ -16,15 +17,17 @@ namespace SimpleSign.Interop.Tests;
 [Trait("Category", "Interop")]
 public sealed class DocumentTimestampInteropTests(ITestOutputHelper output)
 {
+    private const string TestTsaUrl = "http://mock-tsa.example.com";
+
     [SkippableFact(DisplayName = "Standalone DTS (no user signature) — pyHanko detects DocTimeStamp")]
     public async Task StandaloneDts_PyHankoDetects()
     {
         SkipIfDockerUnavailable("simplesign-dss");
         var pdf = MinimalPdf();
 
-        using var httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
+        using var httpClient = MockTimestampAuthority.CreateClient();
         var timestamped = await DocTimeStampWriter.AppendDocTimeStampAsync(
-            pdf, "http://timestamp.digicert.com", httpClient,
+            pdf, TestTsaUrl, httpClient,
             HashAlgorithmName.SHA256);
 
         var tmpDir = CreateTempDir();
@@ -54,9 +57,9 @@ public sealed class DocumentTimestampInteropTests(ITestOutputHelper output)
     {
         var pdf = MinimalPdf();
 
-        using var httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
+        using var httpClient = MockTimestampAuthority.CreateClient();
         var timestamped = await DocTimeStampWriter.AppendDocTimeStampAsync(
-            pdf, "http://timestamp.digicert.com", httpClient,
+            pdf, TestTsaUrl, httpClient,
             HashAlgorithmName.SHA256);
 
         using var stream = new MemoryStream(timestamped);
@@ -68,6 +71,23 @@ public sealed class DocumentTimestampInteropTests(ITestOutputHelper output)
 
         result.Signatures.ShouldContain(s => s.SubFilter == "ETSI.RFC3161",
             "DTS must be detected as a signature with ETSI.RFC3161 subfilter");
+    }
+
+    [SkippableFact(DisplayName = "External TSA — standalone DTS is accepted")]
+    [Trait("Category", "ExternalTsa")]
+    public async Task ExternalTsa_StandaloneDts_IsAccepted()
+    {
+        string? tsaUrl = Environment.GetEnvironmentVariable("TEST_TSA_URL");
+        Skip.If(string.IsNullOrWhiteSpace(tsaUrl),
+            "TEST_TSA_URL is not configured; external TSA integration test skipped.");
+
+        using var httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
+        var timestamped = await DocTimeStampWriter.AppendDocTimeStampAsync(
+            MinimalPdf(), tsaUrl!, httpClient, HashAlgorithmName.SHA256);
+
+        using var stream = new MemoryStream(timestamped);
+        var result = await PdfSignatureInspector.InspectAsync(stream);
+        result.Signatures.ShouldContain(s => s.SubFilter == "ETSI.RFC3161");
     }
 
     [SkippableFact(DisplayName = "DTS on already-signed PDF — both signature and timestamp detected")]
@@ -83,9 +103,9 @@ public sealed class DocumentTimestampInteropTests(ITestOutputHelper output)
             .SignAsync();
 
         // Then append DTS
-        using var httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
+        using var httpClient = MockTimestampAuthority.CreateClient();
         var timestamped = await DocTimeStampWriter.AppendDocTimeStampAsync(
-            signed, "http://timestamp.digicert.com", httpClient,
+            signed, TestTsaUrl, httpClient,
             HashAlgorithmName.SHA256);
 
         // Validate with EU DSS

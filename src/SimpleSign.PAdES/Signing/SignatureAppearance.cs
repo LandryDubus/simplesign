@@ -99,8 +99,8 @@ public sealed class SignatureAppearance
         ShowDate = source.ShowDate;
         ShowReason = source.ShowReason;
         ShowLocation = source.ShowLocation;
-        BackgroundImageJpeg = source.BackgroundImageJpeg;
-        BackgroundImagePng = source.BackgroundImagePng;
+        BackgroundImageJpeg = CopyMemory(source.BackgroundImageJpeg);
+        BackgroundImagePng = CopyMemory(source.BackgroundImagePng);
         CustomFontSize = source.CustomFontSize;
         CustomLabelFontSize = source.CustomLabelFontSize;
         BaseFontName = source.BaseFontName;
@@ -108,20 +108,34 @@ public sealed class SignatureAppearance
         BorderColor = source.BorderColor;
         BorderWidth = source.BorderWidth;
         VerificationUrl = source.VerificationUrl;
-        ExtraLines = source.ExtraLines;
+        ExtraLines = source.ExtraLines is null ? null : [.. source.ExtraLines];
     }
 
+    internal SignatureAppearance Snapshot() => new(this);
+
     /// <summary>Returns a clone with the PNG background image set.</summary>
-    public SignatureAppearance WithBackgroundImagePng(byte[] imageBytes) =>
-        new(this) { BackgroundImagePng = imageBytes };
+    public SignatureAppearance WithBackgroundImagePng(byte[] imageBytes)
+    {
+        ArgumentNullException.ThrowIfNull(imageBytes);
+        return new(this) { BackgroundImagePng = (byte[])imageBytes.Clone() };
+    }
 
     /// <summary>Returns a clone with the JPEG background image set.</summary>
-    public SignatureAppearance WithBackgroundImageJpeg(byte[] imageBytes) =>
-        new(this) { BackgroundImageJpeg = imageBytes };
+    public SignatureAppearance WithBackgroundImageJpeg(byte[] imageBytes)
+    {
+        ArgumentNullException.ThrowIfNull(imageBytes);
+        return new(this) { BackgroundImageJpeg = (byte[])imageBytes.Clone() };
+    }
 
     /// <summary>Returns a clone with extra lines.</summary>
-    public SignatureAppearance WithExtraLines(IReadOnlyList<string> extraLines) =>
-        new(this) { ExtraLines = extraLines };
+    public SignatureAppearance WithExtraLines(IReadOnlyList<string> extraLines)
+    {
+        ArgumentNullException.ThrowIfNull(extraLines);
+        return new(this) { ExtraLines = [.. extraLines] };
+    }
+
+    private static ReadOnlyMemory<byte>? CopyMemory(ReadOnlyMemory<byte>? source) =>
+        source is null ? null : new ReadOnlyMemory<byte>(source.Value.ToArray());
 
     /// <summary>
     /// Creates an auto-positioned signature appearance. Signatures are placed left-to-right

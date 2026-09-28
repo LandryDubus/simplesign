@@ -242,10 +242,12 @@ public sealed class EtsiCorpusTests(ITestOutputHelper output)
         };
 
         var validator = new PdfSignatureValidator(onlineOptions);
+        using var timeoutCts = new CancellationTokenSource(onlineOptions.NetworkTimeout);
 
         try
         {
-            var results = await validator.ValidateAsync(new MemoryStream(bytes));
+            var results = await validator.ValidateAsync(
+                new MemoryStream(bytes), cancellationToken: timeoutCts.Token);
 
             output.WriteLine($"[{filename}] {results.Count} result(s):");
             foreach (var r in results)

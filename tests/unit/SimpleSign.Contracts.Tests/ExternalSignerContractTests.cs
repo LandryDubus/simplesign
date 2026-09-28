@@ -1,6 +1,8 @@
 using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
 using SimpleSign.CAdES;
 using Shouldly;
+using SimpleSign.Core.Constants;
 using SimpleSign.Core.Signing;
 using SimpleSign.PAdES;
 using SimpleSign.TestHelpers;
@@ -23,7 +25,7 @@ public sealed class ExternalSignerContractTests
         string format, ExternalSigningPayloadKind expectedPayloadKind)
     {
         using var cert = ContractFixtures.CreateSignerCertificate();
-        var signer = new CapturingSigner(RSA.Create(2048));
+        var signer = new CapturingSigner(cert);
 
         switch (format)
         {
@@ -67,8 +69,8 @@ public sealed class ExternalSignerContractTests
     public async Task HashAlgorithmSetBeforeOrAfterExternalSigner_ProducesSameRequest(string format)
     {
         using var cert = ContractFixtures.CreateSignerCertificate();
-        var first = new CapturingSigner(RSA.Create(2048));
-        var second = new CapturingSigner(RSA.Create(2048));
+        var first = new CapturingSigner(cert);
+        var second = new CapturingSigner(cert);
 
         switch (format)
         {
@@ -112,13 +114,134 @@ public sealed class ExternalSignerContractTests
         first.LastRequest.SignatureAlgorithmOid.ShouldBe(second.LastRequest.SignatureAlgorithmOid);
     }
 
+    [Theory]
+    [InlineData("pades")]
+    [InlineData("cades")]
+    [InlineData("xades")]
+    public async Task CombinedSignatureOid_InfersHashOnAllFormats(string format)
+    {
+        using var cert = ContractFixtures.CreateSignerCertificate();
+        var signer = new CapturingSigner(cert);
+
+        await SignExternalAsync(format, cert, signer, Oids.RsaSha512);
+
+        signer.LastRequest.ShouldNotBeNull().HashAlgorithm.ShouldBe(HashAlgorithmName.SHA512);
+    }
+
+    [Theory]
+    [InlineData("pades")]
+    [InlineData("cades")]
+    [InlineData("xades")]
+    public async Task ConflictingHashAndCombinedSignatureOid_IsRejected(string format)
+    {
+        using var cert = ContractFixtures.CreateSignerCertificate();
+        var signer = new CapturingSigner(cert);
+
+        var exception = await Should.ThrowAsync<SigningException>(() =>
+            SignExternalAsync(format, cert, signer, Oids.RsaSha512, HashAlgorithmName.SHA256));
+
+        exception.Reason.ShouldBe(SigningErrorReason.AlgorithmIncompatible);
+        signer.LastRequest.ShouldBeNull();
+    }
+
+    [Theory]
+    [InlineData("pades")]
+    [InlineData("cades")]
+    [InlineData("xades")]
+    public async Task RsaPss_RequestCarriesResolvedParameters(string format)
+    {
+        using var cert = ContractFixtures.CreateSignerCertificate();
+        var signer = new CapturingSigner(cert);
+
+        await SignExternalAsync(format, cert, signer, Oids.RsaPss, HashAlgorithmName.SHA384);
+
+        var parameters = signer.LastRequest.ShouldNotBeNull().RsaPssParameters.ShouldNotBeNull();
+        parameters.MaskGenerationHashAlgorithm.ShouldBe(HashAlgorithmName.SHA384);
+        parameters.SaltLength.ShouldBe(48);
+        parameters.TrailerField.ShouldBe(1);
+    }
+
+    [Theory]
+    [InlineData("pades")]
+    [InlineData("cades")]
+    [InlineData("xades")]
+    public async Task InvalidRawExternalSignature_IsRejectedBeforePackaging(string format)
+    {
+        using var cert = ContractFixtures.CreateSignerCertificate();
+        var signer = new InvalidSigner();
+
+        var exception = await Should.ThrowAsync<SigningException>(() =>
+            SignExternalAsync(format, cert, signer));
+
+        exception.Reason.ShouldBe(SigningErrorReason.AlgorithmIncompatible);
+    }
+
+    private static async Task SignExternalAsync(
+        string format,
+        X509Certificate2 certificate,
+        IExternalSigner signer,
+        string? signatureAlgorithmOid = null,
+        HashAlgorithmName? hashAlgorithm = null)
+    {
+        switch (format)
+        {
+            case "pades":
+                {
+                    var builder = PadesSigner.Document(TestPdfFactory.CreateMinimalPdf())
+                        .WithExternalSigner(certificate, signer);
+                    if (signatureAlgorithmOid is not null)
+                    {
+                        builder = builder.WithSignatureAlgorithm(signatureAlgorithmOid);
+                    }
+                    if (hashAlgorithm is not null)
+                    {
+                        builder = builder.WithHashAlgorithm(hashAlgorithm.Value);
+                    }
+                    await builder.SignAsync();
+                    break;
+                }
+            case "cades":
+                {
+                    var builder = CadesSigner.Document(ContractFixtures.BinaryContent)
+                        .WithExternalSigner(certificate, signer);
+                    if (signatureAlgorithmOid is not null)
+                    {
+                        builder = builder.WithSignatureAlgorithm(signatureAlgorithmOid);
+                    }
+                    if (hashAlgorithm is not null)
+                    {
+                        builder = builder.WithHashAlgorithm(hashAlgorithm.Value);
+                    }
+                    await builder.SignAsync();
+                    break;
+                }
+            case "xades":
+                {
+                    var builder = XadesSigner.Document(ContractFixtures.XmlDocument)
+                        .WithExternalSigner(certificate, signer);
+                    if (signatureAlgorithmOid is not null)
+                    {
+                        builder = builder.WithSignatureAlgorithm(signatureAlgorithmOid);
+                    }
+                    if (hashAlgorithm is not null)
+                    {
+                        builder = builder.WithHashAlgorithm(hashAlgorithm.Value);
+                    }
+                    await builder.SignAsync();
+                    break;
+                }
+            default:
+                throw new ArgumentOutOfRangeException(nameof(format));
+        }
+    }
+
     private sealed class CapturingSigner : IExternalSigner
     {
-        private readonly RSA _rsa;
+        private readonly X509Certificate2 _certificate;
 
-        public CapturingSigner(RSA rsa)
+        public CapturingSigner(X509Certificate2 certificate)
         {
-            _rsa = rsa;
+            _certificate = certificate;
         }
 
         public ExternalSigningRequest? LastRequest { get; private set; }
@@ -127,8 +250,21 @@ public sealed class ExternalSignerContractTests
             ExternalSigningRequest request, CancellationToken cancellationToken)
         {
             LastRequest = request;
-            byte[] signature = _rsa.SignData(request.DataToSign.Span, request.HashAlgorithm, RSASignaturePadding.Pkcs1);
+            using var rsa = _certificate.GetRSAPrivateKey()
+                ?? throw new InvalidOperationException("Signer certificate has no private key.");
+            RSASignaturePadding padding = request.SignatureAlgorithmOid == SimpleSign.Core.Constants.Oids.RsaPss
+                ? RSASignaturePadding.Pss
+                : RSASignaturePadding.Pkcs1;
+            byte[] signature = rsa.SignData(request.DataToSign.Span, request.HashAlgorithm, padding);
             return ValueTask.FromResult<ReadOnlyMemory<byte>>(signature);
         }
+    }
+
+    private sealed class InvalidSigner : IExternalSigner
+    {
+        public ValueTask<ReadOnlyMemory<byte>> SignAsync(
+            ExternalSigningRequest request,
+            CancellationToken cancellationToken) =>
+            ValueTask.FromResult<ReadOnlyMemory<byte>>(new byte[256]);
     }
 }

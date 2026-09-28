@@ -49,11 +49,12 @@ public sealed class PadesDssInteropTests(ITestOutputHelper output)
         var pdf = MinimalPdf();
         using var pki = new SyntheticPki(crlDistributionPoint: "http://crl.example.com/test-ca.crl");
         using var crlClient = TestRevocation.BuildCrlClient(pki.BuildLeafCrl());
+        using var tsaClient = MockTimestampAuthority.CreateClient();
 
         var signed = await PadesSigner.Document(pdf)
             .WithCertificate(pki.Leaf, pki.IntermediatesAndRoot())
             .WithLevel(AdesBaselineProfile.LongTerm(
-                new TimestampOptions(new Uri("http://timestamp.digicert.com")),
+                new TimestampOptions(new Uri("http://mock-tsa.example.com"), new SingleClientProvider(tsaClient)),
                 new LongTermValidationOptions(new SingleClientProvider(crlClient))))
             .SignAsync();
 
@@ -488,10 +489,11 @@ public sealed class PadesDssInteropTests(ITestOutputHelper output)
         var pdf = MinimalPdf();
         using var pki = new SyntheticPki(crlDistributionPoint: "http://crl.example.com/test-ca.crl");
         using var crlClient = TestRevocation.BuildCrlClient(pki.BuildLeafCrl());
+        using var tsaClient = MockTimestampAuthority.CreateClient();
         var signed = await PadesSigner.Document(pdf)
             .WithCertificate(pki.Leaf, pki.IntermediatesAndRoot())
             .WithLevel(AdesBaselineProfile.LongTerm(
-                new TimestampOptions(new Uri("http://timestamp.digicert.com")),
+                new TimestampOptions(new Uri("http://mock-tsa.example.com"), new SingleClientProvider(tsaClient)),
                 new LongTermValidationOptions(new SingleClientProvider(crlClient))))
             .SignAsync();
 

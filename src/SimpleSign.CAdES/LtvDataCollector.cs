@@ -10,7 +10,25 @@ namespace SimpleSign.CAdES;
 public sealed record LtvCollectionResult(
     IReadOnlyList<byte[]> CertificateRawData,
     IReadOnlyList<byte[]> OcspResponses,
-    IReadOnlyList<byte[]> Crls);
+    IReadOnlyList<byte[]> Crls,
+    IReadOnlyList<LtvCertificateStatus>? CertificateStatuses = null)
+{
+    /// <summary>
+    /// Whether every non-self-signed certificate for which revocation data is required has its own
+    /// OCSP response or CRL. At least one certificate must require revocation data.
+    /// </summary>
+    public bool HasCompleteRevocationData => CertificateStatuses is { Count: > 0 }
+        && CertificateStatuses.Any(status => status.RequiresRevocationData)
+        && CertificateStatuses
+            .Where(status => status.RequiresRevocationData)
+            .All(status => status.HasRevocationData);
+}
+
+/// <summary>Per-certificate revocation-material collection status.</summary>
+public sealed record LtvCertificateStatus(
+    string Thumbprint,
+    bool RequiresRevocationData,
+    bool HasRevocationData);
 
 /// <summary>
 /// Collects certificate and revocation data (OCSP responses and/or CRLs)
@@ -54,12 +72,15 @@ public static class LtvDataCollector
         var ocspResponses = new List<byte[]>();
         var crls = new List<byte[]>();
         var extraResponderCerts = new List<X509Certificate2>();
+        var certificateStatuses = new List<LtvCertificateStatus>();
 
         var ocsp = ocspClient ?? new OcspClient(httpClient, logger);
 
         foreach (var cert in allCerts)
         {
             var issuer = allCerts.FindIssuerOf(cert);
+            bool requiresRevocationData = !cert.SubjectName.RawData.SequenceEqual(cert.IssuerName.RawData);
+            bool hasRevocationData = false;
 
             // Try OCSP first (preferred per ETSI TS 119 172)
             string? ocspUrl = OcspClient.GetOcspUrl(cert);
@@ -69,6 +90,11 @@ public static class LtvDataCollector
                 {
                     var result = await ocsp.FetchOcspResponseAsync(cert, issuer, ocspUrl, cancellationToken)
                         .ConfigureAwait(false);
+                    if (!result.IsValid || result.ResponseBytes.Length == 0)
+                    {
+                        throw new InvalidOperationException("OCSP response was not valid.");
+                    }
+
                     ocspResponses.Add(result.ResponseBytes);
                     foreach (var rc in result.ResponderCertificates)
                     {
@@ -77,6 +103,11 @@ public static class LtvDataCollector
                             extraResponderCerts.Add(rc);
                         }
                     }
+                    hasRevocationData = true;
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
                 }
                 catch
                 {
@@ -85,7 +116,7 @@ public static class LtvDataCollector
             }
 
             // Fallback: CRL
-            if (ocspUrl is null || ocspResponses.Count == 0)
+            if (!hasRevocationData)
             {
                 string? crlUrl = CrlClient.GetCrlUrl(cert, logger);
                 if (crlUrl is not null)
@@ -97,7 +128,12 @@ public static class LtvDataCollector
                         if (crlBytes is not null)
                         {
                             crls.Add(crlBytes);
+                            hasRevocationData = true;
                         }
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        throw;
                     }
                     catch
                     {
@@ -105,6 +141,11 @@ public static class LtvDataCollector
                     }
                 }
             }
+
+            certificateStatuses.Add(new LtvCertificateStatus(
+                cert.Thumbprint,
+                requiresRevocationData,
+                hasRevocationData));
         }
 
         var certs = new List<byte[]>();
@@ -117,6 +158,10 @@ public static class LtvDataCollector
             certs.Add(cert.RawData);
         }
 
-        return new LtvCollectionResult(certs.AsReadOnly(), ocspResponses.AsReadOnly(), crls.AsReadOnly());
+        return new LtvCollectionResult(
+            certs.AsReadOnly(),
+            ocspResponses.AsReadOnly(),
+            crls.AsReadOnly(),
+            certificateStatuses.AsReadOnly());
     }
 }

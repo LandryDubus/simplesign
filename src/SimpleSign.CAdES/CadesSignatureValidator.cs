@@ -1,3 +1,4 @@
+using System.Formats.Asn1;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using Microsoft.Extensions.Logging;
@@ -154,7 +155,7 @@ public sealed class CadesSignatureValidator : ICadesSignatureValidator
         bool? archiveTsValid = null;
         if (cmsData.ArchiveTimestampToken is not null)
         {
-            archiveTsValid = ValidateArchiveTimestamp(cmsBytes, cmsData, errors, warnings);
+            archiveTsValid = ValidateArchiveTimestamp(cmsBytes, originalData, cmsData, warnings);
         }
 
         return new CadesValidationResult
@@ -271,71 +272,52 @@ public sealed class CadesSignatureValidator : ICadesSignatureValidator
 
     private static bool? ValidateLtvData(byte[] cmsBytes, CmsSignedData cmsData, List<string> warnings)
     {
-        if (cmsData.UnsignedAttributes is null || cmsData.UnsignedAttributes.Count == 0)
+        if (cmsData.UnsignedAttributes is not null
+            && (cmsData.UnsignedAttributes.ContainsKey(Oids.CertValues)
+                || cmsData.UnsignedAttributes.ContainsKey(Oids.RevocationValues)))
         {
-            return null;
-        }
-
-        bool hasCertValues = cmsData.UnsignedAttributes.ContainsKey(Oids.CertValues);
-        bool hasRevocationValues = cmsData.UnsignedAttributes.ContainsKey(Oids.RevocationValues);
-
-        if (!hasCertValues && !hasRevocationValues)
-        {
-            return null;
-        }
-
-        if (!hasCertValues)
-        {
-            warnings.Add("CAdES-B-LT: Missing CertificateValues unsigned attribute.");
+            warnings.Add("CAdES-B-LT: Legacy certificate-values/revocation-values attributes are not permitted by the baseline profile.");
             return false;
         }
-
-        if (!hasRevocationValues)
-        {
-            warnings.Add("CAdES-B-LT: Missing RevocationValues — some revocation sources may be unavailable.");
-        }
-
-        // Validate that CertificateValues is structurally valid
         try
         {
-            var certValuesBytes = cmsData.UnsignedAttributes[Oids.CertValues];
-            if (certValuesBytes is null || certValuesBytes.Length == 0)
+            var reader = new AsnReader(cmsBytes, AsnEncodingRules.BER);
+            var contentInfo = reader.ReadSequence();
+            _ = contentInfo.ReadObjectIdentifier();
+            var wrapper = contentInfo.ReadSequence(new Asn1Tag(TagClass.ContextSpecific, 0, true));
+            var signedData = wrapper.ReadSequence();
+            _ = signedData.ReadEncodedValue();
+            _ = signedData.ReadEncodedValue();
+            _ = signedData.ReadEncodedValue();
+            if (signedData.HasData
+                && signedData.PeekTag() == new Asn1Tag(TagClass.ContextSpecific, 0, true))
             {
-                warnings.Add("CAdES-B-LT: CertificateValues attribute is empty.");
+                _ = signedData.ReadEncodedValue();
+            }
+            if (!signedData.HasData
+                || signedData.PeekTag() != new Asn1Tag(TagClass.ContextSpecific, 1, true))
+            {
+                return null;
+            }
+            var revocations = signedData.ReadSetOf(skipSortOrderValidation: true,
+                new Asn1Tag(TagClass.ContextSpecific, 1, true));
+            if (!revocations.HasData || cmsData.Certificates.Count == 0)
+            {
+                warnings.Add("CAdES-B-LT: Root SignedData lacks certificates or revocation values.");
                 return false;
             }
-
-            bool hasSigner = false;
-            foreach (var certAttr in certValuesBytes)
-            {
-                if (certAttr is null || certAttr.Length == 0)
-                {
-                    continue;
-                }
-                if (cmsData.SignerCertificate is not null &&
-                    certAttr.AsSpan().SequenceEqual(cmsData.SignerCertificate.RawData))
-                {
-                    hasSigner = true;
-                }
-            }
-
-            if (!hasSigner && cmsData.SignerCertificate is not null)
-            {
-                warnings.Add("CAdES-B-LT: CertificateValues does not include signer certificate.");
-            }
+            return true;
         }
         // S2221: intentional -- validation pipeline converts exceptions to error messages
         catch (Exception ex)
         {
-            warnings.Add($"CAdES-B-LT: Failed to validate CertificateValues: {ex.Message}");
+            warnings.Add($"CAdES-B-LT: Failed to parse root validation material: {ex.Message}");
             return false;
         }
-
-        return true;
     }
 
     private static bool ValidateArchiveTimestamp(
-        byte[] cmsBytes, CmsSignedData cmsData, List<string> errors, List<string> warnings)
+        byte[] cmsBytes, byte[] originalData, CmsSignedData cmsData, List<string> warnings)
     {
         byte[]? archiveToken = cmsData.ArchiveTimestampToken;
         if (archiveToken is null)
@@ -346,25 +328,33 @@ public sealed class CadesSignatureValidator : ICadesSignatureValidator
 
         try
         {
-            // Parse the archive timestamp from the CMS
-            // The archive timestamp token covers the complete CMS
-            // including all unsigned attributes
-
-            // Verify the timestamp token structure
-            var tsaCerts = TsaCertificateExtractor.ExtractCertificates(archiveToken);
-            if (tsaCerts.Count == 0)
+            var parsedToken = CmsParser.Parse(archiveToken);
+            if (parsedToken?.UnsignedAttributes is null
+                || !parsedToken.UnsignedAttributes.TryGetValue(Oids.AtsHashIndexV3, out var indexValues)
+                || indexValues.Length != 1)
             {
-                warnings.Add("CAdES-B-LTA: Archive timestamp token contains no TSA certificates.");
+                warnings.Add("CAdES-B-LTA: Archive timestamp has no single ATSHashIndexV3 value.");
                 return false;
             }
-
-            // The token must be a valid RFC 3161 TimeStampToken
-            // We validate by attempting to parse it
-            // Full validation would require verifying the TSA certificate chain
-            // and cryptographic signature on the timestamp
-
-            warnings.Add("CAdES-B-LTA: Archive timestamp present but cryptographic validation requires TSA trust configuration.");
-            return true;
+            HashAlgorithmName hashAlgorithm = parsedToken.TstMessageImprintHashAlgOid switch
+            {
+                Oids.Sha256 => HashAlgorithmName.SHA256,
+                Oids.Sha384 => HashAlgorithmName.SHA384,
+                Oids.Sha512 => HashAlgorithmName.SHA512,
+                Oids.Sha3_256 => HashAlgorithmName.SHA3_256,
+                Oids.Sha3_384 => HashAlgorithmName.SHA3_384,
+                Oids.Sha3_512 => HashAlgorithmName.SHA3_512,
+                _ => throw new NotSupportedException("Unsupported archive timestamp hash algorithm.")
+            };
+            var input = CadesArchiveTimestampBuilder.Build(
+                cmsBytes, originalData, hashAlgorithm, excludeArchiveTimestamp: true);
+            if (!input.AtsHashIndex.AsSpan().SequenceEqual(indexValues[0]))
+            {
+                warnings.Add("CAdES-B-LTA: ATSHashIndexV3 does not cover the signature material.");
+                return false;
+            }
+            return TimestampValidator.Validate(archiveToken, input.DataToTimestamp,
+                cmsData.SigningTime, warnings) == true;
         }
         // S2221: intentional -- validation pipeline converts exceptions to error messages
         catch (Exception ex)

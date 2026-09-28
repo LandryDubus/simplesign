@@ -52,6 +52,22 @@ public sealed class PdfSignatureValidatorTests
         signatureValidationResult.IsValid.ShouldBeTrue("");
     }
 
+    [Fact(DisplayName = "Indeterminate revocation prevents overall validity")]
+    public void SignatureValidationResult_IndeterminateRevocation_IsValidReturnsFalse()
+    {
+        var result = new SignatureValidationResult
+        {
+            IsIntegrityValid = true,
+            IsSignatureValid = true,
+            IsCertificateChainValid = true,
+            IsNotRevoked = true,
+            RevocationSource = RevocationSource.Indeterminate
+        };
+
+        result.IsValid.ShouldBeFalse();
+        result.IsNotRevoked.ShouldBeTrue("unknown status must remain distinct from confirmed revocation");
+    }
+
     [Fact(DisplayName = "Invalid integrity makes IsValid return false")]
     public void SignatureValidationResult_IntegrityInvalid_IsValidReturnsFalse()
     {

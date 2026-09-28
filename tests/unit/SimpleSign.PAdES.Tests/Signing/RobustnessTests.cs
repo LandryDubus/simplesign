@@ -3,6 +3,7 @@ using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using Shouldly;
 using SimpleSign.Core.Crypto;
+using SimpleSign.Core.Signing;
 using SimpleSign.Core.Validation;
 using SimpleSign.PAdES.Signing;
 using SimpleSign.PAdES.Validation;
@@ -321,7 +322,8 @@ public sealed class RobustnessTests
         {
             byte[] pdf = BuildMinimalPdf();
             Func<Task<byte[]>> action = () => PadesSigner.Document(pdf).WithCertificate(cert).SignAsync();
-            var ex = await Should.ThrowAsync<CertificateValidationException>(async () => await action());
+            var ex = await Should.ThrowAsync<SigningException>(async () => await action());
+            ex.Reason.ShouldBe(SigningErrorReason.CertificateExpired);
             ex.Message.ShouldContain("expired");
         }
         finally

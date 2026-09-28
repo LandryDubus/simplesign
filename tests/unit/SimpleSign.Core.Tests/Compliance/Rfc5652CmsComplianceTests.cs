@@ -114,6 +114,76 @@ public sealed class Rfc5652CmsComplianceTests : IDisposable
         encap.HasData.ShouldBeFalse("detached CMS MUST NOT embed eContent (RFC 5652 §5.2)");
     }
 
+    [Fact]
+    public void SignedData_EnvelopedContent_UsesExplicitContextTag()
+    {
+        byte[] content = "hello rfc5652"u8.ToArray();
+        var parsed = CmsParser.Parse(_cmsBytes);
+        byte[] cms = CmsSignatureBuilder.BuildSignedData(
+            OidSha256, parsed.SignatureAlgorithmOid, HashAlgorithmName.SHA256,
+            parsed.SignedAttrs!, parsed.Signature!, _cert, [_cert], eContent: content);
+        var signedData = OpenSignedData(cms);
+        _ = signedData.ReadInteger();
+        _ = signedData.ReadSetOf();
+        var encap = signedData.ReadSequence();
+        encap.ReadObjectIdentifier().ShouldBe(IdData);
+        var wrapper = encap.ReadSequence(new Asn1Tag(TagClass.ContextSpecific, 0, true));
+        wrapper.ReadOctetString().ShouldBe(content);
+        wrapper.HasData.ShouldBeFalse();
+    }
+
+    [Fact]
+    public void UnsignedAttributes_AreDerSetOrdered()
+    {
+        var valueWriter = new AsnWriter(AsnEncodingRules.DER);
+        valueWriter.WriteInteger(1);
+        byte[] value = valueWriter.Encode();
+        byte[] cms = CmsSignatureBuilder.AddUnsignedAttributes(_cmsBytes,
+        [
+            CmsAttribute.Raw("1.2.3.10", value),
+            CmsAttribute.Raw("1.2.3.2", value)
+        ]);
+        var signerInfo = OpenSignerInfo(cms);
+        for (int i = 0; i < 6; i++)
+        {
+            _ = signerInfo.ReadEncodedValue();
+        }
+        var unsignedAttributes = signerInfo.ReadSetOf(new Asn1Tag(TagClass.ContextSpecific, 1, true));
+        while (unsignedAttributes.HasData)
+        {
+            _ = unsignedAttributes.ReadEncodedValue();
+        }
+    }
+
+    [Fact]
+    public void AddUnsignedAttributes_PreservesExistingAttributeValues()
+    {
+        byte[] timestampToken = [0x30, 0x00];
+        byte[] timestamped = TimestampClient.EmbedTimestampInCms(_cmsBytes, timestampToken);
+        byte[] archived = CmsSignatureBuilder.AddUnsignedAttributes(timestamped,
+        [
+            CmsAttribute.Raw("0.4.0.1733.2.4", [0x30, 0x00])
+        ]);
+        var parsed = CmsParser.Parse(archived);
+        parsed.UnsignedAttributes!["1.2.840.113549.1.9.16.2.14"][0]
+            .ShouldBe(timestampToken);
+    }
+
+    [Fact]
+    public void SignedData_OcspRevocationInfo_UsesVersionFive()
+    {
+        byte[] cms = CmsSignatureBuilder.AddValidationMaterial(
+            _cmsBytes, [], [], [[0x30, 0x00]]);
+        var signedData = OpenSignedData(cms);
+        signedData.ReadInteger().ShouldBe(new BigInteger(5));
+        _ = signedData.ReadSetOf();
+        _ = signedData.ReadSequence();
+        _ = signedData.ReadSetOf(new Asn1Tag(TagClass.ContextSpecific, 0, true));
+        var revocations = signedData.ReadSetOf(new Asn1Tag(TagClass.ContextSpecific, 1, true));
+        var other = revocations.ReadSequence(new Asn1Tag(TagClass.ContextSpecific, 1, true));
+        other.ReadObjectIdentifier().ShouldBe("1.3.6.1.5.5.7.16.2");
+    }
+
     [Fact(DisplayName = "§5.1 certificates field contains signer certificate")]
     public void SignedData_Certificates_Contains_Signer_Certificate()
     {

@@ -111,7 +111,7 @@ public sealed class AlgorithmInferenceTests
         ExtractSignatureAlgorithmOid(signed).ShouldBe(Oids.RsaPss);
     }
 
-    [Fact(DisplayName = "WithSignatureAlgorithm(RsaSha256) on ECDSA cert → throws ArgumentException")]
+    [Fact(DisplayName = "WithSignatureAlgorithm(RsaSha256) on ECDSA cert → throws SigningException")]
     public async Task WithSignatureAlgorithm_RsaPkcs1OnEcdsaCert_Throws()
     {
         using var cert = TestCertificateFactory.CreateEcdsaCert();
@@ -120,11 +120,11 @@ public sealed class AlgorithmInferenceTests
             .WithSignatureAlgorithm(Oids.RsaSha256)
             .SignAsync();
 
-        (await Should.ThrowAsync<ArgumentException>(act)).Message
-            .ShouldContain("not compatible");
+        var exception = await Should.ThrowAsync<SigningException>(act);
+        exception.Reason.ShouldBe(SigningErrorReason.AlgorithmIncompatible);
     }
 
-    [Fact(DisplayName = "WithSignatureAlgorithm(EcdsaSha256) on RSA cert → throws ArgumentException")]
+    [Fact(DisplayName = "WithSignatureAlgorithm(EcdsaSha256) on RSA cert → throws SigningException")]
     public async Task WithSignatureAlgorithm_EcdsaOnRsaCert_Throws()
     {
         using var cert = TestCertificateFactory.CreateSelfSignedCert();
@@ -133,8 +133,8 @@ public sealed class AlgorithmInferenceTests
             .WithSignatureAlgorithm(Oids.EcdsaSha256)
             .SignAsync();
 
-        (await Should.ThrowAsync<ArgumentException>(act)).Message
-            .ShouldContain("not compatible");
+        var exception = await Should.ThrowAsync<SigningException>(act);
+        exception.Reason.ShouldBe(SigningErrorReason.AlgorithmIncompatible);
     }
 
     [Fact(DisplayName = "WithSignatureAlgorithm(null/whitespace) → throws ArgumentException at builder time")]

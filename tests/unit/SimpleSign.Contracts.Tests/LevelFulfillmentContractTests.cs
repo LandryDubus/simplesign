@@ -1,6 +1,8 @@
 using System.Security.Cryptography.X509Certificates;
+using System.Xml;
 using Shouldly;
 using SimpleSign.CAdES;
+using SimpleSign.Core.Crypto;
 using SimpleSign.Core.Http;
 using SimpleSign.Core.Signing;
 using SimpleSign.PAdES;
@@ -37,6 +39,43 @@ public sealed class LevelFulfillmentContractTests
         result.HasSignatureTimestamp.ShouldBeTrue();
         result.HasLongTermValidationMaterial.ShouldBeFalse();
         result.HasArchiveTimestamp.ShouldBeFalse();
+    }
+
+    [Theory]
+    [InlineData("cades")]
+    [InlineData("xades")]
+    public async Task SignatureTimestamp_EmbedsExactlyTheReturnedRfc3161Token(string format)
+    {
+        using var cert = ContractFixtures.CreateSignerCertificate();
+        byte[]? returnedToken = null;
+        using var tsaClient = ContractFixtures.BuildMockTsaClient(token => returnedToken = token);
+        var profile = AdesBaselineProfile.Timestamped(TimestampOptionsWith(tsaClient));
+
+        byte[] artifact = format == "cades"
+            ? await CadesSigner.Document(ContractFixtures.BinaryContent)
+                .WithCertificate(cert)
+                .WithLevel(profile)
+                .SignAsync()
+            : await XadesSigner.Document(ContractFixtures.XmlDocument)
+                .WithCertificate(cert)
+                .WithLevel(profile)
+                .SignAsync();
+
+        byte[] expected = returnedToken.ShouldNotBeNull();
+        if (format == "cades")
+        {
+            CmsParser.Parse(artifact).SignatureTimestampToken.ShouldBe(expected);
+            return;
+        }
+
+        var document = new XmlDocument { PreserveWhitespace = true };
+        document.Load(new MemoryStream(artifact));
+        var namespaces = new XmlNamespaceManager(document.NameTable);
+        namespaces.AddNamespace("xades", "http://uri.etsi.org/01903/v1.3.2#");
+        XmlNode tokenNode = document.SelectSingleNode(
+            "//xades:SignatureTimeStamp/xades:EncapsulatedTimeStamp",
+            namespaces).ShouldNotBeNull();
+        Convert.FromBase64String(tokenNode.InnerText).ShouldBe(expected);
     }
 
     [Theory]

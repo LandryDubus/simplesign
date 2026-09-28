@@ -439,6 +439,9 @@ internal static class XadesSignatureBuilder
 
         var atsElement = doc.CreateElement("ArchiveTimeStamp", XadesUris.Xades141Namespace);
         atsElement.SetAttribute("Id", XadesUris.ArchiveTimeStampIdPrefix + Guid.NewGuid().ToString("N")[..8]);
+        var canonicalizationMethod = doc.CreateElement("CanonicalizationMethod", XmlDSigUrls.DsNamespace);
+        canonicalizationMethod.SetAttribute("Algorithm", XmlDSigUrls.ExcC14N);
+        atsElement.AppendChild(canonicalizationMethod);
         var encElement = doc.CreateElement("EncapsulatedTimeStamp", XadesUris.Xades141Namespace);
         encElement.InnerText = Convert.ToBase64String(tsToken);
         atsElement.AppendChild(encElement);
@@ -447,6 +450,194 @@ internal static class XadesSignatureBuilder
         using var ms = new MemoryStream();
         doc.Save(ms);
         return ms.ToArray();
+    }
+
+    internal static byte[] BuildArchiveTimeStampInput(
+        byte[] signedXml,
+        byte[] originalData,
+        string? excludedArchiveTimestampId = null)
+    {
+        ArgumentNullException.ThrowIfNull(signedXml);
+        ArgumentNullException.ThrowIfNull(originalData);
+
+        var doc = new XmlDocument { PreserveWhitespace = true };
+        doc.Load(new MemoryStream(signedXml));
+        var ns = new XmlNamespaceManager(doc.NameTable);
+        ns.AddNamespace("ds", XmlDSigUrls.DsNamespace);
+        ns.AddNamespace("xades", XadesUris.XadesNamespace);
+        ns.AddNamespace("xades141", XadesUris.Xades141Namespace);
+
+        if (doc.SelectSingleNode("//ds:Signature", ns) is not XmlElement signature)
+        {
+            throw new InvalidOperationException("Signature element not found.");
+        }
+
+        using var input = new MemoryStream();
+        var references = signature.SelectNodes("ds:SignedInfo/ds:Reference", ns);
+        if (references is not null)
+        {
+            foreach (XmlElement reference in references)
+            {
+                input.Write(ProcessArchiveReference(doc, signature, reference, originalData));
+            }
+        }
+
+        WriteCanonicalChild(input, signature, "ds:SignedInfo", ns, required: true);
+        WriteCanonicalChild(input, signature, "ds:SignatureValue", ns, required: true);
+        WriteCanonicalChild(input, signature, "ds:KeyInfo", ns, required: false);
+
+        var unsignedProperties = signature.SelectSingleNode(
+            "ds:Object/xades:QualifyingProperties/xades:UnsignedProperties/xades:UnsignedSignatureProperties",
+            ns);
+        if (unsignedProperties is not null)
+        {
+            foreach (XmlNode child in unsignedProperties.ChildNodes)
+            {
+                if (child is XmlElement element)
+                {
+                    if (excludedArchiveTimestampId is not null
+                        && element.LocalName == "ArchiveTimeStamp"
+                        && element.GetAttribute("Id") == excludedArchiveTimestampId)
+                    {
+                        continue;
+                    }
+
+                    input.Write(CanonicalizeElement(element));
+                }
+            }
+        }
+
+        var objects = signature.SelectNodes("ds:Object", ns);
+        if (objects is not null)
+        {
+            foreach (XmlElement objectElement in objects)
+            {
+                if (objectElement.SelectSingleNode("xades:QualifyingProperties", ns) is null)
+                {
+                    input.Write(CanonicalizeElement(objectElement));
+                }
+            }
+        }
+
+        return input.ToArray();
+    }
+
+    private static byte[] ProcessArchiveReference(
+        XmlDocument signedDocument,
+        XmlElement signature,
+        XmlElement reference,
+        byte[] originalData)
+    {
+        string uri = reference.GetAttribute("URI");
+        XmlDocument? nodeSet = null;
+        byte[]? octets = null;
+        if (string.IsNullOrEmpty(uri))
+        {
+            nodeSet = (XmlDocument)signedDocument.CloneNode(true);
+        }
+        else if (uri.StartsWith('#'))
+        {
+            string id = uri[1..];
+            var targets = signedDocument.SelectNodes("//*[@Id]");
+            XmlElement? referencedElement = targets?.OfType<XmlElement>()
+                .SingleOrDefault(element => element.GetAttribute("Id") == id);
+            if (referencedElement is null)
+            {
+                throw new InvalidOperationException($"Archive timestamp reference target '{uri}' was not found.");
+            }
+            nodeSet = new XmlDocument { PreserveWhitespace = true };
+            nodeSet.AppendChild(nodeSet.ImportNode(referencedElement, true));
+        }
+        else
+        {
+            octets = originalData;
+        }
+
+        var namespaces = new XmlNamespaceManager(reference.OwnerDocument!.NameTable);
+        namespaces.AddNamespace("ds", XmlDSigUrls.DsNamespace);
+        var transforms = reference.SelectNodes("ds:Transforms/ds:Transform", namespaces);
+        if (transforms is not null)
+        {
+            foreach (XmlElement transform in transforms)
+            {
+                string algorithm = transform.GetAttribute("Algorithm");
+                if (algorithm == XmlDSigUrls.EnvelopedSignatureTransform)
+                {
+                    if (nodeSet is null)
+                    {
+                        throw new NotSupportedException("Enveloped-signature transform requires an XML node set.");
+                    }
+                    RemoveSignature(nodeSet, signature.GetAttribute("Id"), removeAll: false);
+                }
+                else if (algorithm == XmlDSigUrls.XPathTransform)
+                {
+                    string expression = transform.SelectSingleNode("ds:XPath", namespaces)?.InnerText ?? "";
+                    if (expression != "not(ancestor-or-self::ds:Signature)" || nodeSet is null)
+                    {
+                        throw new NotSupportedException("Unsupported archive timestamp XPath transform.");
+                    }
+                    RemoveSignature(nodeSet, null, removeAll: true);
+                }
+                else if (algorithm == XmlDSigUrls.ExcC14N)
+                {
+                    if (nodeSet is null)
+                    {
+                        nodeSet = new XmlDocument { PreserveWhitespace = true };
+                        nodeSet.Load(new MemoryStream(octets!));
+                    }
+                    octets = CanonicalizeXml(nodeSet);
+                    nodeSet = null;
+                }
+                else
+                {
+                    throw new NotSupportedException($"Unsupported archive timestamp transform '{algorithm}'.");
+                }
+            }
+        }
+        return nodeSet is not null ? CanonicalizeXml(nodeSet) : octets!;
+    }
+
+    private static void RemoveSignature(XmlDocument document, string? signatureId, bool removeAll)
+    {
+        var namespaces = new XmlNamespaceManager(document.NameTable);
+        namespaces.AddNamespace("ds", XmlDSigUrls.DsNamespace);
+        var signatures = document.SelectNodes("//ds:Signature", namespaces);
+        if (signatures is null)
+        {
+            return;
+        }
+        for (int i = signatures.Count - 1; i >= 0; i--)
+        {
+            if (signatures[i] is XmlElement element
+                && (removeAll || element.GetAttribute("Id") == signatureId))
+            {
+                element.ParentNode!.RemoveChild(element);
+            }
+        }
+    }
+
+    private static void WriteCanonicalChild(
+        Stream output,
+        XmlElement parent,
+        string xpath,
+        XmlNamespaceManager ns,
+        bool required)
+    {
+        if (parent.SelectSingleNode(xpath, ns) is XmlElement element)
+        {
+            output.Write(CanonicalizeElement(element));
+        }
+        else if (required)
+        {
+            throw new InvalidOperationException($"Required archive timestamp input element '{xpath}' was not found.");
+        }
+    }
+
+    private static byte[] CanonicalizeElement(XmlElement element)
+    {
+        var document = new XmlDocument { PreserveWhitespace = true };
+        document.AppendChild(document.ImportNode(element, true));
+        return CanonicalizeXml(document);
     }
 
     private static XmlElement CreateSignedProperties(

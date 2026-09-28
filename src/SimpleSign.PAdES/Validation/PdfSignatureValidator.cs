@@ -572,16 +572,23 @@ public sealed class PdfSignatureValidator : IPdfSignatureValidator
 
         try
         {
+            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            timeoutCts.CancelAfter(_options.NetworkTimeout);
+
             // AIA chasing: on macOS/Linux, X509Chain.Build() does not automatically download
             // intermediate certificates via AIA. We do it explicitly and add them to ExtraStore.
             var aiaCerts = await _certChainService.DownloadAiaCertsAsync(
-                _httpClient, cmsData.SignerCertificate, cmsData.Certificates, warnings, ct).ConfigureAwait(false);
+                _httpClient, cmsData.SignerCertificate, cmsData.Certificates, warnings, timeoutCts.Token).ConfigureAwait(false);
 
             IReadOnlyList<X509Certificate2> allCerts = aiaCerts.Count > 0
                 ? [.. cmsData.Certificates, .. aiaCerts]
                 : cmsData.Certificates;
 
             return ValidateCertificateChain(cmsData.SignerCertificate, allCerts, errors, warnings);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
         }
         // S2221: intentional broad catch — validation pipeline converts exceptions to error messages
         catch (Exception ex)
@@ -612,14 +619,21 @@ public sealed class PdfSignatureValidator : IPdfSignatureValidator
 
         try
         {
+            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeoutCts.CancelAfter(_options.NetworkTimeout);
+
             var (notRevoked, source) = await _revocationChecker.CheckRevocationAsync(
-                cmsData.SignerCertificate, cmsData.Certificates, embeddedCrls, embeddedOcsps, cancellationToken, signingTime).ConfigureAwait(false);
+                cmsData.SignerCertificate, cmsData.Certificates, embeddedCrls, embeddedOcsps, timeoutCts.Token, signingTime).ConfigureAwait(false);
             if (!notRevoked)
             {
                 _logger.CertificateRevocationFailed(field.FieldName);
                 errors.Add("Certificate revocation check failed.");
             }
             return (notRevoked, source);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
         }
         // S2221: intentional broad catch — validation pipeline converts exceptions to error messages
         catch (Exception ex)
@@ -699,6 +713,7 @@ public sealed class PdfSignatureValidator : IPdfSignatureValidator
 
         using var chain = new X509Chain();
         CryptoUtility.ConfigureChainPolicy(chain, _options.CheckRevocation);
+        chain.ChainPolicy.UrlRetrievalTimeout = _options.NetworkTimeout;
         chain.ChainPolicy.VerificationFlags =
             X509VerificationFlags.IgnoreEndRevocationUnknown |
             X509VerificationFlags.IgnoreCertificateAuthorityRevocationUnknown;

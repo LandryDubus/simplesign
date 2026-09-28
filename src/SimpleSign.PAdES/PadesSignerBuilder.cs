@@ -22,11 +22,13 @@ namespace SimpleSign.PAdES;
 public sealed class PadesSignerBuilder
 {
     private readonly Stream _inputPdf;
+    private readonly System.Threading.Channels.Channel<bool> _executionGate;
     private readonly PadesSigningOptions _options;
 
     internal PadesSignerBuilder(Stream inputPdf, ILogger? logger = null)
     {
         _inputPdf = inputPdf;
+        _executionGate = CreateExecutionGate();
         _options = new PadesSigningOptions(
             Credential: null,
             HashAlgorithm: HashAlgorithmName.SHA256,
@@ -50,6 +52,7 @@ public sealed class PadesSignerBuilder
         ILogger? logger = null)
     {
         _inputPdf = inputPdf;
+        _executionGate = CreateExecutionGate();
         _options = new PadesSigningOptions(
             Credential: null,
             HashAlgorithm: HashAlgorithmName.SHA256,
@@ -66,10 +69,14 @@ public sealed class PadesSignerBuilder
             Dependencies: new PadesDependencies(tsaFactory, ltvEmbedder, logger ?? NullLogger.Instance, DefaultHttpClientProvider.Instance));
     }
 
-    private PadesSignerBuilder(Stream inputPdf, PadesSigningOptions options)
+    private PadesSignerBuilder(
+        Stream inputPdf,
+        PadesSigningOptions options,
+        System.Threading.Channels.Channel<bool> executionGate)
     {
         _inputPdf = inputPdf;
         _options = options;
+        _executionGate = executionGate;
     }
 
     #region Common fluent configuration
@@ -276,7 +283,7 @@ public sealed class PadesSignerBuilder
             location: location,
             contactInfo: contactInfo);
 
-        return With(_options with { Field = updatedField, Metadata = metadata });
+        return With(_options with { Field = updatedField, Metadata = SnapshotMetadata(metadata) });
     }
 
     /// <summary>Sets visible metadata on the signature.</summary>
@@ -304,7 +311,7 @@ public sealed class PadesSignerBuilder
     public PadesSignerBuilder WithAppearance(SignatureAppearance appearance)
     {
         ArgumentNullException.ThrowIfNull(appearance);
-        return With(_options with { Field = CloneField(appearance: appearance) });
+        return With(_options with { Field = CloneField(appearance: appearance.Snapshot()) });
     }
 
     /// <summary>
@@ -457,8 +464,27 @@ public sealed class PadesSignerBuilder
     public async Task SignAsync(Stream outputStream, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(outputStream);
+        if (!outputStream.CanWrite || !outputStream.CanSeek)
+        {
+            throw new ArgumentException("The output stream must be writable and seekable.", nameof(outputStream));
+        }
+
         EnsureStrictProfile();
-        await SignCoreAsync(outputStream, cancellationToken).ConfigureAwait(false);
+        await _executionGate.Reader.ReadAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            using var stagedOutput = new MemoryStream();
+            await SignCoreAsync(stagedOutput, cancellationToken).ConfigureAwait(false);
+
+            outputStream.Seek(0, SeekOrigin.Begin);
+            outputStream.SetLength(0);
+            stagedOutput.Position = 0;
+            await stagedOutput.CopyToAsync(outputStream, CancellationToken.None).ConfigureAwait(false);
+        }
+        finally
+        {
+            _executionGate.Writer.TryWrite(true);
+        }
     }
 
     /// <summary>
@@ -475,9 +501,17 @@ public sealed class PadesSignerBuilder
     public async Task<byte[]> SignAsync(CancellationToken cancellationToken = default)
     {
         EnsureStrictProfile();
-        using var output = new MemoryStream();
-        await SignCoreAsync(output, cancellationToken).ConfigureAwait(false);
-        return output.ToArray();
+        await _executionGate.Reader.ReadAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            using var output = new MemoryStream();
+            await SignCoreAsync(output, cancellationToken).ConfigureAwait(false);
+            return output.ToArray();
+        }
+        finally
+        {
+            _executionGate.Writer.TryWrite(true);
+        }
     }
 
     /// <summary>
@@ -491,12 +525,20 @@ public sealed class PadesSignerBuilder
     /// <exception cref="NotSupportedException">Unsupported hash algorithm or key type.</exception>
     public async Task<PadesSigningResult> SignWithDetailsAsync(CancellationToken cancellationToken = default)
     {
-        using var output = new MemoryStream();
-        var result = await SignCoreAsync(output, cancellationToken).ConfigureAwait(false);
-        return result with
+        await _executionGate.Reader.ReadAsync(cancellationToken).ConfigureAwait(false);
+        try
         {
-            SignedArtifact = output.ToArray()
-        };
+            using var output = new MemoryStream();
+            var result = await SignCoreAsync(output, cancellationToken).ConfigureAwait(false);
+            return result with
+            {
+                SignedArtifact = output.ToArray()
+            };
+        }
+        finally
+        {
+            _executionGate.Writer.TryWrite(true);
+        }
     }
 
     private void EnsureStrictProfile()
@@ -535,9 +577,13 @@ public sealed class PadesSignerBuilder
 
         var effectiveHash = AlgorithmInference.ResolveEffectiveHashAlgorithm(
             certificate, _options.HashAlgorithm, _options.HashAlgorithmExplicitlySet, _options.SignatureAlgorithmOid);
+        effectiveHash = SigningAlgorithmResolver.ResolveHashAlgorithm(
+            effectiveHash,
+            _options.HashAlgorithmExplicitlySet,
+            _options.SignatureAlgorithmOid);
         var sigOid = _options.SignatureAlgorithmOid
             ?? CryptoUtility.DetectSignatureAlgorithmOid(certificate, effectiveHash);
-        CmsSignatureBuilder.ValidateSignatureAlgorithmCompatibility(certificate, sigOid);
+        SigningAlgorithmResolver.ValidateCompatibility(certificate, sigOid);
 
         var warnings = new List<SigningWarning>();
         var kuExt = certificate.Extensions.OfType<X509KeyUsageExtension>().FirstOrDefault();
@@ -667,12 +713,13 @@ public sealed class PadesSignerBuilder
                 SigningErrorReason.PrivateKeyMissing);
         }
 
-        if (certificate.NotAfter < DateTime.UtcNow)
+        DateTime validationTime = DateTime.UtcNow;
+        if (certificate.NotBefore > validationTime || certificate.NotAfter < validationTime)
         {
-            throw new CertificateValidationException(
-                $"Certificate '{certificate.Subject}' expired on {certificate.NotAfter:yyyy-MM-dd HH:mm:ss} UTC. Cannot sign with an expired certificate.",
-                certificate.Thumbprint,
-                certificate.Subject);
+            throw new SigningException(
+                $"Certificate '{certificate.Subject}' is not valid at {validationTime:yyyy-MM-dd HH:mm:ss} UTC " +
+                $"(valid from {certificate.NotBefore:yyyy-MM-dd HH:mm:ss} through {certificate.NotAfter:yyyy-MM-dd HH:mm:ss} UTC).",
+                SigningErrorReason.CertificateExpired);
         }
 
         _ = opId;
@@ -756,13 +803,30 @@ public sealed class PadesSignerBuilder
             sigOid,
             ExternalSigningPayloadKind.CmsSignedAttributes,
             _options.OperationId);
-        ReadOnlyMemory<byte> signature = await external.Signer.SignAsync(request, cancellationToken).ConfigureAwait(false);
+        ReadOnlyMemory<byte> signature;
+        try
+        {
+            signature = await external.Signer.SignAsync(request, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (SigningException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            throw new SigningException("External signer failed.", SigningErrorReason.Unspecified, ex);
+        }
         if (signature.Length == 0)
         {
             throw new SigningException(
                 "External signer returned an empty signature.",
                 SigningErrorReason.ExternalSignerReturnedEmpty);
         }
+        ExternalSignatureVerifier.Verify(certificate, request, signature.Span);
 
         List<X509Certificate2> allCerts = [certificate, .. chain];
         return CmsSignatureBuilder.BuildSignedData(
@@ -953,10 +1017,40 @@ public sealed class PadesSignerBuilder
         With(_options with { Credential = credential });
 
     private PadesSignerBuilder With(PadesSigningOptions options) =>
-        new(_inputPdf, options);
+        new(_inputPdf, options, _executionGate);
+
+    private static System.Threading.Channels.Channel<bool> CreateExecutionGate()
+    {
+        var gate = System.Threading.Channels.Channel.CreateBounded<bool>(1);
+        gate.Writer.TryWrite(true);
+        return gate;
+    }
 
     private static IReadOnlyList<X509Certificate2> CopyChain(IReadOnlyList<X509Certificate2> chain) =>
         chain.ToList().AsReadOnly();
+
+    private static SignatureMetadata SnapshotMetadata(SignatureMetadata metadata) => new()
+    {
+        SignerName = metadata.SignerName,
+        SignerId = metadata.SignerId,
+        SignerIdType = metadata.SignerIdType,
+        Email = metadata.Email,
+        IpAddress = metadata.IpAddress,
+        AuthenticationMethod = metadata.AuthenticationMethod,
+        InstitutionName = metadata.InstitutionName,
+        InstitutionId = metadata.InstitutionId,
+        InstitutionIdType = metadata.InstitutionIdType,
+        CommitmentType = metadata.CommitmentType,
+        LegalBasis = metadata.LegalBasis,
+        PolicyOid = metadata.PolicyOid,
+        PolicyUri = metadata.PolicyUri,
+        Reason = metadata.Reason,
+        ContactInfo = metadata.ContactInfo,
+        Location = metadata.Location,
+        ExtraAttributes = metadata.ExtraAttributes?
+            .Select(attribute => CmsAttribute.Create(attribute.Oid, (byte[])attribute.DerValue.Clone()))
+            .ToArray()
+    };
 
     private SignatureFieldOptions CloneField(
         string? fieldName = null,

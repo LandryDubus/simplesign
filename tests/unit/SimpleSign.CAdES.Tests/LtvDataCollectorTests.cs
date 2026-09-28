@@ -1,4 +1,5 @@
 using System.Security.Cryptography.X509Certificates;
+using SimpleSign.Core.Revocation;
 using SimpleSign.TestHelpers;
 using Shouldly;
 using Xunit;
@@ -112,5 +113,102 @@ public sealed class LtvDataCollectorTests : IDisposable
         result.CertificateRawData.Count.ShouldBe(2);
         result.CertificateRawData.ShouldContain(b => b.SequenceEqual(_pki.Leaf.RawData));
         result.CertificateRawData.ShouldContain(b => b.SequenceEqual(_pki.IntermediateCa.RawData));
+    }
+
+    [Fact]
+    public async Task CollectAsync_OcspFailureForLaterCertificate_UsesItsCrlFallback()
+    {
+        using var pki = new SyntheticPki(
+            "http://crl.example.com/test.crl",
+            "http://ocsp.example.com");
+        using var httpClient = MockHttpHandler.ForGetBytes([0x30, 0x00]);
+        var ocsp = new SequencedOcspClient();
+
+        var result = await LtvDataCollector.CollectAsync(
+            httpClient,
+            pki.Leaf,
+            [pki.IntermediateCa, pki.RootCa],
+            null,
+            ocsp);
+
+        result.OcspResponses.ShouldHaveSingleItem();
+        result.Crls.ShouldHaveSingleItem();
+        result.HasCompleteRevocationData.ShouldBeTrue();
+        result.CertificateStatuses.ShouldNotBeNull()
+            .Where(status => status.RequiresRevocationData)
+            .ShouldAllBe(status => status.HasRevocationData);
+    }
+
+    [Fact]
+    public async Task CollectAsync_CancellationDuringOcsp_Propagates()
+    {
+        using var httpClient = MockHttpHandler.Failing();
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        await Should.ThrowAsync<OperationCanceledException>(() =>
+            LtvDataCollector.CollectAsync(
+                httpClient,
+                _pki.Leaf,
+                [_pki.IntermediateCa],
+                null,
+                new CancellingOcspClient(),
+                cts.Token));
+    }
+
+    private sealed class SequencedOcspClient : IOcspClient
+    {
+        private int _calls;
+
+        public Task<OcspFetchResult> FetchOcspResponseAsync(
+            X509Certificate2 cert,
+            X509Certificate2? issuerCert,
+            string ocspUrl,
+            CancellationToken ct)
+        {
+            _calls++;
+            return _calls == 1
+                ? Task.FromResult(new OcspFetchResult(true, [1, 2, 3], []))
+                : throw new HttpRequestException("OCSP unavailable");
+        }
+
+        public Task<bool> CheckOcspAsync(X509Certificate2 cert, string ocspUrl, CancellationToken ct) =>
+            throw new NotSupportedException();
+
+        public Task<bool> CheckOcspWithChainAsync(
+            X509Certificate2 cert,
+            IReadOnlyList<X509Certificate2> chain,
+            string ocspUrl,
+            CancellationToken ct) => throw new NotSupportedException();
+
+        public bool? CheckEmbeddedOcspResponse(
+            X509Certificate2 cert,
+            X509Certificate2? issuerCert,
+            byte[] ocspResponseBytes,
+            DateTimeOffset? signingTime) => throw new NotSupportedException();
+    }
+
+    private sealed class CancellingOcspClient : IOcspClient
+    {
+        public Task<OcspFetchResult> FetchOcspResponseAsync(
+            X509Certificate2 cert,
+            X509Certificate2? issuerCert,
+            string ocspUrl,
+            CancellationToken ct) => Task.FromCanceled<OcspFetchResult>(ct);
+
+        public Task<bool> CheckOcspAsync(X509Certificate2 cert, string ocspUrl, CancellationToken ct) =>
+            throw new NotSupportedException();
+
+        public Task<bool> CheckOcspWithChainAsync(
+            X509Certificate2 cert,
+            IReadOnlyList<X509Certificate2> chain,
+            string ocspUrl,
+            CancellationToken ct) => throw new NotSupportedException();
+
+        public bool? CheckEmbeddedOcspResponse(
+            X509Certificate2 cert,
+            X509Certificate2? issuerCert,
+            byte[] ocspResponseBytes,
+            DateTimeOffset? signingTime) => throw new NotSupportedException();
     }
 }

@@ -83,14 +83,15 @@ internal static class CryptoUtility
 
     /// <summary>
     /// Parses the hash algorithm from a DER-encoded <c>RSASSA-PSS-params</c> structure
-    /// (RFC 4055 §3.1). Returns SHA-256 if the params are absent or the hash OID is
-    /// unrecognised (RFC 4055 default).
+    /// (RFC 4055 §3.1). An encoded parameters sequence with no hash field uses the ASN.1
+    /// default SHA-1. An absent parameters field represents an unrestricted PSS key; SimpleSign
+    /// applies its SHA-256 policy default in that distinct case.
     /// </summary>
     internal static HashAlgorithmName ParsePssHashAlgorithm(ReadOnlySpan<byte> algIdentifierParams)
     {
         if (algIdentifierParams.IsEmpty)
         {
-            return HashAlgorithmName.SHA256; // DEFAULT per RFC 4055 §3.1
+            return HashAlgorithmName.SHA256;
         }
 
         try
@@ -115,15 +116,18 @@ internal static class CryptoUtility
                     Oids.Sha256 => HashAlgorithmName.SHA256,
                     Oids.Sha384 => HashAlgorithmName.SHA384,
                     Oids.Sha512 => HashAlgorithmName.SHA512,
-                    _ => HashAlgorithmName.SHA256 // unrecognised → RFC default
+                    Oids.Sha1 => HashAlgorithmName.SHA1,
+                    _ => HashAlgorithmName.SHA1
                 };
             }
+
+            return HashAlgorithmName.SHA1;
         }
         catch (AsnContentException)
         {
             // Malformed params — fall through to default
         }
 
-        return HashAlgorithmName.SHA256; // DEFAULT per RFC 4055 §3.1
+        return HashAlgorithmName.SHA1;
     }
 }

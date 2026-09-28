@@ -1,5 +1,3 @@
-using System.Net;
-using System.Net.Http.Headers;
 using System.Security.Cryptography.X509Certificates;
 using SimpleSign.Core.Http;
 using SimpleSign.Core.Signing;
@@ -185,47 +183,5 @@ public sealed class CadesSignatureValidatorTests : IDisposable
             Microsoft.Extensions.Logging.ILogger? logger = null) => true;
     }
 
-    private static MockHttpHandler BuildMockTsaHandler()
-    {
-        var fakeTsr = BuildFakeTimestampResponse();
-        return new MockHttpHandler(async _ =>
-        {
-            var response = new HttpResponseMessage(HttpStatusCode.OK)
-            {
-                Content = new ByteArrayContent(fakeTsr)
-            };
-            response.Content.Headers.ContentType =
-                new MediaTypeHeaderValue("application/timestamp-reply");
-            await Task.CompletedTask;
-            return response;
-        });
-    }
-
-    private static byte[] BuildFakeTimestampResponse()
-    {
-        var fakeCmsToken = BuildFakeCmsToken();
-        var writer = new System.Formats.Asn1.AsnWriter(System.Formats.Asn1.AsnEncodingRules.DER);
-        using (writer.PushSequence())
-        {
-            using (writer.PushSequence())
-                writer.WriteInteger(0);
-            writer.WriteEncodedValue(fakeCmsToken);
-        }
-        return writer.Encode();
-    }
-
-    private static byte[] BuildFakeCmsToken()
-    {
-        var writer = new System.Formats.Asn1.AsnWriter(System.Formats.Asn1.AsnEncodingRules.DER);
-        using (writer.PushSequence())
-        {
-            writer.WriteObjectIdentifier("1.2.840.113549.1.7.2");
-            using (writer.PushSequence(new System.Formats.Asn1.Asn1Tag(
-                System.Formats.Asn1.TagClass.ContextSpecific, 0, true)))
-            {
-                writer.WriteOctetString([0x01, 0x02, 0x03]);
-            }
-        }
-        return writer.Encode();
-    }
+    private static HttpMessageHandler BuildMockTsaHandler() => MockTimestampAuthority.CreateHandler();
 }

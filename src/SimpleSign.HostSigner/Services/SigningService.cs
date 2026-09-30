@@ -67,11 +67,13 @@ internal static class SigningService
         if (!string.IsNullOrEmpty(options.SignerName) || !string.IsNullOrEmpty(options.Reason) ||
             !string.IsNullOrEmpty(options.Location) || !string.IsNullOrEmpty(options.ContactInfo))
         {
-            builder = builder.WithMetadata(
-                signerName: options.SignerName,
-                reason: options.Reason,
-                location: options.Location,
-                contactInfo: options.ContactInfo);
+            builder = builder.WithFieldOptions(new SignatureFieldOptions
+            {
+                SignerName = options.SignerName,
+                Reason = options.Reason,
+                Location = options.Location,
+                ContactInfo = options.ContactInfo
+            });
         }
 
         // Field name

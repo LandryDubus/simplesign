@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Security.Cryptography.X509Certificates;
 using System.Text.Json;
 using SimpleSign.Cli.Json;
+using SimpleSign.Core.Signing;
 using SimpleSign.Core.Validation;
 using SimpleSign.XAdES;
 using Spectre.Console;
@@ -101,9 +102,9 @@ internal sealed class XadesValidateCommand : AsyncCommand<XadesValidateCommand.S
 
         table.AddRow("XAdES level", result.DetectedLevel switch
         {
-            XadesLevel.Archive => "B-LTA (Archive)",
-            XadesLevel.LongTerm => "B-LT (Long-Term)",
-            XadesLevel.Timestamped => "B-T (Timestamped)",
+            AdesBaselineLevel.Archive => "B-LTA (Archive)",
+            AdesBaselineLevel.LongTerm => "B-LT (Long-Term)",
+            AdesBaselineLevel.Timestamped => "B-T (Timestamped)",
             _ => "B-B (Basic)"
         });
 

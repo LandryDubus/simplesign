@@ -35,19 +35,26 @@ public sealed record ExternalSigningRequest
     /// <summary>Optional operation ID for log correlation.</summary>
     public string? OperationId { get; }
 
+    /// <summary>
+    /// The complete PSS parameters the signer must use, or <see langword="null"/> for a non-PSS request.
+    /// </summary>
+    public RsaPssParameters? RsaPssParameters { get; }
+
     /// <summary>Creates a new external signing request.</summary>
     /// <param name="dataToSign">The bytes to sign.</param>
     /// <param name="hashAlgorithm">The resolved hash algorithm.</param>
     /// <param name="signatureAlgorithmOid">The signature algorithm OID to produce.</param>
     /// <param name="payloadKind">The kind of payload.</param>
     /// <param name="operationId">Optional operation ID.</param>
+    /// <param name="rsaPssParameters">PSS parameters when <paramref name="signatureAlgorithmOid"/> is id-RSASSA-PSS.</param>
     /// <exception cref="ArgumentException"><paramref name="signatureAlgorithmOid"/> is null or whitespace.</exception>
     public ExternalSigningRequest(
         ReadOnlyMemory<byte> dataToSign,
         HashAlgorithmName hashAlgorithm,
         string signatureAlgorithmOid,
         ExternalSigningPayloadKind payloadKind,
-        string? operationId = null)
+        string? operationId = null,
+        RsaPssParameters? rsaPssParameters = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(signatureAlgorithmOid);
         DataToSign = dataToSign;
@@ -55,6 +62,7 @@ public sealed record ExternalSigningRequest
         SignatureAlgorithmOid = signatureAlgorithmOid;
         PayloadKind = payloadKind;
         OperationId = operationId;
+        RsaPssParameters = rsaPssParameters;
     }
 }
 
@@ -63,8 +71,9 @@ public sealed record ExternalSigningRequest
 /// signature bytes (not a CMS or XML container).
 /// </summary>
 /// <remarks>
-/// Raw signature encodings: RSA produces a PKCS#1 v1.5 signature; ECDSA produces an
-/// ASN.1 DER SEQUENCE { r, s } (RFC 3279); EdDSA produces raw signature bytes.
+/// Raw signature encodings: RSA produces the raw signature for the requested PKCS#1 v1.5
+/// or RSASSA-PSS scheme; ECDSA produces an ASN.1 DER SEQUENCE { r, s } (RFC 3279).
+/// EdDSA signing is not supported because net8.0 cannot verify its raw external output.
 /// </remarks>
 public interface IExternalSigner
 {

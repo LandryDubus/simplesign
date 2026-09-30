@@ -40,7 +40,7 @@ public sealed class Rfc8933EddsaCmsComplianceTests
         byte[] signed = await PadesSigner.Document(pdf)
             .WithCertificate(cert)
             .WithHashAlgorithm(hash)
-            .WithExternalSigner(cert, new FuncExternalSigner(async h =>
+            .WithExternalSigner(cert, new DelegatingExternalSigner(async h =>
             {
                 byte[] sig = key.SignHash(h, DSASignatureFormat.Rfc3279DerSequence);
                 return await Task.FromResult(sig);

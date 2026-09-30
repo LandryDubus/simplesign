@@ -35,6 +35,7 @@ File.WriteAllBytes("signed.pdf", signed);
 ### Validate Signatures
 
 ```csharp
+using SimpleSign.Core.Validation;
 using SimpleSign.PAdES.Validation;
 
 var validator = new PdfSignatureValidator(new ValidationOptions
@@ -67,15 +68,19 @@ foreach (var sig in info.Signatures)
 ```csharp
 using SimpleSign.PAdES;
 
-// Server: prepare hash
-var prepared = await DeferredSigner.PrepareAsync(pdfBytes, cert);
+// Server: prepare hash and keep this key outside the session itself.
+byte[] sessionIntegrityKey = RandomNumberGenerator.GetBytes(32);
+var signer = DeferredSigner.Document(pdfBytes)
+    .WithCertificate(cert)
+    .WithSessionIntegrityKey(sessionIntegrityKey);
+var prepared = await signer.PrepareAsync();
 byte[] hash = prepared.HashToSign;  // → send to client
 
 // Client: sign hash with private key
 byte[] signature = clientDevice.Sign(hash);
 
-// Server: complete
-byte[] signedPdf = await DeferredSigner.CompleteAsync(prepared.SessionData, signature);
+// Server: complete, potentially in a later HTTP request
+byte[] signedPdf = await DeferredSigner.Resume(prepared.SessionData, sessionIntegrityKey).CompleteAsync(signature);
 ```
 
 ### HTML to PDF

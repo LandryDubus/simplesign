@@ -51,7 +51,15 @@
     <EmbeddedResource Include="corpus\pades\doc-firmado-LT.pdf" Visible="false" />
   </ItemGroup>
 
+  <!-- EU DSS CAdES/XAdES corpus. Every resource is fixed by commit and SHA-256 in corpus/ades/manifest.json. -->
   <ItemGroup>
+    <EmbeddedResource Include="corpus\ades\manifest.json" Visible="false" />
+    <EmbeddedResource Include="corpus\cades\*" Visible="false" />
+    <EmbeddedResource Include="corpus\xades\*" Visible="false" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\src\SimpleSign.CAdES\SimpleSign.CAdES.csproj" />
     <ProjectReference Include="..\..\..\src\SimpleSign.PAdES\SimpleSign.PAdES.csproj" />
     <ProjectReference Include="..\..\..\src\SimpleSign.Brasil\SimpleSign.Brasil.csproj" />
     <ProjectReference Include="..\..\..\src\SimpleSign.XAdES\SimpleSign.XAdES.csproj" />

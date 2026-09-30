@@ -26,7 +26,7 @@ public sealed class PadesSigner
     public static PadesSignerBuilder Document(byte[] pdfBytes)
     {
         ArgumentNullException.ThrowIfNull(pdfBytes);
-        return new PadesSignerBuilder(new MemoryStream(pdfBytes));
+        return new PadesSignerBuilder(new MemoryStream([.. pdfBytes]), singleExecution: false);
     }
 
     /// <summary>Starts the signing pipeline from a seekable stream.</summary>
@@ -47,7 +47,7 @@ public sealed class PadesSigner
             throw new ArgumentException("PDF stream must be seekable.", nameof(pdfStream));
         }
 
-        return new PadesSignerBuilder(pdfStream);
+        return new PadesSignerBuilder(pdfStream, singleExecution: true);
     }
 
     /// <summary>Starts the signing pipeline from a file path (async file I/O).</summary>
@@ -61,7 +61,7 @@ public sealed class PadesSigner
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(pdfPath);
         var pdfBytes = await File.ReadAllBytesAsync(pdfPath, cancellationToken).ConfigureAwait(false);
-        return new PadesSignerBuilder(new MemoryStream(pdfBytes));
+        return new PadesSignerBuilder(new MemoryStream(pdfBytes), singleExecution: false);
     }
 
     #endregion

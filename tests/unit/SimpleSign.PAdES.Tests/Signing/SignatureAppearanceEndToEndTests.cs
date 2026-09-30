@@ -43,7 +43,7 @@ public sealed class SignatureAppearanceEndToEndTests
     {
         using X509Certificate2 cert = CreateRsaCert("CN=Auditor, O=TCE, C=BR");
         byte[] pdfBytes = BuildPdfWithPage();
-        using MemoryStream stream = new MemoryStream(await PadesSigner.Document(pdfBytes).WithCertificate(cert).WithMetadata("Auditor", "Teste de aparência")
+        using MemoryStream stream = new MemoryStream(await PadesSigner.Document(pdfBytes).WithCertificate(cert).WithTestFieldOptions("Auditor", "Teste de aparência")
             .WithAppearance(new SignatureAppearance
             {
                 X = 20f,
@@ -86,7 +86,7 @@ public sealed class SignatureAppearanceEndToEndTests
     {
         using X509Certificate2 cert = CreateRsaCert("CN=Testador, C=BR");
         byte[] pdfBytes = BuildPdfWithPage();
-        byte[] bytes = await PadesSigner.Document(pdfBytes).WithCertificate(cert).WithMetadata("Testador")
+        byte[] bytes = await PadesSigner.Document(pdfBytes).WithCertificate(cert).WithTestFieldOptions("Testador")
             .WithAppearance(new SignatureAppearance())
             .SignAsync();
         string actualValue = Encoding.Latin1.GetString(bytes);

@@ -99,8 +99,8 @@ public sealed class SignatureAppearance
         ShowDate = source.ShowDate;
         ShowReason = source.ShowReason;
         ShowLocation = source.ShowLocation;
-        BackgroundImageJpeg = source.BackgroundImageJpeg;
-        BackgroundImagePng = source.BackgroundImagePng;
+        BackgroundImageJpeg = source.BackgroundImageJpeg is { } jpeg ? jpeg.ToArray() : null;
+        BackgroundImagePng = source.BackgroundImagePng is { } png ? png.ToArray() : null;
         CustomFontSize = source.CustomFontSize;
         CustomLabelFontSize = source.CustomLabelFontSize;
         BaseFontName = source.BaseFontName;
@@ -108,20 +108,22 @@ public sealed class SignatureAppearance
         BorderColor = source.BorderColor;
         BorderWidth = source.BorderWidth;
         VerificationUrl = source.VerificationUrl;
-        ExtraLines = source.ExtraLines;
+        ExtraLines = source.ExtraLines?.ToArray();
     }
 
     /// <summary>Returns a clone with the PNG background image set.</summary>
     public SignatureAppearance WithBackgroundImagePng(byte[] imageBytes) =>
-        new(this) { BackgroundImagePng = imageBytes };
+        new(this) { BackgroundImagePng = imageBytes.ToArray(), BackgroundImageJpeg = null };
 
     /// <summary>Returns a clone with the JPEG background image set.</summary>
     public SignatureAppearance WithBackgroundImageJpeg(byte[] imageBytes) =>
-        new(this) { BackgroundImageJpeg = imageBytes };
+        new(this) { BackgroundImageJpeg = imageBytes.ToArray(), BackgroundImagePng = null };
 
     /// <summary>Returns a clone with extra lines.</summary>
     public SignatureAppearance WithExtraLines(IReadOnlyList<string> extraLines) =>
-        new(this) { ExtraLines = extraLines };
+        new(this) { ExtraLines = [.. extraLines] };
+
+    internal SignatureAppearance Snapshot() => new(this);
 
     /// <summary>
     /// Creates an auto-positioned signature appearance. Signatures are placed left-to-right

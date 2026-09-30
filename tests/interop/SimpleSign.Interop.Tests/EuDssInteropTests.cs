@@ -34,8 +34,8 @@ public sealed class EuDssInteropTests(ITestOutputHelper output)
     {
         SkipIfDockerUnavailable();
         var pdf = MinimalPdf();
-        using var pki = new SyntheticPki(crlDistributionPoint: "http://crl.example.com/test-ca.crl");
-        using var crlClient = TestRevocation.BuildCrlClient(pki.BuildLeafCrl());
+        using var pki = TestRevocation.CreatePki();
+        using var crlClient = TestRevocation.BuildCrlClient(pki);
         var signed = await PadesSigner.Document(pdf)
             .WithCertificate(pki.Leaf, pki.IntermediatesAndRoot())
             .WithLevel(AdesBaselineProfile.LongTerm(

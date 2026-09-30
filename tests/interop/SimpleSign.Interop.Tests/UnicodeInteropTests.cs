@@ -25,7 +25,7 @@ public sealed class UnicodeInteropTests(ITestOutputHelper output)
 
         var signed = await PadesSigner.Document(pdf)
             .WithCertificate(cert)
-            .WithMetadata("テスト署名者") // Japanese
+            .WithTestFieldOptions("テスト署名者") // Japanese
             .SignAsync();
 
         var tmpDir = CreateTempDir();
@@ -57,7 +57,7 @@ public sealed class UnicodeInteropTests(ITestOutputHelper output)
 
         var signed = await PadesSigner.Document(pdf)
             .WithCertificate(cert)
-            .WithMetadata(reason: "سبب التوقيع")
+            .WithTestFieldOptions(reason: "سبب التوقيع")
             .SignAsync();
 
         var tmpDir = CreateTempDir();
@@ -90,7 +90,7 @@ public sealed class UnicodeInteropTests(ITestOutputHelper output)
 
         var signed = await PadesSigner.Document(pdf)
             .WithCertificate(cert)
-            .WithMetadata(location: "📍 São Paulo")
+            .WithTestFieldOptions(location: "📍 São Paulo")
             .SignAsync();
 
         var tmpDir = CreateTempDir();
@@ -123,7 +123,7 @@ public sealed class UnicodeInteropTests(ITestOutputHelper output)
 
         var signed = await PadesSigner.Document(pdf)
             .WithCertificate(cert)
-            .WithMetadata("Ñoño María", "Ação de teste", "São José")
+            .WithTestFieldOptions("Ñoño María", "Ação de teste", "São José")
             .SignAsync();
 
         var tmpDir = CreateTempDir();

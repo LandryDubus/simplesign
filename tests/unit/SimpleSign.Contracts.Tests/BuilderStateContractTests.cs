@@ -60,7 +60,7 @@ public sealed class BuilderStateContractTests
     public async Task ExternalCredential_ReplacesLocalCredential(string format)
     {
         using var cert = ContractFixtures.CreateSignerCertificate();
-        var signer = new RawSigner(ContractFixtures.CreateSignerCertificate());
+        var signer = new RawSigner(cert);
 
         // Configure local signing first, then switch to external signing.
         ISigningResult result = await SignExternalAfterLocalAsync(format, cert, signer);

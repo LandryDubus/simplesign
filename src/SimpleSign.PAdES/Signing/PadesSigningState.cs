@@ -45,7 +45,6 @@ internal sealed record PadesSigningOptions(
     DateTimeOffset? SigningTime,
     SignatureFieldOptions Field,
     SignatureMetadata? Metadata,
-    bool PadesAttributes,
     bool EnforcePdfA,
     string? OperationId,
     AdesBaselineProfile Profile,

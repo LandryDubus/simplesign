@@ -154,7 +154,7 @@ public sealed class CadesSignatureValidator : ICadesSignatureValidator
         bool? archiveTsValid = null;
         if (cmsData.ArchiveTimestampToken is not null)
         {
-            archiveTsValid = ValidateArchiveTimestamp(cmsBytes, cmsData, errors, warnings);
+            archiveTsValid = ValidateArchiveTimestamp(cmsBytes, originalData, cmsData, errors, warnings);
         }
 
         return new CadesValidationResult
@@ -335,7 +335,7 @@ public sealed class CadesSignatureValidator : ICadesSignatureValidator
     }
 
     private static bool ValidateArchiveTimestamp(
-        byte[] cmsBytes, CmsSignedData cmsData, List<string> errors, List<string> warnings)
+        byte[] cmsBytes, byte[] originalData, CmsSignedData cmsData, List<string> errors, List<string> warnings)
     {
         byte[]? archiveToken = cmsData.ArchiveTimestampToken;
         if (archiveToken is null)
@@ -346,25 +346,7 @@ public sealed class CadesSignatureValidator : ICadesSignatureValidator
 
         try
         {
-            // Parse the archive timestamp from the CMS
-            // The archive timestamp token covers the complete CMS
-            // including all unsigned attributes
-
-            // Verify the timestamp token structure
-            var tsaCerts = TsaCertificateExtractor.ExtractCertificates(archiveToken);
-            if (tsaCerts.Count == 0)
-            {
-                warnings.Add("CAdES-B-LTA: Archive timestamp token contains no TSA certificates.");
-                return false;
-            }
-
-            // The token must be a valid RFC 3161 TimeStampToken
-            // We validate by attempting to parse it
-            // Full validation would require verifying the TSA certificate chain
-            // and cryptographic signature on the timestamp
-
-            warnings.Add("CAdES-B-LTA: Archive timestamp present but cryptographic validation requires TSA trust configuration.");
-            return true;
+            return CadesArchiveTimestampV3.Validate(cmsBytes, originalData, warnings);
         }
         // S2221: intentional -- validation pipeline converts exceptions to error messages
         catch (Exception ex)

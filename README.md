@@ -39,13 +39,13 @@ SimpleSign is a .NET library for creating and validating **PAdES** (ETSI EN 319 
 
 ---
 
-## What's New in v0.8.0
+## What's New in v0.9.0
 
-**Cross-format signing contract** — a single `AdesBaselineProfile` model (`Basic`, `Timestamped`, `LongTerm`, `Archive`) now drives all three signing formats through `PadesSigner`, `CadesSigner`, and `XadesSigner`. Levels are cumulative and encoded in the types; the requested level is a postcondition — `SignAsync()` enforces it strictly, while `SignWithDetailsAsync()` can downgrade and surface structured warnings.
+**Verifiable AdES level fulfillment** — a requested B-T/B-LT/B-LTA level now describes the artifact actually produced. Timestamp tokens are bound to their RFC 3161 request, LTV material is checked per certificate path, and result flags are derived from final-artifact inspection.
 
-**Truthful results** — every signing returns an `ISigningResult` with `RequestedLevel`, `AchievedLevel`, `HasSignatureTimestamp`, `HasLongTermValidationMaterial`, `HasArchiveTimestamp`, and `SigningWarning`s instead of guessable feature flags.
+**Standards-defined archival coverage** — CAdES uses ETSI `archiveTimestampV3` with `ATSHashIndexV3` inside the archive timestamp token. XAdES uses the ETSI archive preimage and XMLDSig reference processing, including same-document distributed unsigned properties and preceding counter-signatures.
 
-**Explicit external signing** — `IExternalSigner.SignAsync(ExternalSigningRequest, …)` carries the payload kind, resolved algorithms, and operation ID; `FuncExternalSigner` adapts legacy delegates. Works with HSMs, cloud KMS, and A3 tokens across all formats.
+**Resolved external signing** — `IExternalSigner.SignAsync(ExternalSigningRequest, …)` receives coherent digest, scheme, operation ID and RSA-PSS parameters. RSA and ECDSA output is verified against the public certificate before packaging.
 
 **Provider-based HTTP configuration** — `.WithHttpClientProvider(...)` plus scoped providers in `TimestampOptions`, `LongTermValidationOptions`, and `ArchiveTimestampOptions`, with deterministic precedence.
 
@@ -53,9 +53,9 @@ SimpleSign is a .NET library for creating and validating **PAdES** (ETSI EN 319 
 
 **CLI improvements** — JSON output for `cades validate` / `xades validate` (`--json`) and stdin/pipe input (path `-`) for all sign and validate commands.
 
-**Hardened signing invariants** — expired certificates are rejected before signing in every format, pre-cancelled tokens never reach the external signer, and `WithSigningTime` now also drives the `/M` entry of the PAdES signature dictionary (including existing fields).
+**Hardened signing invariants** — certificates are checked against both `NotBefore` and `NotAfter`; PAdES inputs and configured binary/collection values are snapshotted; stream-backed PAdES builders are single-use and write transactionally.
 
-See the [full changelog](CHANGELOG.md) for the detailed list, including the breaking-changes migration guide for v0.7 → v0.8.
+See the [full changelog](CHANGELOG.md) and the [v0.8 → v0.9 migration guide](docs/migration/v0.8-to-v0.9.md).
 
 ---
 
@@ -119,6 +119,7 @@ File.WriteAllBytes("contract-signed.pdf", signedPdf);
 ### Validate Signatures
 
 ```csharp
+using SimpleSign.Core.Validation;
 using SimpleSign.PAdES.Validation;
 
 var validator = new PdfSignatureValidator(new ValidationOptions
@@ -148,6 +149,7 @@ Supports both **detached** (.p7s) and **enveloped** (.p7m) content types:
 
 ```csharp
 using SimpleSign.CAdES;
+using SimpleSign.Core.Validation;
 using SimpleSign.Core.Signing;
 
 var data = File.ReadAllBytes("document.pdf");
@@ -303,13 +305,19 @@ Console.WriteLine($"Valid: {result.IsValid}");
 Sign PDFs with full European standard compliance, from basic signatures to long-term archival:
 
 ```csharp
+using SimpleSign.Core.Extensions;
 using SimpleSign.Core.Signing;
 using SimpleSign.PAdES;
 
 var signed = await PadesSigner
     .Document(pdfBytes)
     .WithCertificate(cert)
-    .WithMetadata(signerName: "Jane Doe", reason: "Approval", location: "New York")
+    .WithMetadata(new SignatureMetadata
+    {
+        SignerName = "Jane Doe",
+        Reason = "Approval",
+        Location = "New York"
+    })
     .WithLevel(AdesBaselineProfile.Archive(      // PAdES B-LTA — valid for decades
         new TimestampOptions(new Uri("http://timestamp.digicert.com")),
         new LongTermValidationOptions()))         // Embeds CRL/OCSP for offline validation
@@ -326,11 +334,11 @@ var signed = await PadesSigner
 | Document certification (DocMDP) | `.AsCertification(level)` |
 | PDF/A preservation | `.WithPdfAPreservation()` |
 | Visible signature with QR code | `.WithAppearance(appearance)` |
-| External signer (HSM, KMS) | `.WithExternalSigner(cert, signer)` (`IExternalSigner` / `FuncExternalSigner`) |
+| External signer (HSM, KMS) | `.WithExternalSigner(cert, signer)` (`IExternalSigner`) |
 | Custom signing time | `.WithSigningTime(dateTimeOffset)` — drives the signature dictionary `/M` entry |
 | Custom HTTP client | `.WithHttpClientProvider(provider)` / scoped providers in `TimestampOptions` |
 | Existing field | `.WithExistingField("SignHere")` |
-| Deferred (2-phase) | `DeferredSigner.PrepareAsync()` → `CompleteAsync()` |
+| Deferred (2-phase) | `Document(pdf).WithCertificate(cert).WithSessionIntegrityKey(key).PrepareAsync()` → `Resume(session, key).CompleteAsync()` |
 | Batch (parallel) | `BatchSigner.Create(cert).Build()` |
 
 #### Signature Appearance
@@ -394,7 +402,12 @@ Sign multiple documents in parallel with shared resources:
 
 ```csharp
 var batch = BatchSigner.Create(cert)
-    .WithMetadata(signerName: "Jane Doe", reason: "Batch approval")
+    .WithFieldOptions(new SignatureFieldOptions
+    {
+        SignerName = "Jane Doe",
+        Reason = "Batch approval"
+    })
+    .WithLevel(AdesBaselineProfile.Basic())
     .WithMaxConcurrency(4)
     .Build();
 
@@ -404,9 +417,12 @@ byte[] signed = await batch.SignAsync(pdfBytes);
 // Or stream results as they complete
 await foreach (var result in batch.SignAllAsync(inputs))
 {
-    if (result.PdfBytes is not null)
+    if (result.SignedPdf is not null)
         Console.WriteLine($"{result.Id}: signed");
 }
+
+// Results are ordered by completion, not source order. Breaking the enumeration
+// cancels pending batch work and the cancellation-aware input source.
 
 // Access aggregate stats after signing
 Console.WriteLine($"Success: {batch.SuccessCount}, Fail: {batch.FailureCount}, Avg: {batch.AverageElapsedMs:F0}ms");
@@ -417,29 +433,24 @@ Console.WriteLine($"Success: {batch.SuccessCount}, Fail: {batch.FailureCount}, A
 For web applications where the signing key is on a client device:
 
 ```csharp
-// Server: prepare the hash
-var prepared = await DeferredSigner.PrepareAsync(pdfBytes, cert);
+var builder = DeferredSigner.Document(pdfBytes)
+    .WithCertificate(cert, chain)
+    .WithSessionIntegrityKey(sessionIntegrityKey)
+    .WithLevel(AdesBaselineProfile.Timestamped(
+        new TimestampOptions(new Uri("https://tsa.example"))))
+    .WithHttpClientProvider(httpClientProvider);
+
+// Server: prepare the signed attributes
+var prepared = await builder.PrepareAsync();
 byte[] hashToSign = prepared.HashToSign;
 
 // Client: sign the hash with the private key (RSA PKCS#1 v1.5, ECDSA, etc.)
 byte[] signature = SignWithClientKey(hashToSign);
 
-// Server: embed the signature
-byte[] signedPdf = await DeferredSigner.CompleteAsync(prepared.SessionData, signature);
-```
-
-#### Builder API (Fluent)
-
-```csharp
-// Two-phase with builder
-var builder = new DeferredSignerBuilder(pdfBytes, cert)
-    .WithSignerName("Jane Doe")
-    .WithReason("Contract approval")
-    .WithTimestamp("http://timestamp.digicert.com");
-
-var prepared = await builder.PrepareAsync();
-byte[] signature = await SignExternallyAsync(prepared.HashToSign);
-byte[] signedPdf = await builder.CompleteAsync(prepared.SessionData, signature);
+// Server: load the persisted session, then validate and embed the raw signature.
+byte[] signedPdf = await DeferredSigner.Resume(prepared.SessionData, sessionIntegrityKey)
+    .WithHttpClientProvider(httpClientProvider)
+    .CompleteAsync(signature);
 ```
 
 ### TSA Connection Pool
@@ -683,7 +694,7 @@ contract-signed.pdf  1/1 valid
 |---|---|
 | Custom trust anchors | `ITrustAnchorProvider` |
 | Custom hash algorithm | `HashAlgorithmName` parameter |
-| External signer (HSM/KMS) | `IExternalSigner` / `FuncExternalSigner` callback |
+| External signer (HSM/KMS) | `IExternalSigner` implementation |
 | Custom HTTP | `IHttpClientProvider` / `SingleClientProvider` / `HttpClient` injection |
 | Custom logging | `ILogger<T>` injection |
 | Country extensions | `ICountryExtension` |

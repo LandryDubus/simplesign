@@ -1,4 +1,4 @@
-← [Back to README](../README.md)
+← [Back to README](https://github.com/eupassarin/SimpleSign#readme)
 
 # Interoperability
 
@@ -78,6 +78,7 @@ SimpleSign is built to survive the real world — legacy PDFs from Adobe, iText,
 | Test File | Scenarios |
 |-----------|-----------|
 | `EtsiCorpusTests.cs` | PAdES-LT/LTA multi-revision (DSS + archive timestamps), Belgian eID (`BG_BOR`), German (`DE_SCI`), French (`FR_CS`), Spanish (`doc-firmado`), Hungarian (`HU_MIC`), known-bad fixtures (DSS-1683 SHA-1 regression) |
+| `ExternalAdesCorpusTests.cs` | EU DSS CAdES/XAdES B-T, validation material, and B-LTA fixtures; offline SHA-256 provenance checks; positive ETSI archive-preimage coverage, detached XAdES payload binding, and negative modified-index/copied-token cases |
 
 ## Cross-Validation Matrix
 
@@ -97,4 +98,4 @@ SimpleSign is built to survive the real world — legacy PDFs from Adobe, iText,
 
 ## Docker-Based CI Tests
 
-All interop tests run in Docker containers in CI (EU DSS, iText validator, PDFBox, veraPDF, OpenSSL, pyHanko, xmlsec1) — see [`interop/`](../interop/) for details.
+All interop tests run in Docker containers in CI (EU DSS, iText validator, PDFBox, veraPDF, OpenSSL, pyHanko, xmlsec1) — see [`tests/interop/`](https://github.com/eupassarin/SimpleSign/tree/main/tests/interop) for details.

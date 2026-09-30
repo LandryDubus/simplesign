@@ -14,14 +14,16 @@ namespace SimpleSign.Core.Tests.Validation;
 [Trait("Category", "Unit")]
 public sealed class CertificateChainUtilityTests
 {
-    private static byte[] BuildAiaExtensionBytes(string url)
+    private static byte[] BuildAiaExtensionBytes(
+        string url,
+        string accessMethodOid = "1.3.6.1.5.5.7.48.2")
     {
         AsnWriter asnWriter = new AsnWriter(AsnEncodingRules.DER);
         using (asnWriter.PushSequence())
         {
             using (asnWriter.PushSequence())
             {
-                asnWriter.WriteObjectIdentifier("1.3.6.1.5.5.7.48.2");
+                asnWriter.WriteObjectIdentifier(accessMethodOid);
                 asnWriter.WriteCharacterString(UniversalTagNumber.IA5String, url, new Asn1Tag(TagClass.ContextSpecific, 6));
             }
         }
@@ -46,6 +48,16 @@ public sealed class CertificateChainUtilityTests
         List<string> list = [.. CertificateChainUtility.ExtractAiaUrls(data)];
         list.Count().ShouldBe(1);
         list[0].ShouldBe("http://example.com/ca.crt");
+    }
+
+    [Fact(DisplayName = "OCSP access locations are not treated as CA Issuers URLs")]
+    public void ExtractAiaUrls_OcspLocation_IsIgnored()
+    {
+        byte[] data = BuildAiaExtensionBytes(
+            "http://ocsp.example.com",
+            "1.3.6.1.5.5.7.48.1");
+
+        CertificateChainUtility.ExtractAiaUrls(data).ShouldBeEmpty();
     }
 
     [Fact(DisplayName = "Invalid ASN.1 falls back to text search")]
@@ -117,14 +129,14 @@ public sealed class CertificateChainUtilityTests
         // Arrange: build a 3-level chain — leaf → intermediate → root
         // leaf.AIA → "http://aia.test/intermediate.crt" (serves intermediate DER)
         // intermediate.AIA → "http://aia.test/root.crt"    (serves root DER)
-        using var root = TestCertificateFactory.CreateCaCert("CN=Root CA, O=Tests, C=BR");
-        using var intermediate = CreateCertWithAia("http://aia.test/root.crt");
-        using var leaf = CreateCertWithAia("http://aia.test/intermediate.crt");
+        using var pki = new SyntheticPki(
+            intermediateCaIssuersUrl: "http://aia.test/root.crt",
+            leafCaIssuersUrl: "http://aia.test/intermediate.crt");
 
         var urlMap = new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase)
         {
-            ["http://aia.test/intermediate.crt"] = intermediate.RawData,
-            ["http://aia.test/root.crt"] = root.RawData,
+            ["http://aia.test/intermediate.crt"] = pki.IntermediateCa.RawData,
+            ["http://aia.test/root.crt"] = pki.RootCa.RawData,
         };
 
         using var httpClient = new HttpClient(new MockHttpHandler(async req =>
@@ -140,15 +152,14 @@ public sealed class CertificateChainUtilityTests
 
         // Act
         var result = await CertificateChainUtility.DownloadAiaCertsAsync(
-            httpClient, leaf, null, warnings, CancellationToken.None);
+            httpClient, pki.Leaf, null, warnings, CancellationToken.None);
 
         // Assert: BFS should have followed leaf→intermediate→root (both levels)
-        result.ShouldContain(c => c.Thumbprint == intermediate.Thumbprint,
+        result.ShouldContain(c => c.Thumbprint == pki.IntermediateCa.Thumbprint,
             "first-level AIA cert (intermediate) must be downloaded");
-        result.ShouldContain(c => c.Thumbprint == root.Thumbprint,
+        result.ShouldContain(c => c.Thumbprint == pki.RootCa.Thumbprint,
             "second-level AIA cert (root) must be chased recursively");
-        // Warnings may include issuer mismatch for the intermediate→root hop since
-        // the root's subject ("CN=Root CA") differs from intermediate's issuer ("CN=AIA Test")
+        warnings.ShouldBeEmpty();
     }
 
     [Fact(DisplayName = "Certificate without AIA extension returns empty list")]
@@ -160,16 +171,16 @@ public sealed class CertificateChainUtilityTests
         (await CertificateChainUtility.DownloadAiaCertsAsync(httpClient, cert, null, warnings, CancellationToken.None)).ShouldBeEmpty("");
     }
 
-    [Fact(DisplayName = "Network failure downloading AIA adds warning")]
-    public async Task DownloadAiaCertsAsync_NetworkFailure_AddsWarning()
+    [Fact(DisplayName = "Cancellation while downloading AIA propagates")]
+    public async Task DownloadAiaCertsAsync_Cancellation_Propagates()
     {
         using X509Certificate2 cert = CreateCertWithAia("http://example.com/ca.crt");
         using HttpClient httpClient = MockHttpHandler.Failing();
         using CancellationTokenSource cts = new CancellationTokenSource();
         cts.Cancel();
         List<string> warnings = new List<string>();
-        await CertificateChainUtility.DownloadAiaCertsAsync(httpClient, cert, null, warnings, cts.Token);
-        warnings.ShouldNotBeEmpty();
-        warnings[0].ShouldContain("example.com/ca.crt");
+        await Should.ThrowAsync<OperationCanceledException>(() =>
+            CertificateChainUtility.DownloadAiaCertsAsync(httpClient, cert, null, warnings, cts.Token));
+        warnings.ShouldBeEmpty();
     }
 }

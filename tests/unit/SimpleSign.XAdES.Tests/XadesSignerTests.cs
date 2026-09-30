@@ -2,7 +2,9 @@ using System.Formats.Asn1;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using Shouldly;
+using SimpleSign.CAdES;
 using SimpleSign.Core.Constants;
+using SimpleSign.Core.Crypto;
 using SimpleSign.Core.Signing;
 using SimpleSign.TestHelpers;
 using SimpleSign.XAdES;
@@ -100,7 +102,7 @@ public sealed class XadesSignerTests
         byte[] xmlBytes = System.Text.Encoding.UTF8.GetBytes(xml);
 
         byte[] signed = await XadesSigner.Document(xmlBytes)
-            .WithExternalSigner(s_cert, new FuncExternalSigner(
+            .WithExternalSigner(s_cert, new DelegatingExternalSigner(
                 async data =>
                 {
                     using var rsa = s_cert.GetRSAPrivateKey()!;
@@ -252,6 +254,25 @@ public sealed class XadesSignerTests
     }
 
     [Fact]
+    public async Task SignAsync_Timestamped_RequestsCanonicalSignatureValueFromTsa()
+    {
+        string xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?><doc>canonical timestamp</doc>";
+        var tsaFactory = new CapturingTimestampFactory();
+
+        byte[] signed = await new XadesSignerBuilder(System.Text.Encoding.UTF8.GetBytes(xml), tsaFactory)
+            .WithCertificate(s_cert)
+            .WithLevel(AdesBaselineProfile.Timestamped(
+                new TimestampOptions(new Uri("https://tsa.example.test"))))
+            .SignAsync();
+
+        byte[] canonicalInput = XadesSignatureBuilder.CreateSignatureTimeStampInput(signed);
+        tsaFactory.LastTimestampInput.ShouldBe(canonicalInput);
+
+        byte[] token = XadesSignatureBuilder.ExtractSignatureTimeStamp(signed)!;
+        TimestampClient.ValidateTimestampToken(token, canonicalInput, HashAlgorithmName.SHA256);
+    }
+
+    [Fact]
     public async Task Validate_SignatureTimeStampHashMismatch_ReturnsFalse()
     {
         string xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?><doc>bad ts</doc>";
@@ -373,7 +394,7 @@ public sealed class XadesSignerTests
         string diag = "Errors: " + string.Join("; ", result.Errors) +
                        " | Warnings: " + string.Join("; ", result.Warnings);
         result.IsLtvDataValid.ShouldBe(true, diag);
-        result.DetectedLevel.ShouldBe(XadesLevel.LongTerm);
+        result.DetectedLevel.ShouldBe(AdesBaselineLevel.LongTerm);
     }
 
     private static byte[] EmbedMalformedTimestamp(byte[] signedXml)
@@ -412,20 +433,20 @@ public sealed class XadesSignerTests
 
     private static byte[] EmbedSyntheticTimestamp(byte[] signedXml, bool tamperHash = false)
     {
-        // Parse the signed XML to extract the SignatureValue
+        // Build the ETSI SignatureTimeStamp input before adding unsigned properties.
         var doc = new System.Xml.XmlDocument { PreserveWhitespace = true };
         doc.Load(new MemoryStream(signedXml));
         var ns = new System.Xml.XmlNamespaceManager(doc.NameTable);
         ns.AddNamespace("ds", "http://www.w3.org/2000/09/xmldsig#");
         ns.AddNamespace("xades", "http://uri.etsi.org/01903/v1.3.2#");
 
-        if (doc.SelectSingleNode("//ds:Signature/ds:SignatureValue", ns) is not System.Xml.XmlElement sigValueEl)
+        if (doc.SelectSingleNode("//ds:Signature/ds:SignatureValue", ns) is not System.Xml.XmlElement)
         {
             throw new InvalidOperationException("No SignatureValue found.");
         }
 
-        byte[] sigValueBytes = Convert.FromBase64String(sigValueEl.InnerText.Trim());
-        byte[] preImageHash = SHA256.HashData(tamperHash ? "wrong-data"u8 : sigValueBytes);
+        byte[] timestampInput = XadesSignatureBuilder.CreateSignatureTimeStampInput(signedXml);
+        byte[] preImageHash = SHA256.HashData(tamperHash ? "wrong-data"u8 : timestampInput);
 
         // Build a synthetic RFC 3161 timestamp token
         byte[] tokenBytes = BuildSyntheticTsaToken(s_tsaKey, s_tsaCert, preImageHash);
@@ -588,7 +609,7 @@ public sealed class XadesSignerTests
         string diag = "Errors: " + string.Join("; ", result.Errors) +
                        " | Warnings: " + string.Join("; ", result.Warnings);
         result.HasValidSignatureTimeStamp.ShouldBe(true, diag);
-        result.DetectedLevel.ShouldBe(XadesLevel.Timestamped);
+        result.DetectedLevel.ShouldBe(AdesBaselineLevel.Timestamped);
     }
 
     [Fact]
@@ -651,11 +672,11 @@ public sealed class XadesSignerTests
         string diag = "Errors: " + string.Join("; ", result.Errors) +
                        " | Warnings: " + string.Join("; ", result.Warnings);
         result.IsLtvDataValid.ShouldBe(true, diag);
-        result.DetectedLevel.ShouldBe(XadesLevel.LongTerm);
+        result.DetectedLevel.ShouldBe(AdesBaselineLevel.LongTerm);
     }
 
     [Fact]
-    public async Task SignThenValidate_ArchiveLevel_ReturnsValidArchiveTimeStamp()
+    public async Task Validate_ArchiveTimeStampWithWrongPreimage_ReturnsFalse()
     {
         string xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?><doc>b-lta test</doc>";
         byte[] xmlBytes = System.Text.Encoding.UTF8.GetBytes(xml);
@@ -758,8 +779,304 @@ public sealed class XadesSignerTests
 
         string diag = "Errors: " + string.Join("; ", result.Errors) +
                        " | Warnings: " + string.Join("; ", result.Warnings);
-        result.HasValidArchiveTimeStamp.ShouldBe(true, diag);
-        result.DetectedLevel.ShouldBe(XadesLevel.Archive);
+        result.HasValidArchiveTimeStamp.ShouldBe(false, diag);
+        result.DetectedLevel.ShouldBe(AdesBaselineLevel.Archive);
+    }
+
+    [Fact]
+    public async Task ArchiveTimeStampInput_ReferenceCanonicalizationWithComments_IsHonored()
+    {
+        byte[] signed = await XadesSigner.Document(
+                System.Text.Encoding.UTF8.GetBytes("<doc><!--covered only by reference C14N--><item>value</item></doc>"))
+            .WithCertificate(s_cert)
+            .SignAsync();
+        byte[] archiveReady = XadesSignatureBuilder.EmbedArchiveTimeStamp(signed, [0x01]);
+
+        byte[] defaultInput = XadesSignatureBuilder.CreateArchiveTimeStampInput(archiveReady);
+
+        var doc = new System.Xml.XmlDocument { PreserveWhitespace = true };
+        doc.Load(new MemoryStream(archiveReady));
+        var ns = new System.Xml.XmlNamespaceManager(doc.NameTable);
+        ns.AddNamespace("ds", XmlDSigUrls.DsNamespace);
+        var reference = doc.SelectSingleNode("//ds:Signature/ds:SignedInfo/ds:Reference", ns) as System.Xml.XmlElement;
+        if (reference is null)
+        {
+            throw new InvalidOperationException("SignedInfo reference not found.");
+        }
+
+        var transforms = reference.SelectSingleNode("ds:Transforms", ns) as System.Xml.XmlElement;
+        if (transforms is null)
+        {
+            transforms = doc.CreateElement("Transforms", XmlDSigUrls.DsNamespace);
+            reference.PrependChild(transforms);
+        }
+
+        System.Xml.XmlElement? canonicalization = null;
+        foreach (System.Xml.XmlElement transform in transforms.ChildNodes.OfType<System.Xml.XmlElement>())
+        {
+            if (transform.GetAttribute("Algorithm") is XmlDSigUrls.ExcC14N or
+                XmlDSigUrls.ExcC14NWithComments or XmlDSigUrls.C14N or XmlDSigUrls.C14NWithComments)
+            {
+                canonicalization = transform;
+                break;
+            }
+        }
+
+        canonicalization ??= doc.CreateElement("Transform", XmlDSigUrls.DsNamespace);
+        canonicalization.SetAttribute("Algorithm", XmlDSigUrls.C14NWithComments);
+        if (canonicalization.ParentNode is null)
+        {
+            transforms.AppendChild(canonicalization);
+        }
+        using var output = new MemoryStream();
+        doc.Save(output);
+
+        byte[] referenceC14NInput = XadesSignatureBuilder.CreateArchiveTimeStampInput(output.ToArray());
+
+        referenceC14NInput.ShouldNotBe(defaultInput);
+    }
+
+    [Fact]
+    public async Task ArchiveTimeStampInput_MultipleSignatures_UsesExplicitTargetSignature()
+    {
+        byte[] signed = await XadesSigner.Document(System.Text.Encoding.UTF8.GetBytes("<doc>multi-signature</doc>"))
+            .WithCertificate(s_cert)
+            .SignAsync();
+        byte[] archiveReady = XadesSignatureBuilder.EmbedArchiveTimeStamp(signed, [0x01]);
+
+        var doc = new System.Xml.XmlDocument { PreserveWhitespace = true };
+        doc.Load(new MemoryStream(archiveReady));
+        var ns = new System.Xml.XmlNamespaceManager(doc.NameTable);
+        ns.AddNamespace("ds", XmlDSigUrls.DsNamespace);
+        var signature = doc.SelectSingleNode("//ds:Signature", ns) as System.Xml.XmlElement;
+        if (signature is null)
+        {
+            throw new InvalidOperationException("Signature element not found.");
+        }
+
+        string signatureId = signature.GetAttribute("Id");
+        var secondSignature = (System.Xml.XmlElement)signature.CloneNode(deep: true);
+        secondSignature.SetAttribute("Id", signatureId + "-second");
+        doc.DocumentElement!.AppendChild(secondSignature);
+        using var output = new MemoryStream();
+        doc.Save(output);
+        byte[] multiSignatureXml = output.ToArray();
+
+        Should.Throw<NotSupportedException>(() => XadesSignatureBuilder.CreateArchiveTimeStampInput(multiSignatureXml));
+        byte[] targetInput = XadesSignatureBuilder.CreateArchiveTimeStampInput(
+            multiSignatureXml,
+            signatureId: signatureId);
+
+        targetInput.ShouldNotBeEmpty();
+    }
+
+    [Fact]
+    public async Task SignatureTimeStamp_MultipleSignatures_UsesExplicitTargetSignature()
+    {
+        byte[] signed = await XadesSigner.Document(System.Text.Encoding.UTF8.GetBytes("<doc>multi timestamp</doc>"))
+            .WithCertificate(s_cert)
+            .SignAsync();
+        var doc = new System.Xml.XmlDocument { PreserveWhitespace = true };
+        doc.Load(new MemoryStream(signed));
+        var ns = new System.Xml.XmlNamespaceManager(doc.NameTable);
+        ns.AddNamespace("ds", XmlDSigUrls.DsNamespace);
+        var signature = doc.SelectSingleNode("//ds:Signature", ns) as System.Xml.XmlElement;
+        if (signature is null)
+        {
+            throw new InvalidOperationException("Signature element not found.");
+        }
+
+        string signatureId = signature.GetAttribute("Id");
+        var secondSignature = (System.Xml.XmlElement)signature.CloneNode(deep: true);
+        secondSignature.SetAttribute("Id", signatureId + "-second");
+        doc.DocumentElement!.AppendChild(secondSignature);
+        using var output = new MemoryStream();
+        doc.Save(output);
+        byte[] multiSignatureXml = output.ToArray();
+
+        Should.Throw<NotSupportedException>(() => XadesSignatureBuilder.CreateSignatureTimeStampInput(multiSignatureXml));
+        byte[] input = XadesSignatureBuilder.CreateSignatureTimeStampInput(multiSignatureXml, signatureId);
+        byte[] timestamped = XadesSignatureBuilder.EmbedSignatureTimeStamp(multiSignatureXml, [0x01, 0x02], signatureId);
+
+        XadesSignatureBuilder.ExtractSignatureTimeStamp(timestamped, signatureId).ShouldBe([0x01, 0x02]);
+        input.ShouldNotBeEmpty();
+    }
+
+    [Fact]
+    public async Task HasLtvData_RequiresEveryCollectedCertificateAndRevocationObject()
+    {
+        byte[] signed = await XadesSigner.Document(System.Text.Encoding.UTF8.GetBytes("<doc>ltv inspection</doc>"))
+            .WithCertificate(s_cert)
+            .SignAsync();
+        var evidence = new LtvCollectionResult(
+            CertificateRawData: [[0x30, 0x01, 0x01], [0x30, 0x01, 0x02]],
+            OcspResponses: [[0x30, 0x01, 0x03]],
+            Crls: [[0x30, 0x01, 0x04]],
+            CertificateEvidence:
+            [
+                new LtvCertificateEvidence("signer", true) { RevocationEvidenceKind = LtvRevocationEvidenceKind.Ocsp },
+                new LtvCertificateEvidence("tsa", true) { RevocationEvidenceKind = LtvRevocationEvidenceKind.Crl },
+            ]);
+        byte[] withLtv = XadesSignatureBuilder.EmbedLtvData(signed, evidence);
+
+        XadesSignatureBuilder.HasLtvData(withLtv, evidence).ShouldBeTrue();
+
+        var doc = new System.Xml.XmlDocument { PreserveWhitespace = true };
+        doc.Load(new MemoryStream(withLtv));
+        var ns = new System.Xml.XmlNamespaceManager(doc.NameTable);
+        ns.AddNamespace("xades", XadesUris.XadesNamespace);
+        var crl = doc.SelectSingleNode("//xades:EncapsulatedCRLValue", ns);
+        if (crl?.ParentNode is null)
+        {
+            throw new InvalidOperationException("Embedded CRL not found.");
+        }
+
+        crl.ParentNode.RemoveChild(crl);
+        using var output = new MemoryStream();
+        doc.Save(output);
+
+        XadesSignatureBuilder.HasLtvData(output.ToArray(), evidence).ShouldBeFalse();
+        XadesSignatureBuilder.HasLtvData("<not-xml"u8.ToArray(), evidence).ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task ArchiveTimeStampInput_DistributedProperties_UsesIncludesInDeclaredOrderAndExcludesComments()
+    {
+        byte[] signed = await XadesSigner.Document(System.Text.Encoding.UTF8.GetBytes("<doc>distributed archive</doc>"))
+            .WithCertificate(s_cert)
+            .SignAsync();
+        byte[] archiveReady = XadesSignatureBuilder.EmbedArchiveTimeStamp(signed, [0x01]);
+
+        var doc = new System.Xml.XmlDocument { PreserveWhitespace = true };
+        doc.Load(new MemoryStream(archiveReady));
+        var ns = new System.Xml.XmlNamespaceManager(doc.NameTable);
+        ns.AddNamespace("ds", XmlDSigUrls.DsNamespace);
+        ns.AddNamespace("xades", XadesUris.XadesNamespace);
+        ns.AddNamespace("xades141", XadesUris.Xades141Namespace);
+        var signature = doc.SelectSingleNode("//ds:Signature", ns) as System.Xml.XmlElement;
+        var archive = doc.SelectSingleNode("//xades141:ArchiveTimeStamp", ns) as System.Xml.XmlElement;
+        if (signature is null || archive is null)
+        {
+            throw new InvalidOperationException("Archive signature elements not found.");
+        }
+
+        var distributedObject = doc.CreateElement("Object", XmlDSigUrls.DsNamespace);
+        var distributedQualifyingProperties = doc.CreateElement("QualifyingProperties", XadesUris.XadesNamespace);
+        var distributedUnsignedProperties = doc.CreateElement("UnsignedProperties", XadesUris.XadesNamespace);
+        var distributedSignatureProperties = doc.CreateElement("UnsignedSignatureProperties", XadesUris.XadesNamespace);
+        var firstProperty = doc.CreateElement("CertificateValues", XadesUris.XadesNamespace);
+        firstProperty.SetAttribute("Id", "distributed-first");
+        firstProperty.AppendChild(doc.CreateComment("comments must not affect distributed archive input"));
+        firstProperty.AppendChild(doc.CreateTextNode("first"));
+        var secondProperty = doc.CreateElement("RevocationValues", XadesUris.XadesNamespace);
+        secondProperty.SetAttribute("Id", "distributed-second");
+        secondProperty.InnerText = "second";
+        distributedSignatureProperties.AppendChild(firstProperty);
+        distributedSignatureProperties.AppendChild(secondProperty);
+        distributedUnsignedProperties.AppendChild(distributedSignatureProperties);
+        distributedQualifyingProperties.AppendChild(distributedUnsignedProperties);
+        distributedObject.AppendChild(distributedQualifyingProperties);
+        signature.AppendChild(distributedObject);
+
+        var firstInclude = doc.CreateElement("Include", XadesUris.XadesNamespace);
+        firstInclude.SetAttribute("URI", "#distributed-first");
+        var secondInclude = doc.CreateElement("Include", XadesUris.XadesNamespace);
+        secondInclude.SetAttribute("URI", "#distributed-second");
+        archive.PrependChild(secondInclude);
+        archive.PrependChild(firstInclude);
+
+        using var withComment = new MemoryStream();
+        doc.Save(withComment);
+        byte[] inputWithComment = XadesSignatureBuilder.CreateArchiveTimeStampInput(withComment.ToArray());
+
+        firstProperty.RemoveChild(firstProperty.FirstChild!);
+        using var withoutComment = new MemoryStream();
+        doc.Save(withoutComment);
+        byte[] inputWithoutComment = XadesSignatureBuilder.CreateArchiveTimeStampInput(withoutComment.ToArray());
+        inputWithComment.ShouldBe(inputWithoutComment);
+
+        archive.RemoveChild(firstInclude);
+        archive.RemoveChild(secondInclude);
+        archive.PrependChild(firstInclude);
+        archive.PrependChild(secondInclude);
+        using var reversed = new MemoryStream();
+        doc.Save(reversed);
+        byte[] reversedInput = XadesSignatureBuilder.CreateArchiveTimeStampInput(reversed.ToArray());
+        reversedInput.ShouldNotBe(inputWithoutComment);
+    }
+
+    [Fact]
+    public async Task ArchiveTimeStampInput_DistributedProperties_RejectsExternalIncludes()
+    {
+        byte[] signed = await XadesSigner.Document(System.Text.Encoding.UTF8.GetBytes("<doc>external include</doc>"))
+            .WithCertificate(s_cert)
+            .SignAsync();
+        byte[] archiveReady = XadesSignatureBuilder.EmbedArchiveTimeStamp(signed, [0x01]);
+
+        var doc = new System.Xml.XmlDocument { PreserveWhitespace = true };
+        doc.Load(new MemoryStream(archiveReady));
+        var ns = new System.Xml.XmlNamespaceManager(doc.NameTable);
+        ns.AddNamespace("xades", XadesUris.XadesNamespace);
+        ns.AddNamespace("xades141", XadesUris.Xades141Namespace);
+        var archive = doc.SelectSingleNode("//xades141:ArchiveTimeStamp", ns) as System.Xml.XmlElement;
+        if (archive is null)
+        {
+            throw new InvalidOperationException("ArchiveTimeStamp not found.");
+        }
+
+        var include = doc.CreateElement("Include", XadesUris.XadesNamespace);
+        include.SetAttribute("URI", "https://example.test/properties.xml#validation-values");
+        archive.PrependChild(include);
+        using var output = new MemoryStream();
+        doc.Save(output);
+
+        Should.Throw<NotSupportedException>(() => XadesSignatureBuilder.CreateArchiveTimeStampInput(output.ToArray()));
+    }
+
+    [Fact]
+    public async Task ArchiveTimeStampInput_PrecedingCounterSignature_IsCovered()
+    {
+        byte[] signed = await XadesSigner.Document(System.Text.Encoding.UTF8.GetBytes("<doc>counter signature</doc>"))
+            .WithCertificate(s_cert)
+            .SignAsync();
+        byte[] archiveReady = XadesSignatureBuilder.EmbedArchiveTimeStamp(signed, [0x01]);
+
+        var doc = new System.Xml.XmlDocument { PreserveWhitespace = true };
+        doc.Load(new MemoryStream(archiveReady));
+        var ns = new System.Xml.XmlNamespaceManager(doc.NameTable);
+        ns.AddNamespace("ds", XmlDSigUrls.DsNamespace);
+        ns.AddNamespace("xades", XadesUris.XadesNamespace);
+        ns.AddNamespace("xades141", XadesUris.Xades141Namespace);
+        var signature = doc.SelectSingleNode("//ds:Signature", ns) as System.Xml.XmlElement;
+        var archive = doc.SelectSingleNode("//xades141:ArchiveTimeStamp", ns) as System.Xml.XmlElement;
+        if (signature is null || archive?.ParentNode is not System.Xml.XmlElement unsignedProperties)
+        {
+            throw new InvalidOperationException("Archive signature elements not found.");
+        }
+
+        var counterSignature = doc.CreateElement("CounterSignature", XadesUris.XadesNamespace);
+        var nestedSignature = doc.CreateElement("Signature", XmlDSigUrls.DsNamespace);
+        nestedSignature.SetAttribute("Id", "counter-signature");
+        var nestedSignatureValue = doc.CreateElement("SignatureValue", XmlDSigUrls.DsNamespace);
+        nestedSignatureValue.InnerText = Convert.ToBase64String([0x01, 0x02, 0x03]);
+        nestedSignature.AppendChild(nestedSignatureValue);
+        counterSignature.AppendChild(nestedSignature);
+        unsignedProperties.InsertBefore(counterSignature, archive);
+
+        using var first = new MemoryStream();
+        doc.Save(first);
+        byte[] firstInput = XadesSignatureBuilder.CreateArchiveTimeStampInput(
+            first.ToArray(),
+            signatureId: signature.GetAttribute("Id"));
+
+        nestedSignatureValue.InnerText = Convert.ToBase64String([0x04, 0x05, 0x06]);
+        using var second = new MemoryStream();
+        doc.Save(second);
+        byte[] secondInput = XadesSignatureBuilder.CreateArchiveTimeStampInput(
+            second.ToArray(),
+            signatureId: signature.GetAttribute("Id"));
+
+        firstInput.ShouldNotBe(secondInput);
     }
 
     [Fact]
@@ -839,7 +1156,7 @@ public sealed class XadesSignerTests
         byte[] xmlBytes = System.Text.Encoding.UTF8.GetBytes(xml);
 
         byte[] signed = await XadesSigner.Document(xmlBytes)
-            .WithExternalSigner(s_cert, new FuncExternalSigner(
+            .WithExternalSigner(s_cert, new DelegatingExternalSigner(
                 async data =>
                 {
                     using var rsa = s_cert.GetRSAPrivateKey()!;
@@ -964,7 +1281,7 @@ public sealed class XadesSignerTests
         string xml = "<?xml version=\"1.0\"?><doc>null sig</doc>";
         var ex = await Should.ThrowAsync<SigningException>(() =>
             XadesSigner.Document(System.Text.Encoding.UTF8.GetBytes(xml))
-                .WithExternalSigner(s_cert, new FuncExternalSigner(_ => Task.FromResult<byte[]>(null!)))
+                .WithExternalSigner(s_cert, new DelegatingExternalSigner(_ => Task.FromResult<byte[]>(null!)))
                 .WithSignatureAlgorithm("1.2.840.113549.1.1.11")
                 .SignAsync());
         ex.Reason.ShouldBe(SigningErrorReason.ExternalSignerReturnedEmpty);
@@ -1407,7 +1724,7 @@ public sealed class XadesSignerTests
             .WithCertificate(s_cert)
             .WithForm(XadesForm.Detached)
             .WithDataUri("file.xml")
-            .WithExternalSigner(s_cert, new FuncExternalSigner(async data =>
+            .WithExternalSigner(s_cert, new DelegatingExternalSigner(async data =>
             {
                 using RSA rsa = s_cert.GetRSAPrivateKey()!;
                 return rsa.SignData(data, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
@@ -1429,7 +1746,7 @@ public sealed class XadesSignerTests
         byte[] signed = await XadesSigner.Document(xmlBytes)
             .WithCertificate(s_cert)
             .WithForm(XadesForm.Enveloping)
-            .WithExternalSigner(s_cert, new FuncExternalSigner(async data =>
+            .WithExternalSigner(s_cert, new DelegatingExternalSigner(async data =>
             {
                 using RSA rsa = s_cert.GetRSAPrivateKey()!;
                 return rsa.SignData(data, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
@@ -1460,5 +1777,24 @@ public sealed class XadesSignerTests
         }
 
         return usp;
+    }
+
+    private sealed class CapturingTimestampFactory : ITimestampClientFactory
+    {
+        public byte[]? LastTimestampInput { get; private set; }
+
+        public ITimestampClient Create(string tsaUrl) => new CapturingTimestampClient(this);
+
+        private sealed class CapturingTimestampClient(CapturingTimestampFactory factory) : ITimestampClient
+        {
+            public Task<byte[]> GetTimestampAsync(
+                ReadOnlyMemory<byte> dataToTimestamp,
+                HashAlgorithmName hashAlgorithm,
+                CancellationToken cancellationToken = default)
+            {
+                factory.LastTimestampInput = dataToTimestamp.ToArray();
+                return Task.FromResult(TimestampTestResponseBuilder.CreateTokenForData(dataToTimestamp.Span, hashAlgorithm));
+            }
+        }
     }
 }

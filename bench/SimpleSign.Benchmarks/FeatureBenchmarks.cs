@@ -48,7 +48,7 @@ public class FeatureBenchmarks
     {
         return await PadesSigner.Document(_pdfBytes)
             .WithCertificate(_cert)
-            .WithMetadata("Benchmark Signer", "Performance test", "Lab")
+            .WithTestFieldOptions("Benchmark Signer", "Performance test", "Lab")
             .SignAsync();
     }
 
@@ -58,7 +58,7 @@ public class FeatureBenchmarks
         return await PadesSigner.Document(_pdfBytes)
             .WithCertificate(_cert)
             .WithAppearance(SignatureAppearance.Auto())
-            .WithMetadata("Benchmark Signer", "Performance test", "Lab")
+            .WithTestFieldOptions("Benchmark Signer", "Performance test", "Lab")
             .SignAsync();
     }
 

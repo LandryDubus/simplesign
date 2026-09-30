@@ -7,7 +7,7 @@ namespace SimpleSign.Contracts.Tests;
 
 /// <summary>
 /// Shared cross-format helpers for the signing contract tests: a mock TSA serving a
-/// canned RFC 3161 response and signing certificates.
+/// RFC 3161 responses bound to the received request and signing certificates.
 /// </summary>
 internal static class ContractFixtures
 {
@@ -19,15 +19,15 @@ internal static class ContractFixtures
         TestCertificateFactory.CreateSelfSignedCert(subject);
 
     internal static HttpMessageHandler BuildMockTsaHandler() =>
-        new MockHttpHandler(async _ =>
+        new MockHttpHandler(async request =>
         {
+            byte[] requestBytes = await request.Content!.ReadAsByteArrayAsync();
             var response = new HttpResponseMessage(HttpStatusCode.OK)
             {
-                Content = new ByteArrayContent(BuildFakeTimestampResponse())
+                Content = new ByteArrayContent(TimestampTestResponseBuilder.CreateForRequest(requestBytes))
             };
             response.Content.Headers.ContentType =
                 new MediaTypeHeaderValue("application/timestamp-reply");
-            await Task.CompletedTask;
             return response;
         });
 
@@ -35,38 +35,6 @@ internal static class ContractFixtures
 
     internal static HttpClient BuildFailingClient() => MockHttpHandler.Failing();
 
-    /// <summary>Returns a valid DER-encoded fake CMS token suitable for embedding.</summary>
-    internal static byte[] BuildFakeTimestampToken() => BuildFakeCmsToken();
-
-    private static byte[] BuildFakeTimestampResponse()
-    {
-        var fakeCmsToken = BuildFakeCmsToken();
-        var writer = new System.Formats.Asn1.AsnWriter(System.Formats.Asn1.AsnEncodingRules.DER);
-        using (writer.PushSequence())
-        {
-            using (writer.PushSequence())
-            {
-                writer.WriteInteger(0);
-            }
-            writer.WriteEncodedValue(fakeCmsToken);
-        }
-        return writer.Encode();
-    }
-
-    private static byte[] BuildFakeCmsToken()
-    {
-        var writer = new System.Formats.Asn1.AsnWriter(System.Formats.Asn1.AsnEncodingRules.DER);
-        using (writer.PushSequence())
-        {
-            writer.WriteObjectIdentifier("1.2.840.113549.1.7.2");
-            using (writer.PushSequence(new System.Formats.Asn1.Asn1Tag(
-                System.Formats.Asn1.TagClass.ContextSpecific, 0, true)))
-            {
-                writer.WriteOctetString([0x01, 0x02, 0x03]);
-            }
-        }
-        return writer.Encode();
-    }
 }
 
 /// <summary>Builds an <see cref="HttpClient"/> that serves the provided bytes for any request.</summary>
@@ -77,4 +45,19 @@ internal static class TestRevocationClient
         {
             Content = new ByteArrayContent(responseBytes)
         })));
+
+    internal static HttpClient BuildForUris(params (string Uri, byte[] Response)[] responses) =>
+        new(new MockHttpHandler(request =>
+        {
+            byte[]? response = responses
+                .FirstOrDefault(candidate => string.Equals(
+                    candidate.Uri, request.RequestUri?.ToString(), StringComparison.Ordinal))
+                .Response;
+            return Task.FromResult(response is null
+                ? new HttpResponseMessage(HttpStatusCode.NotFound)
+                : new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new ByteArrayContent(response)
+                });
+        }));
 }

@@ -30,10 +30,11 @@ public sealed record ArchiveTimestampOptions
         Uri? endpoint = null,
         IHttpClientProvider? httpClientProvider = null)
     {
-        if (endpoint is not null && !endpoint.IsAbsoluteUri)
+        if (endpoint is not null && (!endpoint.IsAbsoluteUri ||
+            (endpoint.Scheme != Uri.UriSchemeHttp && endpoint.Scheme != Uri.UriSchemeHttps)))
         {
             throw new ArgumentException(
-                "Archive TSA endpoint must be absolute.",
+                "Archive TSA endpoint must be an absolute HTTP(S) URI.",
                 nameof(endpoint));
         }
 

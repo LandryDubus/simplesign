@@ -43,8 +43,8 @@ public sealed class XadesEuDssInteropTests(ITestOutputHelper output)
     public async Task XadesBLT_ValidatesWithEuDss()
     {
         SkipIfDockerUnavailable();
-        using var pki = new SyntheticPki(crlDistributionPoint: "http://crl.example.com/test-ca.crl");
-        using var crlClient = TestRevocation.BuildCrlClient(pki.BuildLeafCrl());
+        using var pki = TestRevocation.CreatePki();
+        using var crlClient = TestRevocation.BuildCrlClient(pki);
         string xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?><doc><ltv>yes</ltv></doc>";
         var result = await XadesSigner.Document(System.Text.Encoding.UTF8.GetBytes(xml))
             .WithCertificate(pki.Leaf, pki.IntermediatesAndRoot())
@@ -104,8 +104,8 @@ public sealed class XadesEuDssInteropTests(ITestOutputHelper output)
     public async Task XadesBLT_Detached_ValidatesWithEuDss()
     {
         SkipIfDockerUnavailable();
-        using var pki = new SyntheticPki(crlDistributionPoint: "http://crl.example.com/test-ca.crl");
-        using var crlClient = TestRevocation.BuildCrlClient(pki.BuildLeafCrl());
+        using var pki = TestRevocation.CreatePki();
+        using var crlClient = TestRevocation.BuildCrlClient(pki);
         string xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?><doc><ltv>detached</ltv></doc>";
         byte[] xmlBytes = System.Text.Encoding.UTF8.GetBytes(xml);
         var result = await XadesSigner.Document(xmlBytes)
@@ -153,8 +153,8 @@ public sealed class XadesEuDssInteropTests(ITestOutputHelper output)
     public async Task XadesBLT_Enveloping_ValidatesWithEuDss()
     {
         SkipIfDockerUnavailable();
-        using var pki = new SyntheticPki(crlDistributionPoint: "http://crl.example.com/test-ca.crl");
-        using var crlClient = TestRevocation.BuildCrlClient(pki.BuildLeafCrl());
+        using var pki = TestRevocation.CreatePki();
+        using var crlClient = TestRevocation.BuildCrlClient(pki);
         string xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?><doc><ltv>env</ltv></doc>";
         byte[] xmlBytes = System.Text.Encoding.UTF8.GetBytes(xml);
         var result = await XadesSigner.Document(xmlBytes)

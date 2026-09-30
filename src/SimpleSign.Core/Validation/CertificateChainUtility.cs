@@ -29,7 +29,7 @@ internal static class CertificateChainUtility
             while (seq.HasData)
             {
                 var accessDesc = seq.ReadSequence();
-                accessDesc.ReadObjectIdentifier(); // accessMethod OID
+                string accessMethod = accessDesc.ReadObjectIdentifier();
                 if (!accessDesc.HasData)
                 { continue; }
 
@@ -38,7 +38,8 @@ internal static class CertificateChainUtility
                 {
                     var uri = accessDesc.ReadCharacterString(UniversalTagNumber.IA5String,
                         new Asn1Tag(TagClass.ContextSpecific, 6));
-                    if (uri.StartsWith("http", StringComparison.OrdinalIgnoreCase))
+                    if (accessMethod == Oids.AdCaIssuers &&
+                        uri.StartsWith("http", StringComparison.OrdinalIgnoreCase))
                     { urls.Add(uri); }
                 }
                 else
@@ -201,10 +202,16 @@ internal static class CertificateChainUtility
                         if (!loaded.SubjectName.RawData.AsSpan().SequenceEqual(issuerDn))
                         {
                             warnings.Add($"AIA downloaded cert '{loaded.Subject}' from {url} issuer mismatch: expected '{cert.Issuer}'");
+                            loaded.Dispose();
+                            continue;
                         }
                         result.Add(loaded);
                     }
                 }
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
             }
             catch (Exception ex)
             {

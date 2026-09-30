@@ -62,6 +62,8 @@ public sealed class AdesBaselineProfileContractTests
         Should.Throw<ArgumentNullException>(() => new TimestampOptions(null!));
         Should.Throw<ArgumentException>(() => new TimestampOptions(new Uri("/relative", UriKind.Relative)));
         Should.Throw<ArgumentException>(() => new ArchiveTimestampOptions(new Uri("/relative", UriKind.Relative)));
+        Should.Throw<ArgumentException>(() => new TimestampOptions(new Uri("ftp://tsa.example.com")));
+        Should.Throw<ArgumentException>(() => new ArchiveTimestampOptions(new Uri("file:///tmp/timestamp")));
     }
 
     [Fact(DisplayName = "Failure behavior travels with the complete profile")]

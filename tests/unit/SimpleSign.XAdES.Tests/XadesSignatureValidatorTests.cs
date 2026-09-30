@@ -2,6 +2,7 @@ using System.Formats.Asn1;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Xml;
+using SimpleSign.Core.Constants;
 using SimpleSign.Core.Signing;
 using SimpleSign.Core.Validation;
 using SimpleSign.TestHelpers;
@@ -45,7 +46,7 @@ public sealed class XadesSignatureValidatorTests
         result.IsValid.ShouldBeTrue(diag);
         result.IsSignatureValid.ShouldBeTrue(diag);
         result.IsIntegrityValid.ShouldBeTrue(diag);
-        result.DetectedLevel.ShouldBe(XadesLevel.Basic);
+        result.DetectedLevel.ShouldBe(AdesBaselineLevel.Basic);
     }
 
     [Fact]
@@ -81,6 +82,40 @@ public sealed class XadesSignatureValidatorTests
             + " | Warnings: " + string.Join("; ", result.Warnings);
         result.IsValid.ShouldBeTrue(diag);
         result.Errors.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task Validate_MultipleSignatures_RequiresExplicitValidationOfEverySignature()
+    {
+        byte[] signed = await XadesSigner.Document(s_xmlBytes)
+            .WithCertificate(s_cert)
+            .SignAsync();
+        var document = new XmlDocument { PreserveWhitespace = true };
+        document.Load(new MemoryStream(signed));
+        var ns = new XmlNamespaceManager(document.NameTable);
+        ns.AddNamespace("ds", XmlDSigUrls.DsNamespace);
+        var signature = document.SelectSingleNode("//ds:Signature", ns) as XmlElement;
+        if (signature is null)
+        {
+            throw new InvalidOperationException("Signature element not found.");
+        }
+
+        string firstId = signature.GetAttribute("Id");
+        var secondSignature = (XmlElement)signature.CloneNode(deep: true);
+        secondSignature.SetAttribute("Id", firstId + "-second");
+        document.DocumentElement!.AppendChild(secondSignature);
+        using var output = new MemoryStream();
+        document.Save(output);
+
+        var validator = new XadesSignatureValidator(new ValidationOptions { CheckRevocation = false });
+        XadesValidationResult ambiguous = validator.Validate(output.ToArray(), trustAnchors: [s_cert]);
+        IReadOnlyList<XadesValidationResult> results = validator.ValidateAll(output.ToArray(), trustAnchors: [s_cert]);
+
+        ambiguous.IsSignatureValid.ShouldBeFalse();
+        ambiguous.Errors.ShouldContain(error => error.Contains("ValidateAll", StringComparison.Ordinal));
+        results.Count.ShouldBe(2);
+        results[0].SignatureId.ShouldBe(firstId);
+        results[1].SignatureId.ShouldBe(firstId + "-second");
     }
 
     [Fact]
@@ -171,7 +206,7 @@ public sealed class XadesSignatureValidatorTests
         var validator = new XadesSignatureValidator(new ValidationOptions { CheckRevocation = false });
         var result = validator.Validate(signed, trustAnchors: [s_cert]);
 
-        result.DetectedLevel.ShouldBe(XadesLevel.Basic);
+        result.DetectedLevel.ShouldBe(AdesBaselineLevel.Basic);
     }
 
     [Fact]
@@ -188,7 +223,7 @@ public sealed class XadesSignatureValidatorTests
 
         var diag = "Errors: " + string.Join("; ", result.Errors)
             + " | Warnings: " + string.Join("; ", result.Warnings);
-        result.DetectedLevel.ShouldBe(XadesLevel.Timestamped, diag);
+        result.DetectedLevel.ShouldBe(AdesBaselineLevel.Timestamped, diag);
         result.HasValidSignatureTimeStamp.ShouldBe(true, diag);
     }
 
@@ -200,13 +235,13 @@ public sealed class XadesSignatureValidatorTests
         ns.AddNamespace("ds", "http://www.w3.org/2000/09/xmldsig#");
         ns.AddNamespace("xades", XadesUris.XadesNamespace);
 
-        if (doc.SelectSingleNode("//ds:Signature/ds:SignatureValue", ns) is not XmlElement sigValueEl)
+        if (doc.SelectSingleNode("//ds:Signature/ds:SignatureValue", ns) is not XmlElement)
         {
             throw new InvalidOperationException("No SignatureValue found.");
         }
 
-        byte[] sigValueBytes = Convert.FromBase64String(sigValueEl.InnerText.Trim());
-        byte[] preImageHash = SHA256.HashData(sigValueBytes);
+        byte[] timestampInput = XadesSignatureBuilder.CreateSignatureTimeStampInput(signedXml);
+        byte[] preImageHash = SHA256.HashData(timestampInput);
 
         byte[] tokenBytes = BuildSyntheticTsaToken(s_tsaKey, s_tsaCert, preImageHash);
 

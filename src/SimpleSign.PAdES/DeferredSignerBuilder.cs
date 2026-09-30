@@ -2,6 +2,8 @@ using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using SimpleSign.Core.Http;
+using SimpleSign.Core.Signing;
 using SimpleSign.PAdES.Signing;
 
 namespace SimpleSign.PAdES;
@@ -11,65 +13,83 @@ namespace SimpleSign.PAdES;
 /// Immutable — each method returns a new instance with updated configuration.
 /// </summary>
 /// <remarks>
-/// Use this builder to configure and execute deferred signing workflows
-/// where the private key resides on a different machine (e.g., user's browser).
-/// 
-/// Example:
-/// <code>
-/// var signed = await new DeferredSignerBuilder(pdfBytes, cert)
-///     .WithSignerName("John Doe")
-///     .WithSignatureField(page: 1, x: 50, y: 700)
-///     .WithTimestamp("http://tsa.example.com")
-///     .SignAsync(externalSignature);
-/// </code>
+/// Create instances through <see cref="DeferredSigner.Document(byte[])"/>. Configure all
+/// PDF-field data with <see cref="WithFieldOptions(SignatureFieldOptions)"/> and enrichment
+/// with <see cref="WithLevel(AdesBaselineProfile)"/>.
 /// </remarks>
 public sealed class DeferredSignerBuilder
 {
     private readonly byte[] _pdfBytes;
-    private readonly X509Certificate2 _certificate;
+    private readonly byte[]? _sessionData;
+    private readonly X509Certificate2? _certificate;
     private readonly HashAlgorithmName _hashAlgorithm;
     private readonly bool _hashAlgorithmExplicitlySet;
     private readonly SignatureFieldOptions _fieldOptions;
     private readonly string? _signatureAlgorithmOid;
     private readonly IReadOnlyList<X509Certificate2>? _extraCertificates;
     private readonly ILogger _logger;
-    private readonly string? _tsaUrl;
-    private readonly HttpClient? _httpClient;
+    private readonly AdesBaselineProfile? _profile;
+    private readonly IHttpClientProvider? _httpClientProvider;
+    private readonly byte[]? _sessionIntegrityKey;
 
-    /// <summary>Initializes a new deferred signer builder with PDF bytes and signing certificate.</summary>
-    /// <param name="pdfBytes">PDF document bytes to sign.</param>
-    /// <param name="certificate">Signer's public certificate (private key NOT required).</param>
-    /// <exception cref="ArgumentNullException">If pdfBytes or certificate is null.</exception>
-    public DeferredSignerBuilder(byte[] pdfBytes, X509Certificate2 certificate)
+    /// <summary>Initializes a deferred builder without credentials.</summary>
+    internal DeferredSignerBuilder(byte[] pdfBytes)
     {
         ArgumentNullException.ThrowIfNull(pdfBytes);
-        ArgumentNullException.ThrowIfNull(certificate);
-
-        _pdfBytes = pdfBytes;
-        _certificate = certificate;
+        _pdfBytes = [.. pdfBytes];
+        _sessionData = null;
+        _certificate = null;
         _hashAlgorithm = HashAlgorithmName.SHA256;
         _hashAlgorithmExplicitlySet = false;
         _fieldOptions = new SignatureFieldOptions();
         _signatureAlgorithmOid = null;
-        _extraCertificates = null;
+        _extraCertificates = [];
         _logger = NullLogger.Instance;
-        _tsaUrl = null;
-        _httpClient = null;
+        _profile = null;
+        _httpClientProvider = null;
+        _sessionIntegrityKey = null;
+    }
+
+    /// <summary>Initializes a deferred builder that resumes phase two from serialized session data.</summary>
+    internal DeferredSignerBuilder(byte[] sessionData, byte[] sessionIntegrityKey, AdesBaselineProfile profile, bool resume)
+    {
+        ArgumentNullException.ThrowIfNull(sessionData);
+        ArgumentNullException.ThrowIfNull(sessionIntegrityKey);
+        if (!resume)
+        {
+            throw new ArgumentException("Only the deferred resume entry point can create a completion builder.", nameof(resume));
+        }
+
+        _pdfBytes = [];
+        _sessionData = [.. sessionData];
+        _certificate = null;
+        _hashAlgorithm = HashAlgorithmName.SHA256;
+        _hashAlgorithmExplicitlySet = false;
+        _fieldOptions = new SignatureFieldOptions();
+        _signatureAlgorithmOid = null;
+        _extraCertificates = [];
+        _logger = NullLogger.Instance;
+        _profile = profile;
+        _httpClientProvider = null;
+        _sessionIntegrityKey = [.. sessionIntegrityKey];
     }
 
     private DeferredSignerBuilder(
         byte[] pdfBytes,
-        X509Certificate2 certificate,
+        byte[]? sessionData,
+        X509Certificate2? certificate,
         HashAlgorithmName hashAlgorithm,
         bool hashAlgorithmExplicitlySet,
         SignatureFieldOptions fieldOptions,
         string? signatureAlgorithmOid,
         IReadOnlyList<X509Certificate2>? extraCertificates,
         ILogger logger,
-        string? tsaUrl,
-        HttpClient? httpClient)
+        AdesBaselineProfile? profile,
+        IHttpClientProvider? httpClientProvider,
+        byte[]? sessionIntegrityKey)
     {
         _pdfBytes = pdfBytes;
+        _sessionData = sessionData;
         _certificate = certificate;
         _hashAlgorithm = hashAlgorithm;
         _hashAlgorithmExplicitlySet = hashAlgorithmExplicitlySet;
@@ -77,84 +97,35 @@ public sealed class DeferredSignerBuilder
         _signatureAlgorithmOid = signatureAlgorithmOid;
         _extraCertificates = extraCertificates;
         _logger = logger;
-        _tsaUrl = tsaUrl;
-        _httpClient = httpClient;
+        _profile = profile;
+        _httpClientProvider = httpClientProvider;
+        _sessionIntegrityKey = sessionIntegrityKey;
     }
 
     #region Fluent Configuration
+
+    /// <summary>Sets the certificate used to verify the raw external signature.</summary>
+    public DeferredSignerBuilder WithCertificate(X509Certificate2 certificate) =>
+        With(certificate: certificate ?? throw new ArgumentNullException(nameof(certificate)), replaceCertificate: true, extraCertificates: []);
+
+    /// <summary>Sets the certificate and certificate chain included in the CMS.</summary>
+    public DeferredSignerBuilder WithCertificate(X509Certificate2 certificate, IReadOnlyList<X509Certificate2> chain)
+    {
+        ArgumentNullException.ThrowIfNull(certificate);
+        ArgumentNullException.ThrowIfNull(chain);
+        return With(certificate: certificate, replaceCertificate: true, extraCertificates: [.. chain]);
+    }
 
     /// <summary>Sets the hash algorithm for the signature. Default: SHA-256.</summary>
     public DeferredSignerBuilder WithHashAlgorithm(HashAlgorithmName algorithm)
         => With(hashAlgorithm: algorithm, hashAlgorithmExplicitlySet: true);
 
-    /// <summary>Sets the signer's display name in the signature field.</summary>
-    public DeferredSignerBuilder WithSignerName(string name)
+    /// <summary>Replaces the complete PDF signature field configuration.</summary>
+    public DeferredSignerBuilder WithFieldOptions(SignatureFieldOptions fieldOptions)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(name);
-        return WithFieldOptions(signerName: name);
-    }
-
-    /// <summary>Sets the signature reason (e.g., "Approval", "Agreement").</summary>
-    public DeferredSignerBuilder WithReason(string reason)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(reason);
-        return WithFieldOptions(reason: reason);
-    }
-
-    /// <summary>Sets the signature location (e.g., "São Paulo, Brazil").</summary>
-    public DeferredSignerBuilder WithLocation(string location)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(location);
-        return WithFieldOptions(location: location);
-    }
-
-    /// <summary>Configures the signature field position on the PDF.</summary>
-    /// <param name="page">Page number (1-based).</param>
-    /// <param name="x">X coordinate in points.</param>
-    /// <param name="y">Y coordinate in points.</param>
-    public DeferredSignerBuilder WithSignatureField(int page, float x, float y)
-    {
-        if (page < 1)
-        {
-            throw new ArgumentException("Page must be >= 1.", nameof(page));
-        }
-
-        if (x < 0)
-        {
-            throw new ArgumentException("X must be >= 0.", nameof(x));
-        }
-
-        if (y < 0)
-        {
-            throw new ArgumentException("Y must be >= 0.", nameof(y));
-        }
-
-        var appearance = new SignatureAppearance
-        {
-            Page = page,
-            X = x,
-            Y = y
-        };
-        return WithAppearance(appearance);
-    }
-
-    /// <summary>Sets the signature field name. Default: "Signature1".</summary>
-    public DeferredSignerBuilder WithFieldName(string name)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(name);
-        return WithFieldOptions(fieldName: name);
-    }
-
-    /// <summary>Adds extra certificates (CA chain) to the signature for validation.</summary>
-    public DeferredSignerBuilder WithExtraCertificates(IReadOnlyList<X509Certificate2> certificates)
-    {
-        ArgumentNullException.ThrowIfNull(certificates);
-        if (certificates.Count == 0)
-        {
-            throw new ArgumentException("Certificate list cannot be empty.", nameof(certificates));
-        }
-
-        return With(extraCertificates: certificates);
+        ArgumentNullException.ThrowIfNull(fieldOptions);
+        ArgumentException.ThrowIfNullOrWhiteSpace(fieldOptions.FieldName);
+        return With(fieldOptions: SnapshotFieldOptions(fieldOptions));
     }
 
     /// <summary>Specifies a custom signature algorithm OID. Default: auto-detected from certificate.</summary>
@@ -164,19 +135,18 @@ public sealed class DeferredSignerBuilder
         return With(signatureAlgorithmOid: oid);
     }
 
-    /// <summary>Enables timestamp from a Time Stamp Authority (creates PAdES-T).</summary>
-    public DeferredSignerBuilder WithTimestamp(string tsaUrl)
+    /// <summary>Sets the complete ADeS baseline profile for completion.</summary>
+    public DeferredSignerBuilder WithLevel(AdesBaselineProfile profile)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(tsaUrl);
-        return With(tsaUrl: tsaUrl);
+        ArgumentNullException.ThrowIfNull(profile);
+        return With(profile: profile);
     }
 
-    /// <summary>Enables timestamp with a custom HTTP client. Useful for proxies or custom certificate validation.</summary>
-    public DeferredSignerBuilder WithTimestamp(string tsaUrl, HttpClient httpClient)
+    /// <summary>Sets the fallback HTTP provider used by timestamp and LTV completion.</summary>
+    public DeferredSignerBuilder WithHttpClientProvider(IHttpClientProvider provider)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(tsaUrl);
-        ArgumentNullException.ThrowIfNull(httpClient);
-        return With(tsaUrl: tsaUrl, httpClient: httpClient);
+        ArgumentNullException.ThrowIfNull(provider);
+        return With(httpClientProvider: provider);
     }
 
     /// <summary>Sets a custom logger for diagnostic output.</summary>
@@ -184,6 +154,29 @@ public sealed class DeferredSignerBuilder
     {
         ArgumentNullException.ThrowIfNull(logger);
         return With(logger: logger);
+    }
+
+    /// <summary>
+    /// Sets the server-owned HMAC key used to authenticate the deferred session.
+    /// The key must contain at least 32 bytes and is never serialized into the session.
+    /// </summary>
+    /// <param name="key">A server-owned HMAC key with at least 256 bits of entropy.</param>
+    /// <returns>A new preparation builder with the supplied key snapshot.</returns>
+    /// <exception cref="InvalidOperationException">Thrown when called on a resumed builder.</exception>
+    public DeferredSignerBuilder WithSessionIntegrityKey(byte[] key)
+    {
+        ArgumentNullException.ThrowIfNull(key);
+        if (key.Length < 32)
+        {
+            throw new ArgumentException("The deferred session HMAC key must contain at least 32 bytes.", nameof(key));
+        }
+
+        if (_sessionData is not null)
+        {
+            throw new InvalidOperationException("The session integrity key is supplied by DeferredSigner.Resume and cannot be replaced.");
+        }
+
+        return With(sessionIntegrityKey: [.. key], replaceSessionIntegrityKey: true);
     }
 
     #endregion
@@ -196,6 +189,7 @@ public sealed class DeferredSignerBuilder
     /// </summary>
     public async Task<byte[]> SignAsync(byte[] signature, CancellationToken cancellationToken = default)
     {
+        EnsureStrictProfile();
         ArgumentNullException.ThrowIfNull(signature);
         if (signature.Length == 0)
         {
@@ -203,7 +197,7 @@ public sealed class DeferredSignerBuilder
         }
 
         var prepared = await PrepareAsync(cancellationToken).ConfigureAwait(false);
-        return await CompleteAsync(prepared.SessionData, signature, cancellationToken).ConfigureAwait(false);
+        return await CompleteCoreAsync(prepared.SessionData, signature, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -212,24 +206,34 @@ public sealed class DeferredSignerBuilder
     /// </summary>
     public async Task<DeferredSigningPrepareResult> PrepareAsync(CancellationToken cancellationToken = default)
     {
+        if (_sessionData is not null)
+        {
+            throw new InvalidOperationException("A resumed deferred signer can only complete an existing session.");
+        }
+
+        var certificate = _certificate ?? throw new SigningException(
+            "Certificate is required. Call WithCertificate() before preparing a deferred signature.",
+            SigningErrorReason.CredentialMissing);
+        var sessionIntegrityKey = _sessionIntegrityKey ?? throw new SigningException(
+            "A session integrity key is required. Call WithSessionIntegrityKey() before preparing a deferred signature.",
+            SigningErrorReason.LevelDependenciesMissing);
         var options = new DeferredSigningOptions
         {
             HashAlgorithm = _hashAlgorithm,
             HashAlgorithmExplicitlySet = _hashAlgorithmExplicitlySet,
             FieldOptions = _fieldOptions,
             SignatureAlgorithmOid = _signatureAlgorithmOid,
-            ExtraCertificates = _extraCertificates
+            ExtraCertificates = _extraCertificates,
+            Profile = _profile
         };
 
         return await DeferredSigner.PrepareAsync(
-            _pdfBytes, _certificate, options, _logger, cancellationToken).ConfigureAwait(false);
+            _pdfBytes, certificate, sessionIntegrityKey, options, _logger, cancellationToken).ConfigureAwait(false);
     }
 
-    /// <summary>
-    /// Phase 2: Embeds the external signature and optional timestamp into the document.
-    /// </summary>
-    public async Task<byte[]> CompleteAsync(byte[] sessionData, byte[] rawSignature, CancellationToken cancellationToken = default)
+    private async Task<byte[]> CompleteCoreAsync(byte[] sessionData, byte[] rawSignature, CancellationToken cancellationToken)
     {
+        EnsureStrictProfile();
         ArgumentNullException.ThrowIfNull(sessionData);
         ArgumentNullException.ThrowIfNull(rawSignature);
         if (sessionData.Length == 0)
@@ -244,77 +248,94 @@ public sealed class DeferredSignerBuilder
 
         var completeOptions = new DeferredSigningCompleteOptions
         {
-            TsaUrl = _tsaUrl,
-            HttpClient = _httpClient
+            Profile = _profile,
+            HttpClientProvider = _httpClientProvider
         };
 
         return await DeferredSigner.CompleteAsync(
-            sessionData, rawSignature, completeOptions, _logger, cancellationToken: cancellationToken).ConfigureAwait(false);
+            sessionData, rawSignature, RequireSessionIntegrityKey(), completeOptions, _logger, cancellationToken: cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Completes the session supplied to <see cref="DeferredSigner.Resume(byte[], byte[])"/>.
+    /// </summary>
+    /// <param name="rawSignature">Raw signature bytes produced by the external signer.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The completed signed PDF.</returns>
+    public Task<byte[]> CompleteAsync(byte[] rawSignature, CancellationToken cancellationToken = default)
+    {
+        if (_sessionData is null)
+        {
+            throw new InvalidOperationException("Only a builder returned by DeferredSigner.Resume can complete a persisted session.");
+        }
+
+        return CompleteCoreAsync(_sessionData, rawSignature, cancellationToken);
     }
 
     #endregion
 
     #region Private Helpers
 
+    private void EnsureStrictProfile()
+    {
+        if (_profile?.FailureBehavior == SigningLevelFailureBehavior.ReturnLowerLevel)
+        {
+            throw new SigningException(
+                "Deferred completion returns PDF bytes only. Use a strict baseline profile so successful completion cannot hide a level downgrade.",
+                SigningErrorReason.DowngradeRequiresDetailedResult);
+        }
+    }
+
     private DeferredSignerBuilder With(
+        X509Certificate2? certificate = null,
+        bool replaceCertificate = false,
         HashAlgorithmName? hashAlgorithm = null,
         bool? hashAlgorithmExplicitlySet = null,
         SignatureFieldOptions? fieldOptions = null,
         string? signatureAlgorithmOid = null,
         IReadOnlyList<X509Certificate2>? extraCertificates = null,
         ILogger? logger = null,
-        string? tsaUrl = null,
-        HttpClient? httpClient = null)
+        AdesBaselineProfile? profile = null,
+        IHttpClientProvider? httpClientProvider = null,
+        byte[]? sessionIntegrityKey = null,
+        bool replaceSessionIntegrityKey = false)
     {
         return new(
             _pdfBytes,
-            _certificate,
+            _sessionData,
+            replaceCertificate ? certificate : _certificate,
             hashAlgorithm ?? _hashAlgorithm,
             hashAlgorithmExplicitlySet ?? _hashAlgorithmExplicitlySet,
             fieldOptions ?? _fieldOptions,
             signatureAlgorithmOid ?? _signatureAlgorithmOid,
             extraCertificates ?? _extraCertificates,
             logger ?? _logger,
-            tsaUrl ?? _tsaUrl,
-            httpClient ?? _httpClient);
+            profile ?? _profile,
+            httpClientProvider ?? _httpClientProvider,
+            replaceSessionIntegrityKey ? sessionIntegrityKey : _sessionIntegrityKey);
     }
 
-    private DeferredSignerBuilder WithFieldOptions(
-        string? fieldName = null,
-        string? signerName = null,
-        string? reason = null,
-        string? location = null)
+    private byte[] RequireSessionIntegrityKey()
     {
-        var merged = new SignatureFieldOptions
-        {
-            FieldName = fieldName ?? _fieldOptions.FieldName,
-            SignerName = signerName ?? _fieldOptions.SignerName,
-            Reason = reason ?? _fieldOptions.Reason,
-            Location = location ?? _fieldOptions.Location,
-            Appearance = _fieldOptions.Appearance,
-            ContentsReservedBytes = _fieldOptions.ContentsReservedBytes,
-            SubFilter = _fieldOptions.SubFilter,
-            CertificationLevel = _fieldOptions.CertificationLevel,
-            ExistingFieldName = _fieldOptions.ExistingFieldName
-        };
-        return With(fieldOptions: merged);
+        return _sessionIntegrityKey ?? throw new InvalidOperationException(
+            "A deferred completion builder must have a session integrity key.");
     }
 
-    private DeferredSignerBuilder WithAppearance(SignatureAppearance appearance)
+    private static SignatureFieldOptions SnapshotFieldOptions(SignatureFieldOptions source)
     {
-        var merged = new SignatureFieldOptions
+        return new SignatureFieldOptions
         {
-            FieldName = _fieldOptions.FieldName,
-            SignerName = _fieldOptions.SignerName,
-            Reason = _fieldOptions.Reason,
-            Location = _fieldOptions.Location,
-            Appearance = appearance,
-            ContentsReservedBytes = _fieldOptions.ContentsReservedBytes,
-            SubFilter = _fieldOptions.SubFilter,
-            CertificationLevel = _fieldOptions.CertificationLevel,
-            ExistingFieldName = _fieldOptions.ExistingFieldName
+            FieldName = source.FieldName,
+            SignerName = source.SignerName,
+            Reason = source.Reason,
+            Location = source.Location,
+            ContactInfo = source.ContactInfo,
+            ContentsReservedBytes = source.ContentsReservedBytes,
+            SubFilter = source.SubFilter,
+            Appearance = source.Appearance?.Snapshot(),
+            CertificationLevel = source.CertificationLevel,
+            ExistingFieldName = source.ExistingFieldName
         };
-        return With(fieldOptions: merged);
     }
 
     #endregion

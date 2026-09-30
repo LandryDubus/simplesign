@@ -22,17 +22,20 @@ dotnet build
 ### Running Tests
 
 ```bash
-# All tests (fast — excludes Docker/network-dependent)
-dotnet test
+# Build the complete multi-target solution
+dotnet build SimpleSign.sln
 
 # Specific project
-dotnet test tests/SimpleSign.PAdES.Tests
+dotnet test tests/unit/SimpleSign.PAdES.Tests
+
+# Cross-format signing contract
+dotnet test tests/unit/SimpleSign.Contracts.Tests
 
 # With coverage
 dotnet test --collect:"XPlat Code Coverage" --settings coverlet.runsettings
 
 # Interop tests (requires Docker)
-dotnet test tests/SimpleSign.Interop.Tests --filter Category=Interop
+dotnet test tests/interop/SimpleSign.Interop.Tests --filter Category=Interop
 ```
 
 ## How to Contribute
@@ -57,8 +60,8 @@ Open an issue with the `enhancement` label. Describe:
 1. Fork the repository
 2. Create a feature branch (`git checkout -b feature/my-feature`)
 3. Make your changes
-4. Ensure all tests pass (`dotnet test`)
-5. Ensure the build has no warnings (`dotnet build` — warnings are errors)
+4. Run the focused project tests and affected interop tests
+5. Ensure the solution has no warnings (`dotnet build SimpleSign.sln` — warnings are errors)
 6. Submit a pull request
 
 ### Code Style
@@ -73,10 +76,10 @@ Open an issue with the `enhancement` label. Describe:
 
 ### Test Guidelines
 
-- Use xUnit with `[Fact(DisplayName = "...")]`
-- Use FluentAssertions for assertions
-- Tests that require Docker must use `[SkippableFact]` with `DockerProbe`
-- Tests that require real certificates must skip gracefully via `Skip.IfNot(...)`
+- Use xUnit `[Fact]` / `[Theory]` with behavior-oriented test names
+- Use the assertion library already referenced by the target test project
+- Tests requiring Docker, network or external TSA services must be explicitly categorized and skippable
+- Cryptographic changes require positive and negative artifact tests; ADeS changes also require independent vectors when available
 - Add `[Trait("Category", "...")]` for slow, network, or interop tests
 
 ### Commit Messages
@@ -96,8 +99,10 @@ src/
   SimpleSign.HtmlToPdf/ # HTML-to-PDF converter
   SimpleSign/           # Meta-package (all capabilities)
 tests/
-  SimpleSign.*.Tests/   # Unit and integration tests
-  SimpleSign.Fuzz/      # Fuzz testing harness
+  unit/SimpleSign.*.Tests/       # Unit tests
+  integration/SimpleSign.*.Tests/ # Network-dependent integration tests
+  interop/SimpleSign.Interop.Tests/ # External compatibility tests
+  fuzz/SimpleSign.Fuzz/          # Fuzz testing harness
 bench/
   SimpleSign.Benchmarks/ # BenchmarkDotNet performance tests
 interop/

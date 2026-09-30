@@ -5,6 +5,7 @@ using System.Security.Cryptography.Xml;
 using System.Xml;
 using SimpleSign.Core.Constants;
 using SimpleSign.Core.Crypto;
+using SimpleSign.Core.Signing;
 using SimpleSign.Core.Validation;
 using SimpleSign.XAdES.Constants;
 
@@ -47,7 +48,48 @@ public sealed class XadesSignatureValidator : IXadesSignatureValidator
     public XadesValidationResult Validate(
         byte[] signedXml,
         IEnumerable<X509Certificate2>? trustAnchors = null,
+        byte[]? originalData = null) =>
+        ValidateCore(signedXml, trustAnchors, originalData, signatureIndex: null);
+
+    /// <summary>Validates every XMLDSig signature in a signed XAdES XML document.</summary>
+    public IReadOnlyList<XadesValidationResult> ValidateAll(
+        byte[] signedXml,
+        IEnumerable<X509Certificate2>? trustAnchors = null,
         byte[]? originalData = null)
+    {
+        ArgumentNullException.ThrowIfNull(signedXml);
+        var doc = new XmlDocument { PreserveWhitespace = true };
+        try
+        {
+            doc.Load(new MemoryStream(signedXml));
+        }
+        catch (XmlException)
+        {
+            return [ValidateCore(signedXml, trustAnchors, originalData, signatureIndex: null)];
+        }
+
+        var ns = new XmlNamespaceManager(doc.NameTable);
+        ns.AddNamespace("ds", XmlDSigUrls.DsNamespace);
+        XmlNodeList? signatures = doc.SelectNodes("//ds:Signature", ns);
+        if (signatures is null || signatures.Count == 0)
+        {
+            return [ValidateCore(signedXml, trustAnchors, originalData, signatureIndex: null)];
+        }
+
+        var results = new List<XadesValidationResult>(signatures.Count);
+        for (int index = 0; index < signatures.Count; index++)
+        {
+            results.Add(ValidateCore(signedXml, trustAnchors, originalData, index));
+        }
+
+        return results;
+    }
+
+    private XadesValidationResult ValidateCore(
+        byte[] signedXml,
+        IEnumerable<X509Certificate2>? trustAnchors,
+        byte[]? originalData,
+        int? signatureIndex)
     {
         ArgumentNullException.ThrowIfNull(signedXml);
         var errors = new List<string>();
@@ -62,7 +104,7 @@ public sealed class XadesSignatureValidator : IXadesSignatureValidator
                 IsSignatureValid = false,
                 IsIntegrityValid = false,
                 IsCertificateChainValid = false,
-                DetectedLevel = XadesLevel.Basic
+                DetectedLevel = AdesBaselineLevel.Basic
             };
         }
 
@@ -80,7 +122,7 @@ public sealed class XadesSignatureValidator : IXadesSignatureValidator
                 IsSignatureValid = false,
                 IsIntegrityValid = false,
                 IsCertificateChainValid = false,
-                DetectedLevel = XadesLevel.Basic
+                DetectedLevel = AdesBaselineLevel.Basic
             };
         }
 
@@ -89,7 +131,8 @@ public sealed class XadesSignatureValidator : IXadesSignatureValidator
         ns.AddNamespace("xades", XadesUris.XadesNamespace);
         ns.AddNamespace("xades141", XadesUris.Xades141Namespace);
 
-        if (doc.SelectSingleNode("//ds:Signature", ns) is not XmlElement sigElement)
+        XmlNodeList? signatures = doc.SelectNodes("//ds:Signature", ns);
+        if (signatures is null || signatures.Count == 0)
         {
             errors.Add("No ds:Signature element found in the XML.");
             return new XadesValidationResult
@@ -98,7 +141,34 @@ public sealed class XadesSignatureValidator : IXadesSignatureValidator
                 IsSignatureValid = false,
                 IsIntegrityValid = false,
                 IsCertificateChainValid = false,
-                DetectedLevel = XadesLevel.Basic
+                DetectedLevel = AdesBaselineLevel.Basic
+            };
+        }
+
+        if (signatureIndex is null && signatures.Count != 1)
+        {
+            errors.Add("XML contains multiple ds:Signature elements; use ValidateAll to validate each signature.");
+            return new XadesValidationResult
+            {
+                Errors = errors,
+                IsSignatureValid = false,
+                IsIntegrityValid = false,
+                IsCertificateChainValid = false,
+                DetectedLevel = AdesBaselineLevel.Basic
+            };
+        }
+
+        int selectedIndex = signatureIndex ?? 0;
+        if (selectedIndex < 0 || selectedIndex >= signatures.Count || signatures[selectedIndex] is not XmlElement sigElement)
+        {
+            errors.Add("The requested ds:Signature element was not found in the XML.");
+            return new XadesValidationResult
+            {
+                Errors = errors,
+                IsSignatureValid = false,
+                IsIntegrityValid = false,
+                IsCertificateChainValid = false,
+                DetectedLevel = AdesBaselineLevel.Basic
             };
         }
 
@@ -159,31 +229,26 @@ public sealed class XadesSignatureValidator : IXadesSignatureValidator
             warnings.Add("No XAdES SignedProperties found; signature may be plain XMLDSig.");
         }
 
-        XadesLevel detectedLevel = XadesLevel.Basic;
+        AdesBaselineLevel detectedLevel = AdesBaselineLevel.Basic;
         if (extraction.HasArchiveTimeStamp)
         {
-            detectedLevel = XadesLevel.Archive;
+            detectedLevel = AdesBaselineLevel.Archive;
         }
         else if (extraction.HasCertificateValues || extraction.HasRevocationValues)
         {
-            detectedLevel = XadesLevel.LongTerm;
+            detectedLevel = AdesBaselineLevel.LongTerm;
         }
         else if (extraction.HasSignatureTimeStamp)
         {
-            detectedLevel = XadesLevel.Timestamped;
+            detectedLevel = AdesBaselineLevel.Timestamped;
         }
 
         // Timestamp validation
         bool? tsValid = null;
         if (extraction.HasSignatureTimeStamp)
         {
-            var sigValueEl = sigElement.SelectSingleNode("ds:SignatureValue", ns);
-            byte[] sigValueBytes = sigValueEl is not null
-                ? DecodeBase64(sigValueEl)
-                : [];
-
             tsValid = ValidateSignatureTimeStamp(
-                sigElement, ns, sigValueBytes, extraction.SigningTime, trustAnchors, warnings);
+                sigElement, ns, extraction.SigningTime, trustAnchors, warnings);
         }
 
         // LTV data validation (CertificateValues + RevocationValues)
@@ -197,13 +262,8 @@ public sealed class XadesSignatureValidator : IXadesSignatureValidator
         bool? archiveTsValid = null;
         if (extraction.HasArchiveTimeStamp)
         {
-            var sigValueEl = sigElement.SelectSingleNode("ds:SignatureValue", ns);
-            byte[] sigValueBytes = sigValueEl is not null
-                ? DecodeBase64(sigValueEl)
-                : [];
-
             archiveTsValid = ValidateArchiveTimeStamp(
-                sigElement, ns, sigValueBytes, extraction.SigningTime, trustAnchors, warnings);
+                sigElement, ns, originalData, warnings);
         }
 
         // Certificate chain validation
@@ -211,6 +271,7 @@ public sealed class XadesSignatureValidator : IXadesSignatureValidator
 
         return new XadesValidationResult
         {
+            SignatureId = extraction.SignatureId,
             IsSignatureValid = sigValid,
             IsIntegrityValid = sigValid,
             IsCertificateChainValid = chainValid,
@@ -477,13 +538,15 @@ public sealed class XadesSignatureValidator : IXadesSignatureValidator
         if (string.IsNullOrEmpty(uri))
         {
             bool hasEnvelopedTransform = HasEnvelopedTransform(refEl, ns);
-            return ComputeDocumentDigestWithTempSig(doc, sigElement, ns, hashAlg, hasEnvelopedTransform);
+            return ComputeDocumentDigestWithTempSig(
+                doc, sigElement, ns, hashAlg, hasEnvelopedTransform,
+                GetReferenceCanonicalizationAlgorithm(refEl, ns));
         }
 
         if (uri.StartsWith('#'))
         {
             string id = uri[1..];
-            return ComputeFragmentDigest(doc, id, hashAlg);
+            return ComputeFragmentDigest(doc, id, refEl, hashAlg, ns);
         }
 
         if (originalData is not null && originalData.Length > 0)
@@ -501,25 +564,12 @@ public sealed class XadesSignatureValidator : IXadesSignatureValidator
         XmlNamespaceManager ns,
         HashAlgorithmName hashAlg)
     {
-        bool hasExcC14N = false;
-        var transforms = refEl.SelectNodes("ds:Transforms/ds:Transform", ns);
-        if (transforms is not null)
-        {
-            foreach (XmlElement t in transforms)
-            {
-                if (t.GetAttribute("Algorithm") == XmlDSigUrls.ExcC14N)
-                {
-                    hasExcC14N = true;
-                    break;
-                }
-            }
-        }
-
-        if (hasExcC14N)
+        string? canonicalizationAlgorithm = GetReferenceCanonicalizationAlgorithm(refEl, ns);
+        if (canonicalizationAlgorithm is not null)
         {
             var dataDoc = new XmlDocument { PreserveWhitespace = true };
             dataDoc.Load(new MemoryStream(data));
-            return CryptoUtility.ComputeHash(CanonicalizeDocument(dataDoc), hashAlg);
+            return CryptoUtility.ComputeHash(CanonicalizeDocument(dataDoc, canonicalizationAlgorithm), hashAlg);
         }
 
         return CryptoUtility.ComputeHash(data, hashAlg);
@@ -546,12 +596,34 @@ public sealed class XadesSignatureValidator : IXadesSignatureValidator
         return false;
     }
 
+    private static string? GetReferenceCanonicalizationAlgorithm(XmlElement refEl, XmlNamespaceManager ns)
+    {
+        XmlNodeList? transforms = refEl.SelectNodes("ds:Transforms/ds:Transform", ns);
+        if (transforms is null)
+        {
+            return null;
+        }
+
+        foreach (XmlElement transform in transforms)
+        {
+            string algorithm = transform.GetAttribute("Algorithm");
+            if (algorithm is XmlDSigUrls.ExcC14N or XmlDSigUrls.ExcC14NWithComments or
+                XmlDSigUrls.C14N or XmlDSigUrls.C14NWithComments)
+            {
+                return algorithm;
+            }
+        }
+
+        return null;
+    }
+
     private static byte[] ComputeDocumentDigestWithTempSig(
         XmlDocument doc,
         XmlElement sigElement,
         XmlNamespaceManager ns,
         HashAlgorithmName hashAlg,
-        bool hasEnvelopedTransform)
+        bool hasEnvelopedTransform,
+        string? canonicalizationAlgorithm)
     {
         // XmlDsigEnvelopedSignatureTransform is broken in .NET 10 (it does not
         // remove <Signature> elements).  The signing code now computes the
@@ -576,14 +648,16 @@ public sealed class XadesSignatureValidator : IXadesSignatureValidator
             }
         }
 
-        byte[] canonicalBytes = CanonicalizeDocument(clone);
+        byte[] canonicalBytes = CanonicalizeDocument(clone, canonicalizationAlgorithm ?? XmlDSigUrls.ExcC14N);
         return CryptoUtility.ComputeHash(canonicalBytes, hashAlg);
     }
 
     private static byte[] ComputeFragmentDigest(
         XmlDocument doc,
         string id,
-        HashAlgorithmName hashAlg)
+        XmlElement reference,
+        HashAlgorithmName hashAlg,
+        XmlNamespaceManager ns)
     {
         // Find element by Id — for SignedProperties, this is inside
         // ds:Object → xades:QualifyingProperties → xades:SignedProperties.
@@ -593,17 +667,32 @@ public sealed class XadesSignatureValidator : IXadesSignatureValidator
             throw new InvalidOperationException($"Element with Id='{id}' not found.");
         }
 
-        // Wrap in a temp doc for Exc C14N canonicalization
+        if (reference.SelectSingleNode(
+                $"ds:Transforms/ds:Transform[@Algorithm='{XmlDSigUrls.Base64Transform}']", ns) is not null)
+        {
+            return CryptoUtility.ComputeHash(DecodeBase64(element), hashAlg);
+        }
+
+        // Wrap in a temp doc for XML canonicalization. XAdES generated by SimpleSign
+        // and the interoperable corpus use exclusive C14N here.
         var tempDoc = new XmlDocument { PreserveWhitespace = true };
         tempDoc.AppendChild(tempDoc.ImportNode(element, true));
 
-        byte[] canonicalBytes = CanonicalizeDocument(tempDoc);
+        byte[] canonicalBytes = CanonicalizeDocument(
+            tempDoc, GetReferenceCanonicalizationAlgorithm(reference, ns) ?? XmlDSigUrls.ExcC14N);
         return CryptoUtility.ComputeHash(canonicalBytes, hashAlg);
     }
 
-    private static byte[] CanonicalizeDocument(XmlDocument doc)
+    private static byte[] CanonicalizeDocument(XmlDocument doc, string algorithm = XmlDSigUrls.ExcC14N)
     {
-        var transform = new XmlDsigExcC14NTransform();
+        Transform transform = algorithm switch
+        {
+            XmlDSigUrls.ExcC14N => new XmlDsigExcC14NTransform(),
+            XmlDSigUrls.ExcC14NWithComments => new XmlDsigExcC14NTransform(includeComments: true),
+            XmlDSigUrls.C14N => new XmlDsigC14NTransform(),
+            XmlDSigUrls.C14NWithComments => new XmlDsigC14NTransform(includeComments: true),
+            _ => throw new NotSupportedException($"Unsupported XML canonicalization algorithm '{algorithm}'."),
+        };
         transform.LoadInput(doc);
         using var stream = (Stream)transform.GetOutput(typeof(Stream))!;
         using var ms = new MemoryStream();
@@ -796,7 +885,6 @@ public sealed class XadesSignatureValidator : IXadesSignatureValidator
     private bool? ValidateSignatureTimeStamp(
         XmlElement sigElement,
         XmlNamespaceManager ns,
-        byte[] signatureValueBytes,
         DateTimeOffset? signingTime,
         IEnumerable<X509Certificate2>? trustAnchors,
         List<string> warnings)
@@ -867,25 +955,39 @@ public sealed class XadesSignatureValidator : IXadesSignatureValidator
             };
         }
 
-        var tsResult = _timestampValidator.Validate(
+        byte[] canonicalizedSignatureValue;
+        try
+        {
+            canonicalizedSignatureValue = XadesSignatureBuilder.CreateSignatureTimeStampInput(
+                System.Text.Encoding.UTF8.GetBytes(sigElement.OwnerDocument!.OuterXml),
+                sigElement.GetAttribute("Id"));
+        }
+        catch (Exception ex) when (ex is XmlException or InvalidOperationException or CryptographicException)
+        {
+            warnings.Add($"Could not canonicalize SignatureValue for SignatureTimeStamp: {ex.Message}");
+            return false;
+        }
+
+        var timestampWarnings = new List<string>();
+        bool? tsResult = _timestampValidator.Validate(
             timestampToken,
-            signatureValueBytes,
+            canonicalizedSignatureValue,
             signingTime,
-            warnings,
+            timestampWarnings,
             validateTsaChain,
             null);
+
+        warnings.AddRange(timestampWarnings);
 
         // If TimestampValidator returns null (e.g. parsing failure), treat as invalid
         // since the timestamp element is present but unverifiable.
         return tsResult ?? false;
     }
 
-    private bool? ValidateArchiveTimeStamp(
+    private static bool? ValidateArchiveTimeStamp(
         XmlElement sigElement,
         XmlNamespaceManager ns,
-        byte[] signatureValueBytes,
-        DateTimeOffset? signingTime,
-        IEnumerable<X509Certificate2>? trustAnchors,
+        byte[]? originalData,
         List<string> warnings)
     {
         // Try xades141 namespace first, fall back to xades; try nested then flat
@@ -913,71 +1015,22 @@ public sealed class XadesSignatureValidator : IXadesSignatureValidator
             return false;
         }
 
-        byte[] timestampToken;
         try
         {
-            timestampToken = DecodeBase64(encTs);
+            _ = DecodeBase64(encTs);
+            byte[] signedXml = System.Text.Encoding.UTF8.GetBytes(sigElement.OwnerDocument!.OuterXml);
+            return XadesSignatureBuilder.ValidateArchiveTimeStamp(
+                signedXml,
+                originalData,
+                warnings,
+                sigElement.GetAttribute("Id"));
         }
         // S2221: intentional -- validation pipeline converts exceptions to error messages
         catch (Exception ex)
         {
-            warnings.Add($"ArchiveTimeStamp EncapsulatedTimeStamp contains invalid base64: {ex.Message}");
+            warnings.Add($"ArchiveTimeStamp validation failed: {ex.Message}");
             return false;
         }
-
-        // Validate TSA signature on the archive timestamp token
-        TimestampValidator.CertificateChainValidatorDelegate? validateTsaChain = null;
-        if (trustAnchors is not null)
-        {
-            validateTsaChain = (tsaCert, embeddedCerts, tsaErrors, tsaWarnings) =>
-            {
-                if (tsaCert is null)
-                {
-                    tsaErrors.Add("TSA certificate not found.");
-                    return false;
-                }
-                using var chain = new X509Chain
-                {
-                    ChainPolicy =
-                    {
-                        TrustMode = X509ChainTrustMode.CustomRootTrust,
-                        RevocationMode = X509RevocationMode.NoCheck
-                    }
-                };
-                foreach (var anchor in trustAnchors)
-                {
-                    chain.ChainPolicy.CustomTrustStore.Add(anchor);
-                }
-                if (chain.Build(tsaCert))
-                {
-                    return true;
-                }
-                foreach (var status in chain.ChainStatus)
-                {
-                    tsaErrors.Add($"TSA chain: {status.Status} \u2014 {status.StatusInformation}");
-                }
-                return false;
-            };
-        }
-
-        // Hash match is best-effort: archive timestamp covers the full signature element
-        // before the archive timestamp was applied. Full verification requires
-        // reconstructing the pre-archive document state.
-        warnings.Add("ArchiveTimestamp hash verification is best-effort; TSA signature " +
-                     "is verified but full messageImprint check requires pre-archive document state.");
-
-        // Hash match is best-effort: archive timestamp covers the full signature element
-        // before the archive timestamp was applied. Full verification requires
-        // reconstructing the pre-archive document state.
-        var tsResult = _timestampValidator.Validate(
-            timestampToken,
-            signatureValueBytes,
-            signingTime,
-            warnings,
-            validateTsaChain,
-            null);
-
-        return tsResult ?? false;
     }
 
     private static bool? ValidateLtvData(

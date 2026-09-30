@@ -1,10 +1,14 @@
 using System.Security.Cryptography.X509Certificates;
+using SimpleSign.Core.Signing;
 
 namespace SimpleSign.XAdES;
 
 /// <summary>Result of a XAdES signature validation.</summary>
 public sealed class XadesValidationResult
 {
+    /// <summary>The optional XMLDSig <c>Id</c> of the validated signature.</summary>
+    public string? SignatureId { get; init; }
+
     /// <summary>The XMLDSig signature is mathematically valid.</summary>
     public bool IsSignatureValid { get; init; }
 
@@ -29,8 +33,8 @@ public sealed class XadesValidationResult
     /// <summary>Signing time from SignedProperties.</summary>
     public DateTimeOffset? SigningTime { get; init; }
 
-    /// <summary>Detected XAdES conformance level.</summary>
-    public XadesLevel DetectedLevel { get; init; }
+    /// <summary>Detected baseline conformance level.</summary>
+    public AdesBaselineLevel DetectedLevel { get; init; }
 
     /// <summary>Errors found during validation.</summary>
     public IReadOnlyList<string> Errors { get; init; } = [];

@@ -7,6 +7,7 @@ using SimpleSign.Core.Crypto;
 using SimpleSign.Core.Signing;
 using SimpleSign.Core.Validation;
 using SimpleSign.PAdES;
+using SimpleSign.PAdES.Signing;
 using Spectre.Console;
 using Spectre.Console.Cli;
 
@@ -125,11 +126,6 @@ internal sealed class SignCommand : AsyncCommand<SignCommand.Settings>
         [CommandOption("--signature-algorithm <ALGO>")]
         [Description("Signature algorithm: rsa-pkcs1 (default) or rsassa-pss")]
         public string? SignatureAlgorithm { get; init; }
-
-        /// <summary>Use adbe.pkcs7.detached without PAdES attributes (legacy compatibility).</summary>
-        [CommandOption("--legacy-cms")]
-        [Description("Use adbe.pkcs7.detached without PAdES attributes (legacy compatibility)")]
-        public bool LegacyCms { get; init; }
 
         /// <summary>Preserve PDF/A conformance.</summary>
         [CommandOption("--pdfa")]
@@ -514,6 +510,20 @@ internal sealed class SignCommand : AsyncCommand<SignCommand.Settings>
                         builder = builder.WithHashAlgorithm(SignCommandOptions.ParseHash(settings.Hash));
                     }
 
+                    // Metadata is applied before partial field configuration so the latter can
+                    // retain it through their immutable updates.
+                    if (settings.Reason is not null || settings.Location is not null
+                        || settings.Contact is not null || settings.SignerName is not null)
+                    {
+                        builder = builder.WithFieldOptions(new SignatureFieldOptions
+                        {
+                            SignerName = settings.SignerName,
+                            Reason = settings.Reason,
+                            Location = settings.Location,
+                            ContactInfo = settings.Contact
+                        });
+                    }
+
                     if (settings.FieldName is not null)
                     {
                         builder = builder.WithFieldName(settings.FieldName);
@@ -527,17 +537,6 @@ internal sealed class SignCommand : AsyncCommand<SignCommand.Settings>
                     if (settings.Certify is not null)
                     {
                         builder = builder.AsCertification(SignCommandOptions.ParseCertificationLevel(settings.Certify));
-                    }
-
-                    // Metadata: reason, location, contact, signer name
-                    if (settings.Reason is not null || settings.Location is not null
-                        || settings.Contact is not null || settings.SignerName is not null)
-                    {
-                        builder = builder.WithMetadata(
-                            signerName: settings.SignerName,
-                            reason: settings.Reason,
-                            location: settings.Location,
-                            contactInfo: settings.Contact);
                     }
 
                     // Brasil AEA — after explicit metadata so it adds extra CMS attributes
@@ -583,11 +582,6 @@ internal sealed class SignCommand : AsyncCommand<SignCommand.Settings>
                         }
 
                         builder = builder.WithAppearance(appearance);
-                    }
-
-                    if (settings.LegacyCms)
-                    {
-                        builder = builder.WithLegacyCms();
                     }
 
                     if (settings.SubFilter is not null)

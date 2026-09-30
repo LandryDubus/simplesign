@@ -31,7 +31,7 @@ public sealed class SignerBuilderHttpClientTests
         _ = builder.WithOperationId("test");
         provider.CallCount.ShouldBe(0);
 
-        _ = builder.WithMetadata(signerName: "Test");
+        _ = builder.WithTestFieldOptions(signerName: "Test");
         provider.CallCount.ShouldBe(0);
     }
 
@@ -62,7 +62,7 @@ public sealed class SignerBuilderHttpClientTests
             .WithHttpClientProvider(provider)
             .WithOperationId("op1")
             .WithPdfAPreservation()
-            .WithMetadata(signerName: "Test")
+            .WithTestFieldOptions(signerName: "Test")
             .WithLevel(AdesBaselineProfile.LongTerm(
                 new TimestampOptions(new Uri("http://tsa.example.com")),
                 new LongTermValidationOptions()));
@@ -77,7 +77,7 @@ public sealed class SignerBuilderHttpClientTests
         PadesSigner
             .Document([0x25, 0x50, 0x44, 0x46])
             .WithHttpClientProvider(provider)
-            .WithMetadata(signerName: "Test");
+            .WithTestFieldOptions(signerName: "Test");
 
         provider.CallCount.ShouldBe(0);
     }
@@ -102,18 +102,6 @@ public sealed class SignerBuilderHttpClientTests
             .Document([0x25, 0x50, 0x44, 0x46])
             .WithHttpClientProvider(provider)
             .WithPdfAPreservation();
-
-        provider.CallCount.ShouldBe(0);
-    }
-
-    [Fact(DisplayName = "WithLegacyCms preserves IHttpClientProvider")]
-    public void WithLegacyCms_PreservesHttpClientProvider()
-    {
-        var provider = new RecordingHttpClientProvider();
-        PadesSigner
-            .Document([0x25, 0x50, 0x44, 0x46])
-            .WithHttpClientProvider(provider)
-            .WithLegacyCms();
 
         provider.CallCount.ShouldBe(0);
     }

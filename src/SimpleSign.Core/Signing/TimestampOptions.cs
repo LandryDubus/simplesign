@@ -26,9 +26,9 @@ public sealed record TimestampOptions
         IHttpClientProvider? httpClientProvider = null)
     {
         ArgumentNullException.ThrowIfNull(endpoint);
-        if (!endpoint.IsAbsoluteUri)
+        if (!endpoint.IsAbsoluteUri || (endpoint.Scheme != Uri.UriSchemeHttp && endpoint.Scheme != Uri.UriSchemeHttps))
         {
-            throw new ArgumentException("TSA endpoint must be absolute.", nameof(endpoint));
+            throw new ArgumentException("TSA endpoint must be an absolute HTTP(S) URI.", nameof(endpoint));
         }
 
         Endpoint = endpoint;

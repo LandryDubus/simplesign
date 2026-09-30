@@ -34,7 +34,7 @@ public sealed class EddsaSigningTests
         byte[] signed = await PadesSigner.Document(pdf)
             .WithCertificate(c)
             .WithHashAlgorithm(HashAlgorithmName.SHA256)
-            .WithExternalSigner(c, new FuncExternalSigner(async hash =>
+            .WithExternalSigner(c, new DelegatingExternalSigner(async hash =>
             {
                 byte[] sig = key.SignHash(hash, DSASignatureFormat.Rfc3279DerSequence);
                 return await Task.FromResult(sig);
@@ -61,7 +61,7 @@ public sealed class EddsaSigningTests
         byte[] signed = await PadesSigner.Document(pdf)
             .WithCertificate(c)
             .WithHashAlgorithm(HashAlgorithmName.SHA3_256)
-            .WithExternalSigner(c, new FuncExternalSigner(async hash =>
+            .WithExternalSigner(c, new DelegatingExternalSigner(async hash =>
             {
                 byte[] sig = key.SignHash(hash, DSASignatureFormat.Rfc3279DerSequence);
                 return await Task.FromResult(sig);
@@ -87,7 +87,7 @@ public sealed class EddsaSigningTests
         using var key = c!.GetECDsaPrivateKey()!;
         byte[] signed = await PadesSigner.Document(pdf)
             .WithCertificate(c)
-            .WithExternalSigner(c, new FuncExternalSigner(async hash =>
+            .WithExternalSigner(c, new DelegatingExternalSigner(async hash =>
             {
                 byte[] sig = key.SignHash(hash, DSASignatureFormat.Rfc3279DerSequence);
                 return await Task.FromResult(sig);
@@ -111,7 +111,7 @@ public sealed class EddsaSigningTests
         using var key = c!.GetECDsaPrivateKey()!;
         byte[] signed = await PadesSigner.Document(TestPdfFactory.CreateMinimalPdf())
             .WithCertificate(c)
-            .WithExternalSigner(c, new FuncExternalSigner(async hash =>
+            .WithExternalSigner(c, new DelegatingExternalSigner(async hash =>
             {
                 byte[] sig = key.SignHash(hash, DSASignatureFormat.Rfc3279DerSequence);
                 return await Task.FromResult(sig);

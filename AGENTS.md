@@ -6,13 +6,13 @@
 
 | Action | Command |
 |--------|---------|
-| Build all | `dotnet build` |
-| Unit tests | `dotnet test tests/unit/` |
-| Specific tests | `dotnet test tests/unit/SimpleSign.PAdES.Tests` |
-| Interop tests | `dotnet test tests/interop/` |
+| Build all | `dotnet build SimpleSign.sln --no-restore` |
+| Contract tests | `dotnet test tests/unit/SimpleSign.Contracts.Tests --no-restore` |
+| Specific tests | `dotnet test tests/unit/SimpleSign.PAdES.Tests --no-restore` |
+| Interop tests | `dotnet test tests/interop/SimpleSign.Interop.Tests --no-restore` |
 | VeraPDF interop | `docker pull verapdf/cli && dotnet test tests/interop/ --filter "Category=VeraPdf"` |
-| Integration tests | `dotnet test tests/integration/` |
-| CLI tests | `dotnet test tests/cli/` |
+| Integration tests | `dotnet test tests/integration/SimpleSign.Integration.Tests --no-restore` |
+| CLI tests | `dotnet test tests/cli/SimpleSign.Cli.Tests --no-restore` |
 | Mutation tests | `dotnet stryker` |
 | Lint/format check | Build with 0 warnings (enforced) |
 | AOT smoke test | `dotnet publish tests/smoke/SimpleSign.AotSmokeTest -r linux-x64` |
@@ -46,7 +46,7 @@ SimpleSign/
 
 ## Build System
 
-- **SDK:** .NET 10 (global.json pins to 10.0.300)
+- **SDK:** .NET 10 (use the version pinned by `global.json`)
 - **Targets:** net8.0 and net10.0 (multi-target)
 - **Language:** C# 13
 - **Analysis:** `AnalysisMode=All`, warnings as errors, code style enforced in build
@@ -68,7 +68,7 @@ These will cause build failures:
 
 - Framework: xUnit
 - Naming: `MethodName_Condition_ExpectedResult`
-- Assertions: use xUnit `Assert.*` methods
+- Assertions: use the assertion library already referenced by the target test project
 - Don't commit real certificates — use `TestCertificateGenerator` from test helpers
 - Unit tests must not require network access
 - Tests should be deterministic (no random, no time-dependent)
@@ -98,7 +98,7 @@ These will cause build failures:
 1. Add property to the builder in `SimpleSign.PAdES`
 2. Thread it through to `PdfSigner`
 3. Add unit tests
-4. Update XML docs and README example
+4. Update XML docs, README example, migration guide, `llms.txt`, and `llms-full.txt` when public API changes
 
 ### Adding a new validation check
 1. Add to `ValidationOptions` if configurable

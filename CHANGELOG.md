@@ -5,7 +5,67 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.8.1] - UNRELEASED
+## [0.9.0] - 2026-09-30
+
+### Security
+
+- RFC 3161 timestamp responses are bound to the requested CMS/TSTInfo structure,
+  digest OID, message imprint, and nonce before embedding.
+- External RSA/ECDSA signatures are verified against the configured certificate
+  before packaging, including deferred PAdES completion; contradictory combined
+  signature OID/digest selections fail.
+- PSS signing now resolves and passes MGF1 digest, salt length, and trailer-field
+  parameters to external signers; explicit PSS public-key restrictions are enforced.
+- Deferred PAdES sessions are always authenticated with a server-owned HMAC-SHA256
+  key. Phase one requires `WithSessionIntegrityKey(key)` and phase two requires
+  `DeferredSigner.Resume(sessionData, key)`; altered session bytes are rejected.
+
+### Changed
+
+- **Canonical signing surface** — CAdES/XAdES `Document` no longer accepts a logger;
+  configure it through `WithLogger`. `XadesLevel`/`CadesLevel`, the ambiguous
+  parameter-based PAdES metadata overload, and the legacy BatchSigner TSA/LTV and
+  delegate APIs (including `FuncExternalSigner`) were removed. Use
+  `AdesBaselineLevel`, `SignatureFieldOptions`, `AdesBaselineProfile`, and
+  `IExternalSigner`.
+- **Batch PAdES signing** — `BatchSigner` now delegates to the same profile,
+  provider, algorithm, external-signer, and field-options model as `PadesSignerBuilder`.
+- **Batch result streaming** — `SignAllAsync` has bounded result buffering, yields in
+  completion order while the input is still being consumed, and cancels a
+  cancellation-aware source when enumeration ends early.
+- **Deferred PAdES signing** — static prepare/complete operations, the public
+  `DeferredSignerBuilder` constructor, and piecemeal field/timestamp methods were
+  removed. Use `DeferredSigner.Document(...).WithCertificate(...)` for phase one
+  with `WithSessionIntegrityKey(key)`, then `DeferredSigner.Resume(sessionData, key)` for phase two.
+- PAdES stream-backed builder lineages are single-use; caller-owned output streams
+  are transactional and mutable appearance/metadata inputs are snapshotted.
+- Certificate validity failures are normalized to `SigningException` reason codes.
+- CAdES/XAdES inspect the final artifact for the exact embedded signature timestamp
+  token and required LTV structures before reporting their result flags.
+- XAdES signature timestamps now bind the exclusive-canonicalized `ds:SignatureValue`
+  element, as required by ETSI EN 319 132-1. Timestamp tokens over legacy decoded
+  value bytes are rejected rather than treated as XAdES-B-T.
+- The interop suite now embeds EU DSS CAdES/XAdES vectors, fixed by source commit and
+  SHA-256, including positive CAdES/XAdES B-LTA coverage assertions and negative
+  modified-index/copied-token cases.
+- CAdES `ATSHashIndexV3` is now placed in the archive RFC 3161 token's unsigned
+  attributes as specified by ETSI EN 319 122-1. XAdES archive preimages now process
+  XMLDSig base64, enveloped-signature, signature-exclusion XPath, and C14N transforms,
+  plus ordered same-document distributed `Include` properties and preceding
+  counter-signatures.
+- CAdES/XAdES archive timestamp flows reject external distributed resources, ambiguous
+  signature targets, unsupported transforms, or incomplete coverage rather than claiming
+  archival coverage.
+- `XadesSignatureValidator.Validate` now rejects an ambiguous multi-signature document;
+  use `ValidateAll` for one independently identified result per XMLDSig signature.
+- HostSigner health-check, tray, and web API version metadata now report `0.9.0`.
+- CAdES/XAdES LTV collection records a per-certificate evidence ledger, requires
+  a relevant OCSP/CRL object for each non-root certificate, discovers missing issuers
+  through AIA `caIssuers`, preserves cancellation during certificate/revocation retrieval,
+  and verifies that every collected certificate and revocation object is present in the
+  final artifact before reporting B-LT/B-LTA.
+- PAdES verifies the final DocTimeStamp token against its PDF `/ByteRange` before
+  reporting B-LTA, and its final DSS inspection now requires certificate-path coverage.
 
 ### Improved
 
@@ -15,6 +75,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Signature inspection accuracy** — report the signature field's real AcroForm `/T` value instead of a synthetic object-number name.
 - **Deterministic validation tests** — use offline TSA/AIA fixtures, make Docker availability probes concurrency-safe, and avoid persistent Windows key-store imports for in-memory PKCS#12 data.
 - **PAdES multi-signature timestamp association** — B-LT DSS updates now preserve historical VRI mappings and create a VRI only for the newly added signature, so each signature retains its own `/TS` token and validation data.
+
+See `docs/migration/v0.8-to-v0.9.md` and ADR 0016 for the complete migration plan.
 
 ## [0.8.0] - 2026-09-02
 

@@ -1,101 +1,58 @@
-# Deferred Signing
+# Deferred PAdES signing
 
-Deferred signing separates hash preparation from signature embedding, enabling scenarios where the **private key is on a different device** (smart card, HSM, mobile app, browser agent).
-
-## How It Works
-
-```
-Server                              Client
-──────                              ──────
-1. PrepareAsync(pdf, cert)
-   → hashToSign + sessionData
-                                    2. Sign hashToSign with private key
-                                       → raw signature bytes
-3. CompleteAsync(sessionData, sig)
-   → signed PDF
-```
-
-The private key **never leaves the client**. Only the hash digest travels over the network.
-
-## Basic Usage (Static API)
+Deferred signing separates PDF preparation from the private-key operation. The server creates
+CMS signed attributes and an opaque session; a browser, smart card, HSM, or local agent returns
+the raw signature. The private key never leaves that signer.
 
 ```csharp
+using SimpleSign.Core.Signing;
 using SimpleSign.PAdES;
 
-// Phase 1: Server prepares the hash
-var prepared = await DeferredSigner.PrepareAsync(pdfBytes, cert);
-byte[] hashToSign = prepared.HashToSign;
-byte[] sessionData = prepared.SessionData; // opaque blob, store server-side
+var profile = AdesBaselineProfile.Archive(
+    new TimestampOptions(new Uri("https://tsa.example")),
+    new LongTermValidationOptions());
 
-// Phase 2: Client signs the hash (RSA PKCS#1 v1.5, ECDSA, etc.)
-byte[] signature = SignWithClientKey(hashToSign);
+var builder = DeferredSigner.Document(pdfBytes)
+    .WithCertificate(certificate, chain)
+    .WithSessionIntegrityKey(sessionIntegrityKey)
+    .WithLevel(profile)
+    .WithHttpClientProvider(httpClientProvider);
 
-// Phase 3: Server embeds the signature
-byte[] signedPdf = await DeferredSigner.CompleteAsync(sessionData, signature);
-```
-
-> [!NOTE]
-> `HashToSign` contains DER-encoded signed attributes, not a raw hash. The client must hash it (e.g., SHA-256) and then sign with the private key algorithm.
-
-## Builder API (Fluent)
-
-The `DeferredSignerBuilder` provides a fluent interface with additional options:
-
-```csharp
-using SimpleSign.PAdES;
-
-var builder = new DeferredSignerBuilder(pdfBytes, cert)
-    .WithSignerName("Jane Doe")
-    .WithReason("Contract approval")
-    .WithLocation("São Paulo")
-    .WithTimestamp("http://timestamp.digicert.com");
-
-// Phase 1: Prepare
+// Server: persist SessionData and send HashToSign to the external signer.
 var prepared = await builder.PrepareAsync();
+byte[] rawSignature = await SignExternallyAsync(prepared.HashToSign);
 
-// Phase 2: External signing
-byte[] signature = await SignExternallyAsync(prepared.HashToSign);
-
-// Phase 3: Complete
-byte[] signedPdf = await builder.CompleteAsync(prepared.SessionData, signature);
+// Server: load the persisted session and apply B-T/B-LT/B-LTA enrichment.
+byte[] signedPdf = await DeferredSigner.Resume(prepared.SessionData, sessionIntegrityKey)
+    .WithHttpClientProvider(httpClientProvider)
+    .CompleteAsync(rawSignature);
 ```
 
-### Available Builder Methods
+`HashToSign` is DER-encoded CMS signed attributes, not a document hash. The external signer must
+apply the resolved hash and signature scheme represented by `DigestAlgorithm` and
+`SignatureAlgorithmOid`. RSA-PSS callers must also honor the resolved PSS parameters.
 
-| Method | Description |
-|--------|-------------|
-| `WithSignerName(name)` | Sets the signer display name |
-| `WithReason(reason)` | Sets the signing reason |
-| `WithLocation(location)` | Sets the signing location |
-| `WithTimestamp(tsaUrl)` | Adds an RFC 3161 timestamp (PAdES B-T) |
-| `WithSignatureField(page, x, y)` | Places a new signature field on the given page at (x, y) |
-| `WithFieldName(name)` | Names the signature field (must be unique within the PDF) |
-| `WithHashAlgorithm(algorithm)` | Overrides hash algorithm (default: SHA-256) |
-| `WithSignatureAlgorithm(oid)` | Specifies a custom signature algorithm OID |
-| `WithExtraCertificates(certs)` | Embeds additional certificates in the CMS |
+## Configuration
 
-## Web Application Example
+The deferred builder uses the same vocabulary as direct PAdES signing:
 
-A complete web sample is available at [`samples/WebSigningSample/`](https://github.com/eupassarin/SimpleSign/tree/main/samples/WebSigningSample).
+| Method | Purpose |
+| --- | --- |
+| `WithCertificate(certificate, chain)` | Sets the public certificate and optional chain. |
+| `WithHashAlgorithm` / `WithSignatureAlgorithm` | Selects a coherent signing algorithm. |
+| `WithLevel(profile)` | Requests B-B, B-T, B-LT, or B-LTA. |
+| `WithHttpClientProvider(provider)` | Supplies non-owned TSA/revocation clients. |
+| `WithFieldOptions(options)` | Atomically configures or clears PDF field metadata and appearance. |
+| `WithLogger(logger)` | Enables diagnostics. |
 
-The sample uses **SimpleSign.HostSigner** — a Windows tray app running on the user's machine at `http://localhost:21590`:
+The serialized session contains operation state, public certificate material, and the requested
+baseline level/endpoints. It never serializes `HttpClient`, loggers, private keys, or
+service-provider instances. It is always authenticated with HMAC-SHA256 using the mandatory
+server-owned key passed to `WithSessionIntegrityKey` and `Resume`. Store it only on the server
+and return a random one-time identifier to the browser; do not treat session bytes as a
+client-side token. Reattach a server-owned HTTP provider after `Resume` when the configured
+endpoint needs one.
 
-1. **Browser JS** calls HostSigner (`GET /api/certificates`) to list certificates
-2. **Browser** uploads the PDF + selected certificate to the **server**
-3. **Server** calls `DeferredSigner.PrepareAsync()` and returns the hash
-4. **Browser JS** sends the hash to **HostSigner** (`POST /api/sign`) for signing
-5. **Browser** sends the raw signature to the **server**
-6. **Server** calls `DeferredSigner.CompleteAsync()` and returns the signed PDF
-
-If HostSigner is not running, the browser can launch it via the `simplesign://` protocol handler.
-
-## Prepare Result
-
-`DeferredSigningPrepareResult` contains:
-
-| Property | Type | Description |
-|----------|------|-------------|
-| `HashToSign` | `byte[]` | DER-encoded signed attributes to be hashed and signed |
-| `SessionData` | `byte[]` | Opaque session data needed for `CompleteAsync` |
-| `DigestAlgorithm` | `string` | The digest algorithm OID used |
-| `SignatureAlgorithmOid` | `string` | Expected signature algorithm OID |
+For B-LT and B-LTA, completion requires a valid signature timestamp and complete DSS evidence
+for signer and TSA paths. Unsupported evidence collection fails instead of returning an artifact
+that falsely claims the requested level.

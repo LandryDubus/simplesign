@@ -7,7 +7,6 @@ using SimpleSign.CAdES;
 using SimpleSign.Core.Crypto;
 using SimpleSign.Core.Http;
 using SimpleSign.Core.Signing;
-using SimpleSign.Core.Validation;
 
 namespace SimpleSign.XAdES;
 
@@ -282,19 +281,19 @@ public sealed class XadesSignerBuilder
         ValidatePrerequisites(credential);
 
         var warnings = new List<SigningWarning>();
-        var hashAlg = _options.HashAlgorithm;
-        string sigAlgOid = _options.SignatureAlgorithmOid
-            ?? CryptoUtility.DetectSignatureAlgorithmOid(certificate, hashAlg);
-        CmsSignatureBuilder.ValidateSignatureAlgorithmCompatibility(certificate, sigAlgOid);
+        var resolvedAlgorithm = SigningAlgorithmResolver.Resolve(
+            certificate, _options.HashAlgorithm, _options.HashAlgorithmExplicitlySet, _options.SignatureAlgorithmOid);
+        var hashAlg = resolvedAlgorithm.HashAlgorithm;
+        string sigAlgOid = resolvedAlgorithm.SignatureAlgorithmOid;
 
         byte[] signedXml;
         if (credential is XadesExternalCredential external)
         {
-            signedXml = await SignExternalCoreAsync(external, certificate, chain, sigAlgOid, cancellationToken).ConfigureAwait(false);
+            signedXml = await SignExternalCoreAsync(external, certificate, chain, hashAlg, sigAlgOid, resolvedAlgorithm.RsaPssParameters, cancellationToken).ConfigureAwait(false);
         }
         else
         {
-            signedXml = SignLocalCore(certificate, chain, sigAlgOid);
+            signedXml = SignLocalCore(certificate, chain, hashAlg, sigAlgOid);
         }
 
         byte[]? timestampTokenBytes = null;
@@ -328,14 +327,13 @@ public sealed class XadesSignerBuilder
             }
         }
 
-        bool hasLtvMaterial = false;
+        XadesLtvEmbeddingResult? ltvEmbedding = null;
         if (timestampTokenBytes is not null && profile.Level >= AdesBaselineLevel.LongTerm)
         {
-            byte[]? ltvXml = await ApplyLtvAsync(signedXml, certificate, chain, cancellationToken).ConfigureAwait(false);
-            if (ltvXml is not null)
+            ltvEmbedding = await ApplyLtvAsync(signedXml, certificate, chain, cancellationToken).ConfigureAwait(false);
+            if (ltvEmbedding is not null)
             {
-                signedXml = ltvXml;
-                hasLtvMaterial = true;
+                signedXml = ltvEmbedding.SignedXml;
             }
             else
             {
@@ -345,11 +343,11 @@ public sealed class XadesSignerBuilder
         }
 
         bool hasArchiveTimestamp = false;
-        if (hasLtvMaterial && profile.Level >= AdesBaselineLevel.Archive)
+        if (ltvEmbedding is not null && profile.Level >= AdesBaselineLevel.Archive)
         {
             try
             {
-                signedXml = await ApplyArchiveTimestampAsync(signedXml, hashAlg, profile, cancellationToken).ConfigureAwait(false);
+                signedXml = await ApplyArchiveTimestampAsync(signedXml, hashAlg, cancellationToken).ConfigureAwait(false);
                 hasArchiveTimestamp = true;
             }
             catch (OperationCanceledException)
@@ -358,39 +356,65 @@ public sealed class XadesSignerBuilder
             }
             catch (Exception ex)
             {
+                const string archiveMessage = "XAdES ArchiveTimeStamp could not be applied.";
                 if (profile.FailureBehavior == SigningLevelFailureBehavior.Throw)
                 {
-                    throw new SigningException(
-                        $"Archive timestamp request failed: {ex.Message}",
-                        SigningErrorReason.NetworkFailure,
-                        ex);
+                    throw new SigningException(archiveMessage, SigningErrorReason.LevelNotAchievable, ex);
                 }
 
                 AddDowngradeWarnings(warnings, SigningWarningCode.ArchiveTimestampUnavailable,
-                    $"Archive timestamp could not be applied: {ex.Message}");
+                    $"{archiveMessage} {ex.Message}");
             }
         }
 
-        var achieved = ComputeAchievedLevel(timestampTokenBytes, hasLtvMaterial, hasArchiveTimestamp);
+        bool artifactHasTimestamp = timestampTokenBytes is not null &&
+            XadesSignatureBuilder.ExtractSignatureTimeStamp(signedXml) is byte[] embeddedTimestamp &&
+            CryptographicOperations.FixedTimeEquals(embeddedTimestamp, timestampTokenBytes);
+        bool artifactHasLtvMaterial = ltvEmbedding is not null &&
+            XadesSignatureBuilder.HasLtvData(signedXml, ltvEmbedding.Evidence);
+        bool artifactHasArchiveTimestamp = hasArchiveTimestamp &&
+            XadesSignatureBuilder.ValidateArchiveTimeStamp(signedXml, _xmlData, []);
+        if (timestampTokenBytes is not null && !artifactHasTimestamp)
+        {
+            HandleArtifactInspectionFailure(
+                profile, warnings, SigningWarningCode.SignatureTimestampUnavailable,
+                "The produced XML does not contain the requested signature timestamp token.");
+        }
+
+        if (ltvEmbedding is not null && !artifactHasLtvMaterial)
+        {
+            HandleArtifactInspectionFailure(
+                profile, warnings, SigningWarningCode.LongTermValidationMaterialUnavailable,
+                "The produced XML does not contain complete LTV properties.");
+        }
+
+        if (hasArchiveTimestamp && !artifactHasArchiveTimestamp)
+        {
+            HandleArtifactInspectionFailure(
+                profile, warnings, SigningWarningCode.ArchiveTimestampUnavailable,
+                "The produced XML does not contain an ArchiveTimeStamp covering its ETSI-defined input.");
+        }
+
+        var achieved = ComputeAchievedLevel(artifactHasTimestamp, artifactHasLtvMaterial, artifactHasArchiveTimestamp);
 
         return new XadesSigningResult
         {
             SignedArtifact = signedXml,
             RequestedLevel = profile.Level,
             AchievedLevel = achieved,
-            HasSignatureTimestamp = timestampTokenBytes is not null,
-            HasLongTermValidationMaterial = hasLtvMaterial,
-            HasArchiveTimestamp = hasArchiveTimestamp,
+            HasSignatureTimestamp = artifactHasTimestamp,
+            HasLongTermValidationMaterial = artifactHasLtvMaterial,
+            HasArchiveTimestamp = artifactHasArchiveTimestamp,
             Warnings = warnings.AsReadOnly()
         };
     }
 
     private static AdesBaselineLevel ComputeAchievedLevel(
-        byte[]? timestampTokenBytes,
+        bool hasSignatureTimestamp,
         bool hasLtvMaterial,
         bool hasArchiveTimestamp)
     {
-        if (timestampTokenBytes is null)
+        if (!hasSignatureTimestamp)
         {
             return AdesBaselineLevel.Basic;
         }
@@ -409,6 +433,20 @@ public sealed class XadesSignerBuilder
         warnings.Add(new SigningWarning(
             SigningWarningCode.LevelDowngraded,
             "The requested baseline level could not be achieved; the artifact was downgraded."));
+    }
+
+    private static void HandleArtifactInspectionFailure(
+        AdesBaselineProfile profile,
+        List<SigningWarning> warnings,
+        SigningWarningCode code,
+        string message)
+    {
+        if (profile.FailureBehavior == SigningLevelFailureBehavior.Throw)
+        {
+            throw new SigningException(message, SigningErrorReason.LevelNotAchievable);
+        }
+
+        AddDowngradeWarnings(warnings, code, message);
     }
 
     private void EnsureStrictProfile()
@@ -432,12 +470,14 @@ public sealed class XadesSignerBuilder
                 SigningErrorReason.PrivateKeyMissing);
         }
 
-        if (certificate.NotAfter < DateTime.UtcNow)
+        var signingTime = DateTimeOffset.UtcNow;
+        if (certificate.NotBefore > signingTime || certificate.NotAfter < signingTime)
         {
-            throw new CertificateValidationException(
-                $"Certificate '{certificate.Subject}' expired on {certificate.NotAfter:yyyy-MM-dd HH:mm:ss} UTC. Cannot sign with an expired certificate.",
-                certificate.Thumbprint,
-                certificate.Subject);
+            throw new SigningException(
+                $"Certificate '{certificate.Subject}' is not valid at {signingTime:yyyy-MM-dd HH:mm:ss} UTC.",
+                certificate.NotAfter < signingTime
+                    ? SigningErrorReason.CertificateExpired
+                    : SigningErrorReason.CertificateNotCurrentlyValid);
         }
     }
 
@@ -458,11 +498,12 @@ public sealed class XadesSignerBuilder
     private byte[] SignLocalCore(
         X509Certificate2 certificate,
         IReadOnlyList<X509Certificate2> chain,
+        HashAlgorithmName hashAlg,
         string sigAlgOid)
     {
         var signingTime = _options.SigningTime ?? DateTimeOffset.UtcNow;
         return XadesSignatureBuilder.BuildSignature(
-            _xmlData, certificate, _options.HashAlgorithm, signingTime, chain,
+            _xmlData, certificate, hashAlg, signingTime, chain,
             _options.CommitmentType, _options.SignaturePolicyOid, _options.SignaturePolicyUri,
             sigAlgOid, _options.Form, _options.SignerRoles, _options.DataObjectFormat,
             _options.Dependencies.Logger, _options.DataUri);
@@ -472,11 +513,12 @@ public sealed class XadesSignerBuilder
         XadesExternalCredential external,
         X509Certificate2 certificate,
         IReadOnlyList<X509Certificate2> chain,
+        HashAlgorithmName hashAlg,
         string sigAlgOid,
+        RsaPssParameters? rsaPssParameters,
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        var hashAlg = _options.HashAlgorithm;
         var signingTime = _options.SigningTime ?? DateTimeOffset.UtcNow;
 
         byte[] signedInfoBytes = XadesSignatureBuilder.BuildSignedInfoToHash(
@@ -492,13 +534,33 @@ public sealed class XadesSignerBuilder
             hashAlg,
             sigAlgOid,
             ExternalSigningPayloadKind.XmlCanonicalizedSignedInfo,
-            _options.OperationId);
-        ReadOnlyMemory<byte> signature = await external.Signer.SignAsync(request, cancellationToken).ConfigureAwait(false);
+            _options.OperationId,
+            rsaPssParameters);
+        ReadOnlyMemory<byte> signature;
+        try
+        {
+            signature = await external.Signer.SignAsync(request, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            throw new SigningException("External signer failed to produce a signature.",
+                SigningErrorReason.ExternalSignerFailure, ex);
+        }
         if (signature.Length == 0)
         {
             throw new SigningException(
                 "External signer returned an empty signature.",
                 SigningErrorReason.ExternalSignerReturnedEmpty);
+        }
+
+        if (!CmsSignatureBuilder.VerifyExternalSignature(signedInfoBytes, signature.Span, certificate, hashAlg, sigAlgOid))
+        {
+            throw new SigningException("External signer returned a signature that does not verify with the configured certificate.",
+                SigningErrorReason.AlgorithmIncompatible);
         }
 
         return XadesSignatureBuilder.CompleteWithExternalSignature(
@@ -515,10 +577,11 @@ public sealed class XadesSignerBuilder
         CancellationToken cancellationToken)
     {
         var tsaClient = CreateTimestampClient(timestampOptions.Endpoint.ToString(), timestampOptions.HttpClientProvider);
-        var sigValue = XadesSignatureBuilder.ExtractSignatureValue(signedXml);
-        byte[] tsToken = await tsaClient.GetTimestampAsync(sigValue, hashAlg, cancellationToken).ConfigureAwait(false);
+        byte[] timestampInput = XadesSignatureBuilder.CreateSignatureTimeStampInput(signedXml);
+        byte[] tsToken = await tsaClient.GetTimestampAsync(timestampInput, hashAlg, cancellationToken).ConfigureAwait(false);
+        TimestampClient.ValidateTimestampToken(tsToken, timestampInput, hashAlg);
 
-        return XadesSignatureBuilder.EmbedSignatureTimeStamp(signedXml, tsToken);
+        return tsToken;
     }
 
     private ITimestampClient CreateTimestampClient(string endpoint, IHttpClientProvider? scopedProvider)
@@ -532,7 +595,7 @@ public sealed class XadesSignerBuilder
         return new TimestampClient(provider.GetClient(), endpoint, _options.Dependencies.Logger);
     }
 
-    private async Task<byte[]?> ApplyLtvAsync(
+    private async Task<XadesLtvEmbeddingResult?> ApplyLtvAsync(
         byte[] signedXml,
         X509Certificate2 certificate,
         IReadOnlyList<X509Certificate2> chain,
@@ -551,47 +614,76 @@ public sealed class XadesSignerBuilder
             }
         }
 
+        byte[]? timestampToken = XadesSignatureBuilder.ExtractSignatureTimeStamp(signedXml);
+        if (timestampToken is not null)
+        {
+            foreach (var tsaCertificate in TsaCertificateExtractor.ExtractCertificates(timestampToken))
+            {
+                if (!chainCerts.Any(x => x.Thumbprint == tsaCertificate.Thumbprint))
+                {
+                    chainCerts.Add(tsaCertificate);
+                }
+            }
+        }
+
         var ltvData = await LtvDataCollector.CollectAsync(
             ltvProvider.GetClient(), certificate, chainCerts, logger, cancellationToken: cancellationToken).ConfigureAwait(false);
 
-        bool hasLtvMaterial = ltvData.CertificateRawData.Count > 0
-            && (ltvData.OcspResponses.Count > 0 || ltvData.Crls.Count > 0);
+        bool hasLtvMaterial = ltvData.CertificateRawData.Count > 0 && ltvData.HasCompleteCoverage;
         if (!hasLtvMaterial)
         {
             if (profile.FailureBehavior == SigningLevelFailureBehavior.Throw)
             {
+                string missingEvidence = string.Join("; ",
+                    (ltvData.CertificateEvidence ?? [])
+                        .Where(item => !item.IsComplete)
+                        .Select(item => $"{item.Thumbprint}: {item.AbsenceReason}"));
                 throw new SigningException(
                     "LTV was requested but no certificate and revocation data could be collected. " +
-                    "The requested B-LT/B-LTA level cannot be produced.",
+                    "The requested B-LT/B-LTA level cannot be produced." +
+                    (missingEvidence.Length > 0 ? $" Missing evidence: {missingEvidence}" : string.Empty),
                     SigningErrorReason.LevelNotAchievable);
             }
 
             return null;
         }
 
-        return XadesSignatureBuilder.EmbedLtvData(signedXml, ltvData);
+        return new XadesLtvEmbeddingResult(XadesSignatureBuilder.EmbedLtvData(signedXml, ltvData), ltvData);
     }
 
     private async Task<byte[]> ApplyArchiveTimestampAsync(
         byte[] signedXml,
-        HashAlgorithmName hashAlg,
-        AdesBaselineProfile profile,
+        HashAlgorithmName hashAlgorithm,
         CancellationToken cancellationToken)
     {
+        var profile = _options.Profile;
         var archiveOptions = profile.ArchiveTimestamp;
         var timestampOptions = profile.Timestamp!;
         var endpoint = archiveOptions?.Endpoint ?? timestampOptions.Endpoint;
         var scopedProvider = archiveOptions?.HttpClientProvider ?? timestampOptions.HttpClientProvider;
 
+        byte[] withPlaceholder = XadesSignatureBuilder.EmbedArchiveTimeStamp(signedXml, []);
+        byte[] input = XadesSignatureBuilder.CreateArchiveTimeStampInput(withPlaceholder, _xmlData);
         var tsaClient = CreateTimestampClient(endpoint.ToString(), scopedProvider);
-        byte[] xmlHash = CryptoUtility.ComputeHash(signedXml, hashAlg);
-        byte[] tsToken = await tsaClient.GetTimestampAsync(xmlHash, hashAlg, cancellationToken).ConfigureAwait(false);
+        byte[] archiveToken = await tsaClient.GetTimestampAsync(input, hashAlgorithm, cancellationToken).ConfigureAwait(false);
+        TimestampClient.ValidateTimestampToken(archiveToken, input, hashAlgorithm);
 
-        return XadesSignatureBuilder.EmbedArchiveTimeStamp(signedXml, tsToken);
+        byte[] completedXml = XadesSignatureBuilder.EmbedArchiveTimeStamp(signedXml, archiveToken);
+        var warnings = new List<string>();
+        if (!XadesSignatureBuilder.ValidateArchiveTimeStamp(completedXml, _xmlData, warnings))
+        {
+            throw new SigningException(
+                $"The produced ArchiveTimeStamp did not validate: {string.Join(" ", warnings)}",
+                SigningErrorReason.LevelNotAchievable);
+        }
+
+        return completedXml;
     }
 
     private XadesSignerBuilder WithCredential(XadesSigningCredential credential) =>
         With(_options with { Credential = credential });
+
+    private sealed record XadesLtvEmbeddingResult(byte[] SignedXml, LtvCollectionResult Evidence);
 
     private XadesSignerBuilder With(XadesSigningOptions options) =>
         new(_xmlData, options);

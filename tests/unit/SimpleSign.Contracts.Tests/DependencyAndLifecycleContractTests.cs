@@ -2,10 +2,10 @@ using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using Microsoft.Extensions.Logging;
 using SimpleSign.CAdES;
+using SimpleSign.Core.Constants;
 using SimpleSign.Core.Crypto;
 using SimpleSign.Core.Http;
 using SimpleSign.Core.Signing;
-using SimpleSign.Core.Validation;
 using SimpleSign.PAdES;
 using SimpleSign.PAdES.Signing;
 using SimpleSign.TestHelpers;
@@ -22,6 +22,19 @@ namespace SimpleSign.Contracts.Tests;
 /// </summary>
 public sealed class DependencyAndLifecycleContractTests
 {
+    [Fact(DisplayName = "PAdES: a stream-backed builder lineage is single-use")]
+    public async Task Pades_StreamBackedBuilder_SecondTerminalCallThrows()
+    {
+        using var cert = ContractFixtures.CreateSignerCertificate();
+        using var input = new MemoryStream(TestPdfFactory.CreateMinimalPdf());
+        var builder = PadesSigner.Document(input).WithCertificate(cert);
+
+        await builder.SignAsync();
+
+        var ex = await Should.ThrowAsync<SigningException>(() => builder.SignAsync());
+        ex.Reason.ShouldBe(SigningErrorReason.DocumentNotSignable);
+    }
+
     [Theory]
     [InlineData("pades")]
     [InlineData("cades")]
@@ -112,11 +125,12 @@ public sealed class DependencyAndLifecycleContractTests
             new TimestampOptions(new Uri("http://mock-tsa.example.com")),
             failureBehavior: SigningLevelFailureBehavior.ReturnLowerLevel);
 
-        await Should.ThrowAsync<CertificateValidationException>(() =>
+        var exception = await Should.ThrowAsync<SigningException>(() =>
             PadesSigner.Document(TestPdfFactory.CreateMinimalPdf())
                 .WithCertificate(cert)
                 .WithLevel(profile)
                 .SignWithDetailsAsync());
+        exception.Reason.ShouldBe(SigningErrorReason.CertificateExpired);
     }
 
     [Theory]
@@ -257,8 +271,12 @@ public sealed class DependencyAndLifecycleContractTests
     [Fact(DisplayName = "PAdES: strict B-LT embeds collectible revocation material (DSS inspection)")]
     public async Task Pades_LongTerm_WithCollectibleCrl_EmbedsValidationMaterial()
     {
-        using var pki = new SyntheticPki(crlDistributionPoint: "http://crl.example.com/test-ca.crl");
-        using var crlClient = TestRevocationClient.Build(pki.BuildLeafCrl());
+        using var pki = new SyntheticPki(
+            crlDistributionPoint: "http://198.51.100.1/leaf.crl",
+            intermediateCrlDistributionPoint: "http://198.51.100.1/intermediate.crl");
+        using var crlClient = TestRevocationClient.BuildForUris(
+            (pki.CrlDistributionPoint!, pki.BuildLeafCrl()),
+            (pki.IntermediateCrlDistributionPoint!, pki.BuildIntermediateCrl()));
         using var tsaClient = ContractFixtures.BuildMockTsaClient();
 
         var result = await PadesSigner.Document(TestPdfFactory.CreateMinimalPdf())
@@ -276,8 +294,12 @@ public sealed class DependencyAndLifecycleContractTests
     [Fact(DisplayName = "CAdES: strict B-LT embeds collectible revocation material")]
     public async Task Cades_LongTerm_WithCollectibleCrl_EmbedsValidationMaterial()
     {
-        using var pki = new SyntheticPki(crlDistributionPoint: "http://crl.example.com/test-ca.crl");
-        using var crlClient = TestRevocationClient.Build(pki.BuildLeafCrl());
+        using var pki = new SyntheticPki(
+            crlDistributionPoint: "http://198.51.100.1/leaf.crl",
+            intermediateCrlDistributionPoint: "http://198.51.100.1/intermediate.crl");
+        using var crlClient = TestRevocationClient.BuildForUris(
+            (pki.CrlDistributionPoint!, pki.BuildLeafCrl()),
+            (pki.IntermediateCrlDistributionPoint!, pki.BuildIntermediateCrl()));
         using var tsaClient = ContractFixtures.BuildMockTsaClient();
 
         var result = await CadesSigner.Document(ContractFixtures.BinaryContent)
@@ -294,8 +316,12 @@ public sealed class DependencyAndLifecycleContractTests
     [Fact(DisplayName = "XAdES: strict B-LT embeds collectible revocation material")]
     public async Task Xades_LongTerm_WithCollectibleCrl_EmbedsValidationMaterial()
     {
-        using var pki = new SyntheticPki(crlDistributionPoint: "http://crl.example.com/test-ca.crl");
-        using var crlClient = TestRevocationClient.Build(pki.BuildLeafCrl());
+        using var pki = new SyntheticPki(
+            crlDistributionPoint: "http://198.51.100.1/leaf.crl",
+            intermediateCrlDistributionPoint: "http://198.51.100.1/intermediate.crl");
+        using var crlClient = TestRevocationClient.BuildForUris(
+            (pki.CrlDistributionPoint!, pki.BuildLeafCrl()),
+            (pki.IntermediateCrlDistributionPoint!, pki.BuildIntermediateCrl()));
         using var tsaClient = ContractFixtures.BuildMockTsaClient();
 
         var result = await XadesSigner.Document(ContractFixtures.XmlDocument)
@@ -312,8 +338,12 @@ public sealed class DependencyAndLifecycleContractTests
     [Fact(DisplayName = "PAdES: strict B-LTA with local CRL embeds DocTimeStamp and DSS")]
     public async Task Pades_Archive_WithCollectibleCrl_EmbedsArchiveTimestamp()
     {
-        using var pki = new SyntheticPki(crlDistributionPoint: "http://crl.example.com/test-ca.crl");
-        using var crlClient = TestRevocationClient.Build(pki.BuildLeafCrl());
+        using var pki = new SyntheticPki(
+            crlDistributionPoint: "http://198.51.100.1/leaf.crl",
+            intermediateCrlDistributionPoint: "http://198.51.100.1/intermediate.crl");
+        using var crlClient = TestRevocationClient.BuildForUris(
+            (pki.CrlDistributionPoint!, pki.BuildLeafCrl()),
+            (pki.IntermediateCrlDistributionPoint!, pki.BuildIntermediateCrl()));
         using var tsaClient = ContractFixtures.BuildMockTsaClient();
         var timestampOptions = new TimestampOptions(
             new Uri("http://mock-tsa.example.com"), new SingleClientProvider(tsaClient));
@@ -330,6 +360,100 @@ public sealed class DependencyAndLifecycleContractTests
         result.HasArchiveTimestamp.ShouldBeTrue();
     }
 
+    [Fact(DisplayName = "CAdES: strict B-LTA constructs and verifies ATSHashIndexV3 coverage")]
+    public async Task Cades_Archive_WithCollectibleCrl_EmbedsVerifiableArchiveTimestampV3()
+    {
+        using var pki = new SyntheticPki(
+            crlDistributionPoint: "http://198.51.100.1/leaf.crl",
+            intermediateCrlDistributionPoint: "http://198.51.100.1/intermediate.crl");
+        using var crlClient = TestRevocationClient.BuildForUris(
+            (pki.CrlDistributionPoint!, pki.BuildLeafCrl()),
+            (pki.IntermediateCrlDistributionPoint!, pki.BuildIntermediateCrl()));
+        using var tsaClient = ContractFixtures.BuildMockTsaClient();
+        var timestampOptions = new TimestampOptions(
+            new Uri("http://mock-tsa.example.com"), new SingleClientProvider(tsaClient));
+
+        var result = await CadesSigner.Document(ContractFixtures.BinaryContent)
+            .WithCertificate(pki.Leaf, pki.IntermediatesAndRoot())
+            .WithLevel(AdesBaselineProfile.Archive(
+                timestampOptions,
+                new LongTermValidationOptions(new SingleClientProvider(crlClient))))
+            .SignWithDetailsAsync();
+
+        result.AchievedLevel.ShouldBe(AdesBaselineLevel.Archive);
+        result.HasLongTermValidationMaterial.ShouldBeTrue();
+        result.HasArchiveTimestamp.ShouldBeTrue();
+
+        var parsed = CmsParser.Parse(result.SignedArtifact);
+        parsed.ArchiveTimestampToken.ShouldNotBeNull();
+        parsed.UnsignedAttributes!.ContainsKey(Oids.AtsHashIndexV3).ShouldBeFalse();
+        CmsParser.Parse(parsed.ArchiveTimestampToken!).UnsignedAttributes!
+            .ContainsKey(Oids.AtsHashIndexV3).ShouldBeTrue();
+
+        CadesArchiveTimestampV3.Validate(result.SignedArtifact, ContractFixtures.BinaryContent, [])
+            .ShouldBeTrue();
+        CadesArchiveTimestampV3.Validate(result.SignedArtifact, "different content"u8.ToArray(), [])
+            .ShouldBeFalse();
+    }
+
+    [Fact(DisplayName = "XAdES: strict B-LTA constructs and verifies the ETSI ArchiveTimeStamp input")]
+    public async Task Xades_Archive_WithCollectibleCrl_EmbedsVerifiableArchiveTimestamp()
+    {
+        using var pki = new SyntheticPki(
+            crlDistributionPoint: "http://198.51.100.1/leaf.crl",
+            intermediateCrlDistributionPoint: "http://198.51.100.1/intermediate.crl");
+        using var crlClient = TestRevocationClient.BuildForUris(
+            (pki.CrlDistributionPoint!, pki.BuildLeafCrl()),
+            (pki.IntermediateCrlDistributionPoint!, pki.BuildIntermediateCrl()));
+        using var tsaClient = ContractFixtures.BuildMockTsaClient();
+        var timestampOptions = new TimestampOptions(
+            new Uri("http://mock-tsa.example.com"), new SingleClientProvider(tsaClient));
+
+        var result = await XadesSigner.Document(ContractFixtures.XmlDocument)
+            .WithCertificate(pki.Leaf, pki.IntermediatesAndRoot())
+            .WithLevel(AdesBaselineProfile.Archive(
+                timestampOptions,
+                new LongTermValidationOptions(new SingleClientProvider(crlClient))))
+            .SignWithDetailsAsync();
+
+        result.AchievedLevel.ShouldBe(AdesBaselineLevel.Archive);
+        result.HasLongTermValidationMaterial.ShouldBeTrue();
+        result.HasArchiveTimestamp.ShouldBeTrue();
+        XadesSignatureBuilder.ExtractArchiveTimeStamp(result.SignedArtifact).ShouldNotBeNull();
+        XadesSignatureBuilder.ValidateArchiveTimeStamp(result.SignedArtifact, ContractFixtures.XmlDocument, [])
+            .ShouldBeTrue();
+        var validation = new XadesSignatureValidator().Validate(
+            result.SignedArtifact, pki.IntermediatesAndRoot(), ContractFixtures.XmlDocument);
+        validation.HasValidArchiveTimeStamp.ShouldBe(true);
+        byte[] tampered = System.Text.Encoding.UTF8.GetBytes(
+            System.Text.Encoding.UTF8.GetString(result.SignedArtifact).Replace("contract test", "different data", StringComparison.Ordinal));
+        XadesSignatureBuilder.ValidateArchiveTimeStamp(tampered, ContractFixtures.XmlDocument, [])
+            .ShouldBeFalse();
+
+        var distributed = new System.Xml.XmlDocument { PreserveWhitespace = true };
+        distributed.Load(new MemoryStream(result.SignedArtifact));
+        var archiveElement = distributed.SelectSingleNode("//*[local-name()='ArchiveTimeStamp']") as System.Xml.XmlElement;
+        archiveElement.ShouldNotBeNull();
+        archiveElement!.AppendChild(distributed.CreateElement("Include", "http://uri.etsi.org/01903/v1.4.1#"));
+        using var distributedStream = new MemoryStream();
+        distributed.Save(distributedStream);
+        Should.Throw<NotSupportedException>(() =>
+            XadesSignatureBuilder.CreateArchiveTimeStampInput(distributedStream.ToArray(), ContractFixtures.XmlDocument));
+
+        var unsupportedTransform = new System.Xml.XmlDocument { PreserveWhitespace = true };
+        unsupportedTransform.Load(new MemoryStream(result.SignedArtifact));
+        var transform = unsupportedTransform.SelectSingleNode(
+            "//*[local-name()='Reference']/*[local-name()='Transforms']/*[local-name()='Transform']")
+            as System.Xml.XmlElement;
+        transform.ShouldNotBeNull();
+        transform!.SetAttribute("Algorithm", "urn:simplesign:test:unsupported-transform");
+        using var unsupportedTransformStream = new MemoryStream();
+        unsupportedTransform.Save(unsupportedTransformStream);
+        Should.Throw<NotSupportedException>(() =>
+            XadesSignatureBuilder.CreateArchiveTimeStampInput(
+                unsupportedTransformStream.ToArray(), ContractFixtures.XmlDocument));
+    }
+
     [Theory]
     [InlineData("pades")]
     [InlineData("cades")]
@@ -338,8 +462,9 @@ public sealed class DependencyAndLifecycleContractTests
     {
         using var cert = CreateExpiredCertificate();
 
-        await Should.ThrowAsync<CertificateValidationException>(
+        var ex = await Should.ThrowAsync<SigningException>(
             () => SignWithCertificateAsync(format, cert, AdesBaselineProfile.Basic()));
+        ex.Reason.ShouldBe(SigningErrorReason.CertificateExpired);
     }
 
     [Theory]
@@ -388,6 +513,39 @@ public sealed class DependencyAndLifecycleContractTests
             () => SignWithExternalSignerAsync(format, cert, signer, cts.Token));
 
         signer.Invoked.ShouldBeFalse();
+    }
+
+    [Theory]
+    [InlineData("cades")]
+    [InlineData("xades")]
+    public async Task CancellationDuringLtvCollection_PropagatesUnchanged(string format)
+    {
+        using var pki = new SyntheticPki(crlDistributionPoint: "http://198.51.100.1/leaf.crl");
+        using var tsaClient = ContractFixtures.BuildMockTsaClient();
+        using var cancellationHandler = new CancellationAwareHttpHandler();
+        using var ltvClient = new HttpClient(cancellationHandler);
+        using var cts = new CancellationTokenSource();
+        var profile = AdesBaselineProfile.LongTerm(
+            new TimestampOptions(new Uri("http://mock-tsa.example.com"), new SingleClientProvider(tsaClient)),
+            new LongTermValidationOptions(new SingleClientProvider(ltvClient)));
+
+        Task signing = format switch
+        {
+            "cades" => CadesSigner.Document(ContractFixtures.BinaryContent)
+                .WithCertificate(pki.Leaf, [pki.IntermediateCa])
+                .WithLevel(profile)
+                .SignWithDetailsAsync(cts.Token),
+            "xades" => XadesSigner.Document(ContractFixtures.XmlDocument)
+                .WithCertificate(pki.Leaf, [pki.IntermediateCa])
+                .WithLevel(profile)
+                .SignWithDetailsAsync(cts.Token),
+            _ => throw new ArgumentOutOfRangeException(nameof(format))
+        };
+
+        await cancellationHandler.Started.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        cts.Cancel();
+
+        await Should.ThrowAsync<OperationCanceledException>(() => signing);
     }
 
     [Theory]
@@ -562,7 +720,7 @@ public sealed class DependencyAndLifecycleContractTests
             ReadOnlyMemory<byte> dataToTimestamp,
             HashAlgorithmName hashAlgorithm,
             CancellationToken cancellationToken = default) =>
-            Task.FromResult(ContractFixtures.BuildFakeTimestampToken());
+            Task.FromResult(TimestampTestResponseBuilder.CreateTokenForData(dataToTimestamp.Span, hashAlgorithm));
     }
 
     private sealed class RecordingLtvEmbedder : ILtvEmbedder
@@ -610,6 +768,20 @@ public sealed class DependencyAndLifecycleContractTests
         {
             Invoked = true;
             return ValueTask.FromResult(ReadOnlyMemory<byte>.Empty);
+        }
+    }
+
+    private sealed class CancellationAwareHttpHandler : HttpMessageHandler
+    {
+        internal TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        protected override async Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            Started.TrySetResult();
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken).ConfigureAwait(false);
+            throw new InvalidOperationException("The cancellation-aware handler should not complete normally.");
         }
     }
 

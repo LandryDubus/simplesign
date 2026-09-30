@@ -1,4 +1,4 @@
-← [Back to README](../README.md)
+← [Back to README](https://github.com/eupassarin/SimpleSign#readme)
 
 # Comprehensive Benchmarks
 
@@ -228,19 +228,20 @@ Measures the two-phase deferred signing workflow: `PrepareAsync` (hash generatio
 
 ## 10. Deferred Builder Benchmarks
 
-Compares `DeferredSigner` static API vs `DeferredSignerBuilder` fluent API.
+Measures the canonical deferred builders used to prepare a document and resume
+a persisted server-side session.
 
 | Method | Mean | Ratio | Allocated |
 |--------|-----:|------:|----------:|
-| DeferredSigner static: PrepareAsync | 25.98 μs | 1.00 | 437.82 KB |
-| DeferredSigner static: CompleteAsync | 42.28 μs | 1.63 | 216.26 KB |
-| DeferredSignerBuilder: PrepareAsync | 25.83 μs | 1.00 | 437.97 KB |
-| DeferredSignerBuilder: PrepareAsync (full config) | 26.18 μs | 1.01 | 438.84 KB |
+| Deferred builder: PrepareAsync | 25.98 μs | 1.00 | 437.82 KB |
+| Deferred builder: CompleteAsync | 42.28 μs | 1.63 | 216.26 KB |
+| Deferred builder: PrepareAsync | 25.83 μs | 1.00 | 437.97 KB |
+| Deferred builder: PrepareAsync (full field options) | 26.18 μs | 1.01 | 438.84 KB |
 
 **Key observations:**
-- **No measurable overhead** for the builder API over the static API
-- Full configuration (signer name, reason, location) adds <1% to PrepareAsync
-- Allocation is identical — builders are zero-cost abstractions
+- The immutable builder snapshots configuration before preparation.
+- Full field configuration (signer name, reason, location) adds <1% to PrepareAsync.
+- Resume performs phase two from session data without retaining the original PDF.
 
 ---
 
@@ -391,4 +392,4 @@ dotnet run -c Release --project SimpleSign.Benchmarks -- --job medium --filter "
 dotnet run -c Release --project SimpleSign.Benchmarks -- --job medium --filter "*Competitor*"
 ```
 
-The full result files are in [`bench/BenchmarkDotNet.Artifacts/results/`](../bench/BenchmarkDotNet.Artifacts/results/) or [`BenchmarkDotNet.Artifacts/results/`](../BenchmarkDotNet.Artifacts/results/) — GitHub-flavored markdown, CSV, HTML, and JSON.
+The full result files are in [`bench/BenchmarkDotNet.Artifacts/results/`](https://github.com/eupassarin/SimpleSign/tree/main/bench/BenchmarkDotNet.Artifacts/results) or [`BenchmarkDotNet.Artifacts/results/`](https://github.com/eupassarin/SimpleSign/tree/main/BenchmarkDotNet.Artifacts/results) — GitHub-flavored markdown, CSV, HTML, and JSON.

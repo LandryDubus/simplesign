@@ -26,20 +26,20 @@ For scenarios where the caller controls the full signing operation:
 // ValueTask<ReadOnlyMemory<byte>> SignAsync(ExternalSigningRequest request, CancellationToken ct)
 ```
 
-The signer receives an explicit `ExternalSigningRequest` carrying the payload bytes (CMS signed attributes for PAdES/CAdES; canonicalized XML `SignedInfo` for XAdES — distinguished by `PayloadKind`), the fully resolved hash algorithm, the signature algorithm OID, and the operation ID. It returns raw signature bytes (RSA PKCS#1 v1.5, ECDSA DER SEQUENCE { r, s }, or raw EdDSA bytes). Legacy delegates are adapted via `FuncExternalSigner`. Algorithm inference and compatibility validation happen at terminal execution, after all fluent calls, so configuration order cannot freeze mismatched digest/signature pairs. See ADR 0015.
+The signer receives an explicit `ExternalSigningRequest` carrying the payload bytes (CMS signed attributes for PAdES/CAdES; canonicalized XML `SignedInfo` for XAdES — distinguished by `PayloadKind`), the fully resolved hash algorithm, the signature algorithm OID, operation ID, and complete RSA-PSS parameters when applicable. It returns RSA PKCS#1 v1.5/PSS or ECDSA DER SEQUENCE `{ r, s }` bytes; SimpleSign verifies those bytes against the supplied certificate before writing a CMS/XML container. Production integrations implement `IExternalSigner` directly. Algorithm inference and compatibility validation happen at terminal execution, after all fluent calls, so configuration order cannot freeze mismatched digest/signature pairs. See ADR 0015 and ADR 0016.
 
-### 2. Deferred Signing (`DeferredSigner.PrepareAsync` + `CompleteAsync`)
+### 2. Deferred Signing (`DeferredSigner.Document` + `Resume`)
 
 For web/mobile scenarios where server and client are separate:
 
 ```
 Server                          Client
 ──────                          ──────
-PrepareAsync(pdf, cert)
+Document(pdf).WithCertificate(cert).PrepareAsync()
 → hashToSign + sessionData
                                   Sign(hashToSign)
                                   → raw signature
-CompleteAsync(sessionData, sig)
+Resume(sessionData).CompleteAsync(sig)
 → signed.pdf
 ```
 
@@ -54,7 +54,7 @@ The `sessionData` is an opaque blob that encodes the PDF state between phases. T
 - Timestamp hash: derived from the fully resolved signing hash
 - External signer returns a raw signature — SimpleSign constructs the CMS/XML container
 - Deferred session data is not encrypted (caller is responsible for secure storage)
-- EdDSA (Ed25519/Ed448) only supported via external signer path (no BCL API for direct EdDSA signing)
+- EdDSA signing is not advertised in v0.9.0: the net8.0 target cannot verify its raw external signature output consistently. It is rejected before container construction rather than emitting an unverifiable artifact.
 
 **Alternatives considered:**
 

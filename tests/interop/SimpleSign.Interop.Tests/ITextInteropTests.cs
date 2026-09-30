@@ -48,7 +48,7 @@ public sealed class ITextInteropTests(ITestOutputHelper output)
         var signed = await PadesSigner.Document(pdf)
             .WithCertificate(cert)
             .WithAppearance(SignatureAppearance.Auto())
-            .WithMetadata("Test Signer", "iText interop", "Brazil")
+            .WithTestFieldOptions("Test Signer", "iText interop", "Brazil")
             .SignAsync();
         await ValidatePdfWithIText(signed, "pades-visual");
     }
@@ -61,7 +61,7 @@ public sealed class ITextInteropTests(ITestOutputHelper output)
         using var cert = TestCertificateFactory.CreateSelfSignedCert("CN=PAdES Metadata iText");
         var signed = await PadesSigner.Document(pdf)
             .WithCertificate(cert)
-            .WithMetadata("André Almeida", "Contract review", "Vitória")
+            .WithTestFieldOptions("André Almeida", "Contract review", "Vitória")
             .SignAsync();
 
         var tmpDir = CreateTempDir();
@@ -112,8 +112,8 @@ public sealed class ITextInteropTests(ITestOutputHelper output)
     {
         SkipIfDockerUnavailable();
         var pdf = MinimalPdf();
-        using var pki = new SyntheticPki(crlDistributionPoint: "http://crl.example.com/test-ca.crl");
-        using var crlClient = TestRevocation.BuildCrlClient(pki.BuildLeafCrl());
+        using var pki = TestRevocation.CreatePki();
+        using var crlClient = TestRevocation.BuildCrlClient(pki);
         var signed = await PadesSigner.Document(pdf)
             .WithCertificate(pki.Leaf, pki.IntermediatesAndRoot())
             .WithLevel(AdesBaselineProfile.LongTerm(

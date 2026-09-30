@@ -542,14 +542,18 @@ public sealed class ExpandedInteropTests(ITestOutputHelper output)
         using var cert = TestCertificateFactory.CreateSelfSignedCert("CN=Deferred Full Chain");
 
         // Phase 1: prepare
-        var prepResult = await DeferredSigner.PrepareAsync(pdf, cert);
+        byte[] sessionIntegrityKey = RandomNumberGenerator.GetBytes(32);
+        var signer = DeferredSigner.Document(pdf)
+            .WithCertificate(cert)
+            .WithSessionIntegrityKey(sessionIntegrityKey);
+        var prepResult = await signer.PrepareAsync();
 
         // Phase 2: sign hash (simulating HSM)
         using var rsa = cert.GetRSAPrivateKey()!;
         var signedHash = rsa.SignData(prepResult.HashToSign, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
 
         // Phase 3: complete
-        var signed = await DeferredSigner.CompleteAsync(prepResult.SessionData, signedHash);
+        var signed = await DeferredSigner.Resume(prepResult.SessionData, sessionIntegrityKey).CompleteAsync(signedHash);
 
         // Extract CMS and validate structure
         using var stream = new MemoryStream(signed);

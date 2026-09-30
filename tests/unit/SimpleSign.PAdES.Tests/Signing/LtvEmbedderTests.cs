@@ -129,6 +129,20 @@ public sealed class LtvEmbedderTests
         actualValue.ShouldNotBeNull("");
     }
 
+    [Fact(DisplayName = "Complete LTV evidence requires every required certificate")]
+    public void HasCompleteEvidence_MissingRequiredCertificate_ReturnsFalse()
+    {
+        using X509Certificate2 firstCertificate = TestCertificateFactory.CreateSelfSignedCert("CN=First required certificate");
+        using X509Certificate2 secondCertificate = TestCertificateFactory.CreateSelfSignedCert("CN=Second required certificate");
+        var dss = new DssValidationData(
+            [],
+            [],
+            [firstCertificate.RawData],
+            new Dictionary<string, VriData>());
+
+        LtvEmbedder.HasCompleteEvidence(dss, [firstCertificate, secondCertificate]).ShouldBeFalse();
+    }
+
     [Fact(DisplayName = "Null PDF throws ArgumentNullException")]
     public async Task EmbedLtvDataAsync_NullPdf_ThrowsArgumentNullException()
     {
@@ -194,11 +208,9 @@ public sealed class LtvEmbedderTests
     [Fact(DisplayName = "With CRL data, output is larger than input")]
     public async Task EmbedLtvDataAsync_WithCrlData_OutputIsLargerThanInput()
     {
-        byte[] array = new byte[256];
-        Random.Shared.NextBytes(array);
-        using HttpClient httpClient = MockHttpHandler.ForGetBytes(array, HttpStatusCode.OK);
-        LtvEmbedder ltvEmbedder = new LtvEmbedder(httpClient);
         using X509Certificate2 cert = CreateCertWithCrlUrl();
+        using HttpClient httpClient = MockHttpHandler.ForGetBytes(BuildFakeCrl(cert.IssuerName.RawData), HttpStatusCode.OK);
+        LtvEmbedder ltvEmbedder = new LtvEmbedder(httpClient);
         byte[] pdf = TestPdfFactory.CreateMinimalPdf();
         (await ltvEmbedder.EmbedLtvDataAsync(pdf, [cert])).Length.ShouldBeGreaterThan(pdf.Length, "DSS dictionary with CRL data should be appended");
     }
@@ -206,10 +218,9 @@ public sealed class LtvEmbedderTests
     [Fact(DisplayName = "With CRL data, output contains DSS dictionary")]
     public async Task EmbedLtvDataAsync_WithCrlData_OutputContainsDssMarker()
     {
-        byte[] content = [48, 130, 1, 0];
-        using HttpClient httpClient = MockHttpHandler.ForGetBytes(content, HttpStatusCode.OK);
-        LtvEmbedder ltvEmbedder = new LtvEmbedder(httpClient);
         using X509Certificate2 cert = CreateCertWithCrlUrl();
+        using HttpClient httpClient = MockHttpHandler.ForGetBytes(BuildFakeCrl(cert.IssuerName.RawData), HttpStatusCode.OK);
+        LtvEmbedder ltvEmbedder = new LtvEmbedder(httpClient);
         byte[] signedPdf = TestPdfFactory.CreateMinimalPdf();
         byte[] bytes = await ltvEmbedder.EmbedLtvDataAsync(signedPdf, [cert]);
         string actualValue = Encoding.Latin1.GetString(bytes);
@@ -223,10 +234,9 @@ public sealed class LtvEmbedderTests
         // Regression for the v0.4.0 fix to BuildUpdatedCatalogDss — the catalog write
         // returned by the embedder must end with an EOL marker after "endobj" so the
         // XRef stream written immediately after is LF-preceded.
-        byte[] content = [48, 130, 1, 0];
-        using HttpClient httpClient = MockHttpHandler.ForGetBytes(content, HttpStatusCode.OK);
-        LtvEmbedder ltvEmbedder = new LtvEmbedder(httpClient);
         using X509Certificate2 cert = CreateCertWithCrlUrl();
+        using HttpClient httpClient = MockHttpHandler.ForGetBytes(BuildFakeCrl(cert.IssuerName.RawData), HttpStatusCode.OK);
+        LtvEmbedder ltvEmbedder = new LtvEmbedder(httpClient);
         byte[] signedPdf = TestPdfFactory.CreateMinimalPdf();
         byte[] bytes = await ltvEmbedder.EmbedLtvDataAsync(signedPdf, [cert]);
         string text = Encoding.Latin1.GetString(bytes);
@@ -255,10 +265,9 @@ public sealed class LtvEmbedderTests
     [Fact(DisplayName = "With CRL data, output starts with original PDF")]
     public async Task EmbedLtvDataAsync_WithCrlData_OutputStartsWithOriginalPdf()
     {
-        byte[] content = [48, 130, 1, 0];
-        using HttpClient httpClient = MockHttpHandler.ForGetBytes(content, HttpStatusCode.OK);
-        LtvEmbedder ltvEmbedder = new LtvEmbedder(httpClient);
         using X509Certificate2 cert = CreateCertWithCrlUrl();
+        using HttpClient httpClient = MockHttpHandler.ForGetBytes(BuildFakeCrl(cert.IssuerName.RawData), HttpStatusCode.OK);
+        LtvEmbedder ltvEmbedder = new LtvEmbedder(httpClient);
         byte[] pdf = TestPdfFactory.CreateMinimalPdf();
         (await ltvEmbedder.EmbedLtvDataAsync(pdf, [cert])).AsSpan(0, pdf.Length).ToArray().ShouldBe(pdf);
     }
@@ -322,7 +331,7 @@ public sealed class LtvEmbedderTests
         usesXRefStreams.ShouldBeTrue("signed PDF should preserve xref stream format");
 
         // Embed LTV with a CRL server that returns valid-looking data
-        byte[] fakeCrl = BuildFakeCrl();
+        byte[] fakeCrl = BuildFakeCrl(cert.IssuerName.RawData);
         using var httpClient = MockHttpHandler.ForGetBytes(fakeCrl, HttpStatusCode.OK);
         var embedder = new LtvEmbedder(httpClient);
         byte[] ltvPdf = await embedder.EmbedLtvDataAsync(signedPdf, [cert]);
@@ -341,8 +350,10 @@ public sealed class LtvEmbedderTests
     [Fact(DisplayName = "Multiple certs with CRL URLs: all CRLs are embedded")]
     public async Task EmbedLtvDataAsync_MultipleCertsWithCrls_AllCrlsEmbedded()
     {
-        byte[] crl1 = [48, 12, 2, 1, 1];
-        byte[] crl2 = [48, 12, 2, 1, 2];
+        using X509Certificate2 cert1 = CreateCertWithCrlUrl("http://crl.test/cert1.crl");
+        using X509Certificate2 cert2 = CreateCertWithCrlUrl("http://crl.test/cert2.crl");
+        byte[] crl1 = BuildFakeCrl(cert1.IssuerName.RawData);
+        byte[] crl2 = BuildFakeCrl(cert2.IssuerName.RawData);
         int requestCount = 0;
 
         using HttpClient httpClient = new HttpClient(new MockHttpHandler(async _ =>
@@ -356,8 +367,6 @@ public sealed class LtvEmbedderTests
         }));
 
         LtvEmbedder embedder = new LtvEmbedder(httpClient);
-        using X509Certificate2 cert1 = CreateCertWithCrlUrl("http://crl.test/cert1.crl");
-        using X509Certificate2 cert2 = CreateCertWithCrlUrl("http://crl.test/cert2.crl");
         byte[] pdf = TestPdfFactory.CreateMinimalPdf();
 
         byte[] result = await embedder.EmbedLtvDataAsync(pdf, [cert1, cert2]);
@@ -370,7 +379,9 @@ public sealed class LtvEmbedderTests
     [Fact(DisplayName = "Parallel processing: one cert failure does not block others")]
     public async Task EmbedLtvDataAsync_OneCertFails_StillProcessesOthers()
     {
-        byte[] crlData = [48, 12, 2, 1, 0];
+        using X509Certificate2 cert1 = CreateCertWithCrlUrl("http://crl.test/ok.crl");
+        using X509Certificate2 cert2 = CreateCertWithCrlUrl("http://crl.test/fail.crl");
+        byte[] crlData = BuildFakeCrl(cert1.IssuerName.RawData);
 
         int requestCount = 0;
         using HttpClient httpClient = new HttpClient(new MockHttpHandler(async _ =>
@@ -388,8 +399,6 @@ public sealed class LtvEmbedderTests
         }));
 
         LtvEmbedder embedder = new LtvEmbedder(httpClient);
-        using X509Certificate2 cert1 = CreateCertWithCrlUrl("http://crl.test/ok.crl");
-        using X509Certificate2 cert2 = CreateCertWithCrlUrl("http://crl.test/fail.crl");
         byte[] pdf = TestPdfFactory.CreateMinimalPdf();
 
         byte[] result = await embedder.EmbedLtvDataAsync(pdf, [cert1, cert2]);
@@ -400,11 +409,12 @@ public sealed class LtvEmbedderTests
     [Fact(DisplayName = "Multiple certs: result is structurally identical across runs")]
     public async Task EmbedLtvDataAsync_MultipleCerts_StructureStableAcrossRuns()
     {
-        byte[] crl1 = [48, 6, 2, 1, 0];
-        byte[] crl2 = [48, 6, 2, 1, 1];
-
         async Task<byte[]> RunEmbedAsync()
         {
+            using X509Certificate2 cert1 = CreateCertWithCrlUrl("http://crl.test/cert1.crl");
+            using X509Certificate2 cert2 = CreateCertWithCrlUrl("http://crl.test/cert2.crl");
+            byte[] crl1 = BuildFakeCrl(cert1.IssuerName.RawData);
+            byte[] crl2 = BuildFakeCrl(cert2.IssuerName.RawData);
             using HttpClient httpClient = new HttpClient(new MockHttpHandler(async req =>
             {
                 string url = req.RequestUri?.AbsoluteUri ?? "";
@@ -416,8 +426,6 @@ public sealed class LtvEmbedderTests
             }));
 
             LtvEmbedder embedder = new LtvEmbedder(httpClient);
-            using X509Certificate2 cert1 = CreateCertWithCrlUrl("http://crl.test/cert1.crl");
-            using X509Certificate2 cert2 = CreateCertWithCrlUrl("http://crl.test/cert2.crl");
             return await embedder.EmbedLtvDataAsync(TestPdfFactory.CreateMinimalPdf(), [cert1, cert2]);
         }
 
@@ -445,7 +453,7 @@ public sealed class LtvEmbedderTests
         return count;
     }
 
-    private static byte[] BuildFakeCrl()
+    private static byte[] BuildFakeCrl(byte[] issuerName)
     {
         // Build a minimal DER-encoded CRL structure
         // This is a fake CRL that won't validate but is enough for LtvEmbedder to embed
@@ -461,18 +469,7 @@ public sealed class LtvEmbedderTests
                 {
                     writer.WriteObjectIdentifier("1.2.840.113549.1.1.11"); // sha256WithRSAEncryption
                 }
-                // issuer
-                using (writer.PushSequence())
-                {
-                    using (writer.PushSetOf())
-                    {
-                        using (writer.PushSequence())
-                        {
-                            writer.WriteObjectIdentifier("2.5.4.3"); // CN
-                            writer.WriteCharacterString(System.Formats.Asn1.UniversalTagNumber.UTF8String, "CRL Test");
-                        }
-                    }
-                }
+                writer.WriteEncodedValue(issuerName);
                 // thisUpdate
                 writer.WriteUtcTime(DateTimeOffset.UtcNow);
             }
@@ -487,54 +484,25 @@ public sealed class LtvEmbedderTests
         return writer.Encode();
     }
 
-    private static byte[] BuildFakeTimestampToken(byte marker = 0x01)
+    private static HttpClient BuildTimestampClient(Action<byte[]> captureToken)
     {
-        var writer = new AsnWriter(AsnEncodingRules.DER);
-        using (writer.PushSequence())
+        return new HttpClient(new MockHttpHandler(async request =>
         {
-            writer.WriteObjectIdentifier("1.2.840.113549.1.7.2");
-            using (writer.PushSequence(new Asn1Tag(TagClass.ContextSpecific, 0, true)))
-            {
-                writer.WriteOctetString([marker, 0x02, 0x03]);
-            }
-        }
+            byte[] requestBytes = await request.Content!.ReadAsByteArrayAsync().ConfigureAwait(false);
+            byte[] timestampResponse = TimestampTestResponseBuilder.CreateForRequest(requestBytes);
+            var responseReader = new AsnReader(timestampResponse, AsnEncodingRules.DER);
+            var responseSequence = responseReader.ReadSequence();
+            _ = responseSequence.ReadSequence();
+            captureToken(responseSequence.ReadEncodedValue().ToArray());
 
-        return writer.Encode();
-    }
-
-    private static byte[] BuildFakeTimestampResponse(byte[] timestampToken)
-    {
-        var writer = new AsnWriter(AsnEncodingRules.DER);
-        using (writer.PushSequence())
-        {
-            using (writer.PushSequence())
-            {
-                writer.WriteInteger(0);
-            }
-
-            writer.WriteEncodedValue(timestampToken);
-        }
-
-        return writer.Encode();
-    }
-
-    private static HttpClient BuildLtvHttpClient(byte[] timestampToken)
-    {
-        byte[] timestampResponse = BuildFakeTimestampResponse(timestampToken);
-        byte[] crl = BuildFakeCrl();
-        return new HttpClient(new MockHttpHandler(request =>
-        {
             var response = new HttpResponseMessage(HttpStatusCode.OK)
             {
-                Content = new ByteArrayContent(request.Method == HttpMethod.Post ? timestampResponse : crl)
+                Content = new ByteArrayContent(timestampResponse)
             };
-            if (request.Method == HttpMethod.Post)
-            {
-                response.Content.Headers.ContentType =
-                    new System.Net.Http.Headers.MediaTypeHeaderValue("application/timestamp-reply");
-            }
+            response.Content.Headers.ContentType =
+                new System.Net.Http.Headers.MediaTypeHeaderValue("application/timestamp-reply");
 
-            return Task.FromResult(response);
+            return response;
         }));
     }
 
@@ -578,9 +546,9 @@ public sealed class LtvEmbedderTests
         byte[] pdf = TestPdfFactory.CreateMinimalPdf();
         byte[] signed = await PadesSigner.Document(pdf).WithCertificate(cert).SignAsync();
 
-        using HttpClient httpClient = MockHttpHandler.ForGetBytes([48, 6, 2, 1, 0], HttpStatusCode.OK);
-        var embedder = new LtvEmbedder(httpClient);
         using X509Certificate2 crlCert = CreateCertWithCrlUrl();
+        using HttpClient httpClient = MockHttpHandler.ForGetBytes(BuildFakeCrl(crlCert.IssuerName.RawData), HttpStatusCode.OK);
+        var embedder = new LtvEmbedder(httpClient);
         byte[] ltvPdf = await embedder.EmbedLtvDataAsync(signed, [cert, crlCert]);
 
         string pdfText = Encoding.Latin1.GetString(ltvPdf);
@@ -594,9 +562,9 @@ public sealed class LtvEmbedderTests
         byte[] pdf = TestPdfFactory.CreateMinimalPdf();
         byte[] signed = await PadesSigner.Document(pdf).WithCertificate(cert).SignAsync();
 
-        using HttpClient httpClient = MockHttpHandler.ForGetBytes([48, 6, 2, 1, 0], HttpStatusCode.OK);
-        var embedder = new LtvEmbedder(httpClient);
         using X509Certificate2 crlCert = CreateCertWithCrlUrl();
+        using HttpClient httpClient = MockHttpHandler.ForGetBytes(BuildFakeCrl(crlCert.IssuerName.RawData), HttpStatusCode.OK);
+        var embedder = new LtvEmbedder(httpClient);
         byte[] ltvPdf = await embedder.EmbedLtvDataAsync(signed, [cert, crlCert]);
 
         string pdfText = Encoding.Latin1.GetString(ltvPdf);
@@ -637,14 +605,16 @@ public sealed class LtvEmbedderTests
     [Fact(DisplayName = "Incremental B-LT signatures preserve their own VRI timestamp mappings")]
     public async Task SignAsync_IncrementalLongTermSignatures_PreserveHistoricalVriTimestampMappings()
     {
-        byte[] timestamp1 = BuildFakeTimestampToken(0x11);
-        byte[] timestamp2 = BuildFakeTimestampToken(0x22);
+        byte[]? timestamp1 = null;
+        byte[]? timestamp2 = null;
         using var signer = TestCertificateFactory.CreateSelfSignedCert("CN=Incremental B-LT Signer");
         using X509Certificate2 revocationCert = CreateCertWithCrlUrl(includePrivateKey: false);
-        using HttpClient httpClient1 = BuildLtvHttpClient(timestamp1);
-        using HttpClient httpClient2 = BuildLtvHttpClient(timestamp2);
-        using HttpClient crlClient1 = MockHttpHandler.ForGetBytes(BuildFakeCrl(), HttpStatusCode.OK);
-        using HttpClient crlClient2 = MockHttpHandler.ForGetBytes(BuildFakeCrl(), HttpStatusCode.OK);
+        using HttpClient httpClient1 = BuildTimestampClient(token => timestamp1 = token);
+        using HttpClient httpClient2 = BuildTimestampClient(token => timestamp2 = token);
+        using HttpClient crlClient1 = MockHttpHandler.ForGetBytes(
+            BuildFakeCrl(revocationCert.IssuerName.RawData), HttpStatusCode.OK);
+        using HttpClient crlClient2 = MockHttpHandler.ForGetBytes(
+            BuildFakeCrl(revocationCert.IssuerName.RawData), HttpStatusCode.OK);
 
         var firstProvider = new SingleClientProvider(httpClient1);
         byte[] firstTimestamped = await PadesSigner.Document(TestPdfFactory.CreateMinimalPdfWithPage())
@@ -653,17 +623,18 @@ public sealed class LtvEmbedderTests
             .WithLevel(AdesBaselineProfile.Timestamped(
                 new TimestampOptions(new Uri("http://tsa.example.com"), firstProvider)))
             .SignAsync();
+        byte[] firstTimestampToken = timestamp1 ?? throw new InvalidOperationException("The first TSA token was not captured.");
         var firstEmbedder = new LtvEmbedder(crlClient1);
         byte[] firstLongTerm = await firstEmbedder.EmbedLtvDataAsync(
             firstTimestamped,
             [revocationCert],
-            timestamp1);
+            firstTimestampToken);
 
         List<string> firstHashes = LtvEmbedder.ExtractSignatureContentHashes(firstLongTerm);
         firstHashes.Count.ShouldBe(1);
         ExistingDssData firstDss = DssExtractor.ParseExistingDss(firstLongTerm);
         int firstVriObjNum = firstDss.VriEntries[firstHashes[0]];
-        ExtractVriTimestamp(firstLongTerm, firstVriObjNum).ShouldBe(timestamp1);
+        ExtractVriTimestamp(firstLongTerm, firstVriObjNum).ShouldBe(firstTimestampToken);
 
         var secondProvider = new SingleClientProvider(httpClient2);
         byte[] secondTimestamped = await PadesSigner.Document(firstLongTerm)
@@ -672,11 +643,12 @@ public sealed class LtvEmbedderTests
             .WithLevel(AdesBaselineProfile.Timestamped(
                 new TimestampOptions(new Uri("http://tsa.example.com"), secondProvider)))
             .SignAsync();
+        byte[] secondTimestampToken = timestamp2 ?? throw new InvalidOperationException("The second TSA token was not captured.");
         var secondEmbedder = new LtvEmbedder(crlClient2);
         byte[] secondLongTerm = await secondEmbedder.EmbedLtvDataAsync(
             secondTimestamped,
             [revocationCert],
-            timestamp2);
+            secondTimestampToken);
 
         List<string> finalHashes = LtvEmbedder.ExtractSignatureContentHashes(secondLongTerm);
         finalHashes.Count.ShouldBe(2);
@@ -685,8 +657,8 @@ public sealed class LtvEmbedderTests
         finalDss.VriEntries[finalHashes[0]].ShouldBe(firstVriObjNum,
             "the active DSS must preserve the historical VRI object mapping");
         ExtractVriTimestamp(secondLongTerm, finalDss.VriEntries[finalHashes[0]])
-            .ShouldBe(timestamp1, "signature 1 must retain timestamp 1");
+            .ShouldBe(firstTimestampToken, "signature 1 must retain timestamp 1");
         ExtractVriTimestamp(secondLongTerm, finalDss.VriEntries[finalHashes[1]])
-            .ShouldBe(timestamp2, "signature 2 must reference only timestamp 2");
+            .ShouldBe(secondTimestampToken, "signature 2 must reference only timestamp 2");
     }
 }

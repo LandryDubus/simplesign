@@ -65,30 +65,32 @@ src/
 
 ### Fluent Builder (public API)
 ```csharp
-// Signing
-await SimpleSigner.Document(pdf).WithCertificate(cert).WithTimestamp(url).SignAsync();
+// PAdES signing
+await PadesSigner.Document(pdf).WithCertificate(cert).WithLevel(AdesBaselineProfile.Basic()).SignAsync();
 
 // With signature algorithm override (e.g., RSASSA-PSS)
-await SimpleSigner.Document(pdf).WithCertificate(cert).WithSignatureAlgorithm(Oids.RsaPss).SignAsync();
+await PadesSigner.Document(pdf).WithCertificate(cert).WithSignatureAlgorithm(Oids.RsaPss).SignAsync();
 
 // Deferred
-var prepared = await DeferredSigner.PrepareAsync(pdf, cert);
-await DeferredSigner.CompleteAsync(session, signature);
-
-// Deferred builder
-var builder = new DeferredSignerBuilder(pdfBytes, cert)
-    .WithSignerName("Jane Doe")
-    .WithTimestamp("http://timestamp.digicert.com");
+var builder = DeferredSigner.Document(pdfBytes)
+    .WithCertificate(cert)
+    .WithSessionIntegrityKey(sessionIntegrityKey)
+    .WithLevel(AdesBaselineProfile.Basic());
 var prepared = await builder.PrepareAsync();
-var signedPdf = await builder.CompleteAsync(prepared.SessionData, signature);
+var signedPdf = await DeferredSigner.Resume(prepared.SessionData, sessionIntegrityKey)
+    .CompleteAsync(signature);
 
 // Batch
-var batch = BatchSigner.Create(cert).WithTimestamp(url).Build();
+var batch = BatchSigner.Create(cert)
+    .WithLevel(AdesBaselineProfile.Basic())
+    .Build();
 byte[] signed = await batch.SignAsync(pdfBytes);
 await foreach (var r in batch.SignAllAsync(inputs)) { }
 
 // CAdES
-await CadesSigner.Document(data).WithCertificate(cert).WithTimestamp(url).WithLevel(CadesLevel.Timestamped).SignAsync();
+await CadesSigner.Document(data).WithCertificate(cert)
+    .WithLevel(AdesBaselineProfile.Timestamped(new TimestampOptions(new Uri(url))))
+    .SignAsync();
 ```
 
 ### Extension Points (interfaces)

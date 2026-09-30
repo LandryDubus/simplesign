@@ -81,7 +81,7 @@ Three overloads: stream-target (`SignAsync(stream, ct)` returns `Task`), byte-ar
 
 ```csharp
 .WithExternalSigner(cert, signer)
-// signer implements IExternalSigner; legacy delegates can use FuncExternalSigner
+// signer implements IExternalSigner and receives a complete ExternalSigningRequest
 ```
 
 Algorithm resolution happens at terminal execution, so builder call order does not affect the resolved digest/signature pair. See ADR 0006 and ADR 0015.
@@ -92,7 +92,10 @@ For web/mobile scenarios where the private key is on a different machine:
 
 ```csharp
 // Phase 1 — server
-var prepared = await DeferredSigner.PrepareAsync(pdf, cert);
+var signer = DeferredSigner.Document(pdf)
+    .WithCertificate(cert)
+    .WithSessionIntegrityKey(sessionIntegrityKey);
+var prepared = await signer.PrepareAsync();
 sessionDb.Save(prepared.SessionData);
 return prepared.HashToSign;  // send to client
 
@@ -100,14 +103,14 @@ return prepared.HashToSign;  // send to client
 byte[] rawSig = await webSigner.SignAsync(prepared.HashToSign);
 
 // Phase 2b — server completes
-var signedPdf = await DeferredSigner.CompleteAsync(sessionData, rawSig);
+var signedPdf = await DeferredSigner.Resume(sessionData, sessionIntegrityKey).CompleteAsync(rawSig);
 ```
 
-`DeferredSigningSession` serialises to JSON with optional HMAC integrity check. AOT-safe via `JsonSerializerContext`.
+`DeferredSigningSession` serialises to JSON with mandatory HMAC-SHA256 integrity protection. The server-owned key is never serialised. AOT-safe via `JsonSerializerContext`.
 
 ### 7. Validation upfront
 
-Before any PDF modification, `SignCoreAsync` validates: credential presence, private-key availability (local signing), certificate expiry, DocMDP lock, PDF/A compatibility (when enabled), algorithm compatibility, and level dependencies (the baseline profile factories make invalid level combinations unrepresentable). Level-enrichment failures are strict by default (see ADR 0015).
+Before any PDF modification, `SignCoreAsync` validates: credential presence, private-key availability (local signing), certificate validity at operation time (`NotBefore` and `NotAfter`), DocMDP lock, PDF/A compatibility (when enabled), resolved algorithm compatibility, and level dependencies (the baseline profile factories make invalid level combinations unrepresentable). Level-enrichment failures are strict by default (see ADR 0015 and ADR 0016).
 
 **Consequences:**
 - Immutable configuration state: all builder options live in one record; each `With*` starts from the previous state

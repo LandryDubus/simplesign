@@ -28,7 +28,16 @@
         "files": ["api/**.yml", "api/index.md"]
       },
       {
-        "files": ["articles/**.md", "articles/**/toc.yml", "toc.yml", "*.md"]
+        "files": [
+          "articles/**.md",
+          "articles/**/toc.yml",
+          "adr/**.md",
+          "adr/**/toc.yml",
+          "migration/**.md",
+          "migration/**/toc.yml",
+          "toc.yml",
+          "*.md"
+        ]
       }
     ],
     "resource": [
@@ -42,7 +51,7 @@
     "template": ["default", "modern"],
     "globalMetadata": {
       "_appTitle": "SimpleSign",
-      "_appFooter": "SimpleSign — .NET PAdES digital signature library",
+      "_appFooter": "SimpleSign — .NET PAdES, CAdES, and XAdES digital signature library",
       "_enableSearch": true,
       "_disableContribution": false,
       "_gitContribute": {

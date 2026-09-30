@@ -83,14 +83,15 @@ internal static class CryptoUtility
 
     /// <summary>
     /// Parses the hash algorithm from a DER-encoded <c>RSASSA-PSS-params</c> structure
-    /// (RFC 4055 §3.1). Returns SHA-256 if the params are absent or the hash OID is
-    /// unrecognised (RFC 4055 default).
+    /// (RFC 4055 §3.1). The ASN.1 default inside an encoded parameter sequence is SHA-1;
+    /// callers that see an absent parameter field must handle that separately because it
+    /// means no key-level restriction rather than an encoded default.
     /// </summary>
     internal static HashAlgorithmName ParsePssHashAlgorithm(ReadOnlySpan<byte> algIdentifierParams)
     {
         if (algIdentifierParams.IsEmpty)
         {
-            return HashAlgorithmName.SHA256; // DEFAULT per RFC 4055 §3.1
+            return HashAlgorithmName.SHA1; // DEFAULT per RFC 4055 §3.1
         }
 
         try
@@ -115,7 +116,7 @@ internal static class CryptoUtility
                     Oids.Sha256 => HashAlgorithmName.SHA256,
                     Oids.Sha384 => HashAlgorithmName.SHA384,
                     Oids.Sha512 => HashAlgorithmName.SHA512,
-                    _ => HashAlgorithmName.SHA256 // unrecognised → RFC default
+                    _ => HashAlgorithmName.SHA1 // unrecognised → RFC default
                 };
             }
         }
@@ -124,6 +125,6 @@ internal static class CryptoUtility
             // Malformed params — fall through to default
         }
 
-        return HashAlgorithmName.SHA256; // DEFAULT per RFC 4055 §3.1
+        return HashAlgorithmName.SHA1; // DEFAULT per RFC 4055 §3.1
     }
 }

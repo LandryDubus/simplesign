@@ -93,7 +93,7 @@ public sealed class WithExternalSignerChainTests
         return await PadesSigner.Document(pdf)
             .WithExternalSigner(
                 signerCert,
-                new FuncExternalSigner(data =>
+                new DelegatingExternalSigner(data =>
                 {
                     using var rsa = signerCert.GetRSAPrivateKey()!;
                     return Task.FromResult(rsa.SignData(data, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1));
@@ -121,7 +121,7 @@ public sealed class WithExternalSignerChainTests
         Assert.Throws<ArgumentNullException>(() =>
             builder.WithExternalSigner(
                 null!,
-                new FuncExternalSigner(_ => Task.FromResult(Array.Empty<byte>())),
+                new DelegatingExternalSigner(_ => Task.FromResult(Array.Empty<byte>())),
                 [])
             .WithSignatureAlgorithm("1.2.840.113549.1.1.11"));
     }
@@ -143,7 +143,7 @@ public sealed class WithExternalSignerChainTests
         Assert.Throws<ArgumentNullException>(() =>
             builder.WithExternalSigner(
                 cert,
-                new FuncExternalSigner(_ => Task.FromResult(Array.Empty<byte>())),
+                new DelegatingExternalSigner(_ => Task.FromResult(Array.Empty<byte>())),
                 null!));
     }
 
@@ -155,7 +155,7 @@ public sealed class WithExternalSignerChainTests
         Assert.Throws<ArgumentException>(() =>
             builder.WithExternalSigner(
                 cert,
-                new FuncExternalSigner(_ => Task.FromResult(Array.Empty<byte>())),
+                new DelegatingExternalSigner(_ => Task.FromResult(Array.Empty<byte>())),
                 [])
             .WithSignatureAlgorithm("   "));
     }
@@ -167,7 +167,7 @@ public sealed class WithExternalSignerChainTests
         var builder = PadesSigner.Document([0x25, 0x50, 0x44, 0x46]);
         IReadOnlyList<X509Certificate2>? nullChain = null;
         Assert.Throws<ArgumentNullException>(() =>
-            builder.WithExternalSigner(cert, new FuncExternalSigner(_ => Task.FromResult(Array.Empty<byte>())), nullChain!));
+            builder.WithExternalSigner(cert, new DelegatingExternalSigner(_ => Task.FromResult(Array.Empty<byte>())), nullChain!));
     }
 
     // ── Builder shape / chain storage ────────────────────────────────────────
@@ -179,7 +179,7 @@ public sealed class WithExternalSignerChainTests
         var builder = PadesSigner.Document([0x25, 0x50, 0x44, 0x46]);
         var builder2 = builder.WithExternalSigner(
             cert,
-            new FuncExternalSigner(_ => Task.FromResult(Array.Empty<byte>())),
+            new DelegatingExternalSigner(_ => Task.FromResult(Array.Empty<byte>())),
             [])
             .WithSignatureAlgorithm("1.2.840.113549.1.1.11");
 
@@ -197,7 +197,7 @@ public sealed class WithExternalSignerChainTests
         var builder = PadesSigner.Document([0x25, 0x50, 0x44, 0x46]);
         var builder2 = builder.WithExternalSigner(
             cert,
-            new FuncExternalSigner(_ => Task.FromResult(Array.Empty<byte>())),
+            new DelegatingExternalSigner(_ => Task.FromResult(Array.Empty<byte>())),
             []);
 
         builder.ShouldNotBeSameAs(builder2);
@@ -257,7 +257,7 @@ public sealed class WithExternalSignerChainTests
             byte[] signed = await PadesSigner.Document(BuildMinimalPdf())
                 .WithExternalSigner(
                     leaf,
-                    new FuncExternalSigner(data =>
+                    new DelegatingExternalSigner(data =>
                     {
                         using var rsa = leaf.GetRSAPrivateKey()!;
                         return Task.FromResult(rsa.SignData(data, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1));

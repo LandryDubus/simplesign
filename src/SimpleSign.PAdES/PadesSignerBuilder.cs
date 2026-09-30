@@ -2,11 +2,13 @@ using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using SimpleSign.Core.Constants;
 using SimpleSign.Core.Crypto;
 using SimpleSign.Core.Extensions;
 using SimpleSign.Core.Http;
 using SimpleSign.Core.Signing;
 using SimpleSign.Core.Validation;
+using SimpleSign.PAdES.Inspection;
 using SimpleSign.PAdES.Signing;
 using SimpleSign.PAdES.Validation;
 using SimpleSign.Pdf;
@@ -23,10 +25,12 @@ public sealed class PadesSignerBuilder
 {
     private readonly Stream _inputPdf;
     private readonly PadesSigningOptions _options;
+    private readonly PadesExecutionGate? _executionGate;
 
-    internal PadesSignerBuilder(Stream inputPdf, ILogger? logger = null)
+    internal PadesSignerBuilder(Stream inputPdf, bool singleExecution = true, ILogger? logger = null)
     {
         _inputPdf = inputPdf;
+        _executionGate = singleExecution ? new PadesExecutionGate() : null;
         _options = new PadesSigningOptions(
             Credential: null,
             HashAlgorithm: HashAlgorithmName.SHA256,
@@ -35,12 +39,16 @@ public sealed class PadesSignerBuilder
             SigningTime: null,
             Field: new SignatureFieldOptions(),
             Metadata: null,
-            PadesAttributes: true,
             EnforcePdfA: false,
             OperationId: null,
             Profile: AdesBaselineProfile.Basic(),
             CountryExtensions: [],
             Dependencies: new PadesDependencies(null, null, logger ?? NullLogger.Instance, DefaultHttpClientProvider.Instance));
+    }
+
+    internal PadesSignerBuilder(Stream inputPdf, ILogger? logger)
+        : this(inputPdf, singleExecution: true, logger)
+    {
     }
 
     internal PadesSignerBuilder(
@@ -50,6 +58,7 @@ public sealed class PadesSignerBuilder
         ILogger? logger = null)
     {
         _inputPdf = inputPdf;
+        _executionGate = new PadesExecutionGate();
         _options = new PadesSigningOptions(
             Credential: null,
             HashAlgorithm: HashAlgorithmName.SHA256,
@@ -58,7 +67,6 @@ public sealed class PadesSignerBuilder
             SigningTime: null,
             Field: new SignatureFieldOptions(),
             Metadata: null,
-            PadesAttributes: true,
             EnforcePdfA: false,
             OperationId: null,
             Profile: AdesBaselineProfile.Basic(),
@@ -66,10 +74,11 @@ public sealed class PadesSignerBuilder
             Dependencies: new PadesDependencies(tsaFactory, ltvEmbedder, logger ?? NullLogger.Instance, DefaultHttpClientProvider.Instance));
     }
 
-    private PadesSignerBuilder(Stream inputPdf, PadesSigningOptions options)
+    private PadesSignerBuilder(Stream inputPdf, PadesSigningOptions options, PadesExecutionGate? executionGate)
     {
         _inputPdf = inputPdf;
         _options = options;
+        _executionGate = executionGate;
     }
 
     #region Common fluent configuration
@@ -225,6 +234,23 @@ public sealed class PadesSignerBuilder
     }
 
     /// <summary>
+    /// Replaces the complete PDF signature-field configuration.
+    /// </summary>
+    /// <param name="options">The complete field configuration to snapshot.</param>
+    /// <returns>A new builder with the supplied field configuration.</returns>
+    /// <remarks>
+    /// Use this method when an optional field value previously configured on a builder must be
+    /// cleared. Unlike the convenience methods, this operation replaces rather than merges
+    /// field state.
+    /// </remarks>
+    public PadesSignerBuilder WithFieldOptions(SignatureFieldOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        ArgumentException.ThrowIfNullOrWhiteSpace(options.FieldName);
+        return With(_options with { Field = SnapshotField(options) });
+    }
+
+    /// <summary>
     /// Configures generic signer metadata for the signature.
     /// Use this for country-agnostic signing with structured metadata.
     /// For Brazil-specific signing, use <c>WithAdvancedSignature</c> from SimpleSign.Brasil.
@@ -235,10 +261,9 @@ public sealed class PadesSignerBuilder
     {
         ArgumentNullException.ThrowIfNull(metadata);
 
-        string reason = metadata.Reason ?? string.Empty;
-        string location = metadata.Location ?? metadata.InstitutionName ?? string.Empty;
+        string? location = metadata.Location ?? metadata.InstitutionName;
 
-        string contactInfo;
+        string? contactInfo;
         if (metadata.ContactInfo is not null)
         {
             contactInfo = metadata.ContactInfo;
@@ -267,33 +292,26 @@ public sealed class PadesSignerBuilder
             {
                 contactParts.Add($"Org: {metadata.InstitutionName}");
             }
-            contactInfo = string.Join(" | ", contactParts);
+            contactInfo = contactParts.Count == 0 ? null : string.Join(" | ", contactParts);
         }
 
-        var updatedField = CloneField(
-            signerName: metadata.SignerName,
-            reason: reason,
-            location: location,
-            contactInfo: contactInfo);
-
-        return With(_options with { Field = updatedField, Metadata = metadata });
-    }
-
-    /// <summary>Sets visible metadata on the signature.</summary>
-    /// <param name="signerName">Signer display name.</param>
-    /// <param name="reason">Signing reason.</param>
-    /// <param name="location">Signing location.</param>
-    /// <param name="contactInfo">Contact information.</param>
-    /// <returns>A new builder with the metadata configured.</returns>
-    public PadesSignerBuilder WithMetadata(
-        string? signerName = null,
-        string? reason = null,
-        string? location = null,
-        string? contactInfo = null) =>
-        With(_options with
+        var currentField = _options.Field;
+        var updatedField = new SignatureFieldOptions
         {
-            Field = CloneField(signerName: signerName, reason: reason, location: location, contactInfo: contactInfo)
-        });
+            FieldName = currentField.FieldName,
+            SignerName = metadata.SignerName,
+            Reason = metadata.Reason,
+            Location = location,
+            ContactInfo = contactInfo,
+            ContentsReservedBytes = currentField.ContentsReservedBytes,
+            SubFilter = currentField.SubFilter,
+            Appearance = currentField.Appearance,
+            CertificationLevel = currentField.CertificationLevel,
+            ExistingFieldName = currentField.ExistingFieldName
+        };
+
+        return With(_options with { Field = updatedField, Metadata = CopyMetadata(metadata) });
+    }
 
     /// <summary>
     /// Adds a visual appearance (stamp) to the signature on a specific page.
@@ -304,7 +322,7 @@ public sealed class PadesSignerBuilder
     public PadesSignerBuilder WithAppearance(SignatureAppearance appearance)
     {
         ArgumentNullException.ThrowIfNull(appearance);
-        return With(_options with { Field = CloneField(appearance: appearance) });
+        return With(_options with { Field = CloneField(appearance: appearance.Snapshot()) });
     }
 
     /// <summary>
@@ -338,45 +356,11 @@ public sealed class PadesSignerBuilder
         With(_options with { EnforcePdfA = true });
 
     /// <summary>
-    /// Produces a plain PKCS#7/CMS signature (<c>adbe.pkcs7.detached</c>) without PAdES-specific
-    /// attributes (no <c>id-aa-signingCertificateV2</c> / ESS CertV2).
-    /// Use this to interoperate with legacy systems or to replicate signatures produced by tools
-    /// that predate PAdES (Level: <c>CMS — no PAdES attributes</c>).
-    /// </summary>
-    /// <remarks>
-    /// When this mode is active, the resulting signature is NOT considered PAdES-compliant.
-    /// Validators that enforce PAdES (e.g., ITI) may report the signature as non-conformant.
-    /// </remarks>
-    /// <returns>A new builder configured for legacy CMS output.</returns>
-    public PadesSignerBuilder WithLegacyCms()
-    {
-        var legacyField = new SignatureFieldOptions
-        {
-            FieldName = _options.Field.FieldName,
-            SignerName = _options.Field.SignerName,
-            Reason = _options.Field.Reason,
-            Location = _options.Field.Location,
-            ContactInfo = _options.Field.ContactInfo,
-            ContentsReservedBytes = _options.Field.ContentsReservedBytes,
-            SubFilter = PdfSignatureSubFilter.AdbePkcs7Detached,
-            Appearance = _options.Field.Appearance,
-            CertificationLevel = _options.Field.CertificationLevel,
-            ExistingFieldName = _options.Field.ExistingFieldName
-        };
-        return With(_options with { Field = legacyField, PadesAttributes = false });
-    }
-
-    /// <summary>
     /// Sets the signature SubFilter value independently of PAdES attribute configuration.
     /// Default is <see cref="PdfSignatureSubFilter.EtsiCadesDetached"/>.
     /// Use <see cref="PdfSignatureSubFilter.AdbePkcs7Detached"/> for PDF/A-1 compatibility
     /// or when the target validator requires the legacy subfilter.
     /// </summary>
-    /// <remarks>
-    /// Unlike <see cref="WithLegacyCms"/>, this method does NOT disable CAdES/PAdES attributes.
-    /// The resulting signature includes full PAdES-B-B attributes (signing-certificate-v2, etc.)
-    /// while using the specified SubFilter value in the PDF signature dictionary.
-    /// </remarks>
     /// <param name="subFilter">The signature SubFilter value.</param>
     /// <returns>A new builder with the SubFilter configured.</returns>
     public PadesSignerBuilder WithSubFilter(PdfSignatureSubFilter subFilter)
@@ -458,7 +442,11 @@ public sealed class PadesSignerBuilder
     {
         ArgumentNullException.ThrowIfNull(outputStream);
         EnsureStrictProfile();
-        await SignCoreAsync(outputStream, cancellationToken).ConfigureAwait(false);
+        EnterExecution();
+        using var stagedOutput = new MemoryStream();
+        await SignCoreAsync(stagedOutput, cancellationToken).ConfigureAwait(false);
+        stagedOutput.Seek(0, SeekOrigin.Begin);
+        await stagedOutput.CopyToAsync(outputStream, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -475,6 +463,7 @@ public sealed class PadesSignerBuilder
     public async Task<byte[]> SignAsync(CancellationToken cancellationToken = default)
     {
         EnsureStrictProfile();
+        EnterExecution();
         using var output = new MemoryStream();
         await SignCoreAsync(output, cancellationToken).ConfigureAwait(false);
         return output.ToArray();
@@ -491,6 +480,7 @@ public sealed class PadesSignerBuilder
     /// <exception cref="NotSupportedException">Unsupported hash algorithm or key type.</exception>
     public async Task<PadesSigningResult> SignWithDetailsAsync(CancellationToken cancellationToken = default)
     {
+        EnterExecution();
         using var output = new MemoryStream();
         var result = await SignCoreAsync(output, cancellationToken).ConfigureAwait(false);
         return result with
@@ -533,11 +523,10 @@ public sealed class PadesSignerBuilder
         var sw = System.Diagnostics.Stopwatch.StartNew();
         logger.SigningStarted(opId, certificate.Subject, useExternal);
 
-        var effectiveHash = AlgorithmInference.ResolveEffectiveHashAlgorithm(
+        var resolvedAlgorithm = SigningAlgorithmResolver.Resolve(
             certificate, _options.HashAlgorithm, _options.HashAlgorithmExplicitlySet, _options.SignatureAlgorithmOid);
-        var sigOid = _options.SignatureAlgorithmOid
-            ?? CryptoUtility.DetectSignatureAlgorithmOid(certificate, effectiveHash);
-        CmsSignatureBuilder.ValidateSignatureAlgorithmCompatibility(certificate, sigOid);
+        var effectiveHash = resolvedAlgorithm.HashAlgorithm;
+        var sigOid = resolvedAlgorithm.SignatureAlgorithmOid;
 
         var warnings = new List<SigningWarning>();
         var kuExt = certificate.Extensions.OfType<X509KeyUsageExtension>().FirstOrDefault();
@@ -553,7 +542,7 @@ public sealed class PadesSignerBuilder
             await PreparePdfForSigningAsync(outputStream, effectiveHash, cancellationToken).ConfigureAwait(false);
 
         var cms = useExternal
-            ? await BuildExternalCmsAsync(signedBytes, effectiveHash, sigOid, certificate, chain, (ExternalCredential)credential, cancellationToken).ConfigureAwait(false)
+            ? await BuildExternalCmsAsync(signedBytes, effectiveHash, sigOid, resolvedAlgorithm.RsaPssParameters, certificate, chain, (ExternalCredential)credential, cancellationToken).ConfigureAwait(false)
             : BuildLocalCms(signedBytes, effectiveHash, sigOid, certificate, chain);
 
         byte[]? timestampTokenBytes = null;
@@ -608,7 +597,51 @@ public sealed class PadesSignerBuilder
                 outputStream, effectiveHash, pdfALevel, profile, opId, warnings, cancellationToken).ConfigureAwait(false);
         }
 
-        var achieved = ComputeAchievedLevel(timestampTokenBytes, hasLtvMaterial, hasArchiveTimestamp);
+        List<X509Certificate2>? requiredLtvCertificates = null;
+        List<X509Certificate2>? disposableTsaCertificates = null;
+        if (hasLtvMaterial)
+        {
+            requiredLtvCertificates = BuildRequiredLtvCertificates(timestampTokenBytes, out disposableTsaCertificates);
+        }
+
+        (bool HasTimestamp, bool HasLtvMaterial, bool HasArchiveTimestamp) artifactFacts;
+        try
+        {
+            artifactFacts = await InspectProducedArtifactAsync(
+                outputStream,
+                timestampTokenBytes,
+                hasLtvMaterial,
+                requiredLtvCertificates,
+                hasArchiveTimestamp,
+                cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            DisposeCertificates(disposableTsaCertificates);
+        }
+        if (timestampTokenBytes is not null && !artifactFacts.HasTimestamp)
+        {
+            HandleArtifactInspectionFailure(
+                profile, warnings, SigningWarningCode.SignatureTimestampUnavailable,
+                "The produced PDF does not contain the requested signature timestamp token.");
+        }
+
+        if (hasLtvMaterial && !artifactFacts.HasLtvMaterial)
+        {
+            HandleArtifactInspectionFailure(
+                profile, warnings, SigningWarningCode.LongTermValidationMaterialUnavailable,
+                "The produced PDF does not contain complete DSS validation material.");
+        }
+
+        if (hasArchiveTimestamp && !artifactFacts.HasArchiveTimestamp)
+        {
+            HandleArtifactInspectionFailure(
+                profile, warnings, SigningWarningCode.ArchiveTimestampUnavailable,
+                "The produced PDF does not contain the requested document timestamp.");
+        }
+
+        var achieved = ComputeAchievedLevel(
+            artifactFacts.HasTimestamp, artifactFacts.HasLtvMaterial, artifactFacts.HasArchiveTimestamp);
 
         logger.SigningCompleted(opId, sw.ElapsedMilliseconds, outputStream.Length);
 
@@ -617,19 +650,19 @@ public sealed class PadesSignerBuilder
             SignedArtifact = [],
             RequestedLevel = profile.Level,
             AchievedLevel = achieved,
-            HasSignatureTimestamp = timestampTokenBytes is not null,
-            HasLongTermValidationMaterial = hasLtvMaterial,
-            HasArchiveTimestamp = hasArchiveTimestamp,
+            HasSignatureTimestamp = artifactFacts.HasTimestamp,
+            HasLongTermValidationMaterial = artifactFacts.HasLtvMaterial,
+            HasArchiveTimestamp = artifactFacts.HasArchiveTimestamp,
             Warnings = warnings.AsReadOnly()
         };
     }
 
     private static AdesBaselineLevel ComputeAchievedLevel(
-        byte[]? timestampTokenBytes,
+        bool hasSignatureTimestamp,
         bool hasLtvMaterial,
         bool hasArchiveTimestamp)
     {
-        if (timestampTokenBytes is null)
+        if (!hasSignatureTimestamp)
         {
             return AdesBaselineLevel.Basic;
         }
@@ -640,6 +673,112 @@ public sealed class PadesSignerBuilder
         }
 
         return hasArchiveTimestamp ? AdesBaselineLevel.Archive : AdesBaselineLevel.LongTerm;
+    }
+
+    private static void HandleArtifactInspectionFailure(
+        AdesBaselineProfile profile,
+        List<SigningWarning> warnings,
+        SigningWarningCode code,
+        string message)
+    {
+        if (profile.FailureBehavior == SigningLevelFailureBehavior.Throw)
+        {
+            throw new SigningException(message, SigningErrorReason.LevelNotAchievable);
+        }
+
+        warnings.Add(new SigningWarning(code, message));
+        warnings.Add(new SigningWarning(
+            SigningWarningCode.LevelDowngraded,
+            "The requested baseline level could not be achieved; the artifact was downgraded."));
+    }
+
+    private static async Task<(bool HasTimestamp, bool HasLtvMaterial, bool HasArchiveTimestamp)>
+        InspectProducedArtifactAsync(
+            Stream outputStream,
+            byte[]? expectedTimestampToken,
+            bool expectedLtvMaterial,
+            IReadOnlyList<X509Certificate2>? requiredLtvCertificates,
+            bool expectedArchiveTimestamp,
+            CancellationToken cancellationToken)
+    {
+        try
+        {
+            outputStream.Seek(0, SeekOrigin.Begin);
+            var artifactBytes = new byte[outputStream.Length];
+            await outputStream.ReadExactlyAsync(artifactBytes, cancellationToken).ConfigureAwait(false);
+            outputStream.Seek(0, SeekOrigin.Begin);
+            PdfInspectionResult inspection = await PdfSignatureInspector.InspectAsync(
+                outputStream, cancellationToken: cancellationToken).ConfigureAwait(false);
+            // Incremental updates preserve prior signatures. The signature with the latest
+            // /Contents offset is the one this terminal operation just appended.
+            SignatureFieldInfo? signature = inspection.Signatures
+                .Where(field => !field.IsDocumentTimestamp)
+                .OrderByDescending(field => field.ByteRange.ContentsOffset)
+                .FirstOrDefault();
+            CmsSignedData? cms = signature is null ? null : CmsParser.Parse(signature.CmsRawData.ToArray());
+            bool hasTimestamp = expectedTimestampToken is not null && cms?.SignatureTimestampToken is not null &&
+                CryptographicOperations.FixedTimeEquals(cms.SignatureTimestampToken, expectedTimestampToken);
+            bool hasLtvMaterial = false;
+            if (expectedLtvMaterial && requiredLtvCertificates is not null)
+            {
+                using var dssStream = new MemoryStream(artifactBytes, writable: false);
+                var dss = await DssExtractor.TryReadFullDssDataAsync(dssStream, cancellationToken).ConfigureAwait(false);
+                hasLtvMaterial = LtvEmbedder.HasCompleteEvidence(dss, requiredLtvCertificates);
+            }
+            bool hasArchiveTimestamp = expectedArchiveTimestamp && inspection.Signatures
+                .Where(field => field.IsDocumentTimestamp)
+                .Any(field => HasValidDocumentTimestampBinding(field, artifactBytes));
+            return (hasTimestamp, hasLtvMaterial, hasArchiveTimestamp);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+            return (false, false, false);
+        }
+        finally
+        {
+            if (outputStream.CanSeek)
+            {
+                outputStream.Seek(0, SeekOrigin.End);
+            }
+        }
+    }
+
+    private static bool HasValidDocumentTimestampBinding(SignatureFieldInfo field, byte[] artifactBytes)
+    {
+        try
+        {
+            CmsSignedData timestamp = CmsParser.Parse(field.CmsRawData.ToArray());
+            HashAlgorithmName hashAlgorithm = timestamp.TstMessageImprintHashAlgOid switch
+            {
+                Oids.Sha256 => HashAlgorithmName.SHA256,
+                Oids.Sha384 => HashAlgorithmName.SHA384,
+                Oids.Sha512 => HashAlgorithmName.SHA512,
+                Oids.Sha3_256 => HashAlgorithmName.SHA3_256,
+                Oids.Sha3_384 => HashAlgorithmName.SHA3_384,
+                Oids.Sha3_512 => HashAlgorithmName.SHA3_512,
+                _ => throw new InvalidOperationException("DocTimeStamp uses an unsupported message-imprint algorithm."),
+            };
+            var byteRange = field.ByteRange;
+            if (!byteRange.IsValid || byteRange.Offset1 != 0 || byteRange.Offset2 + byteRange.Length2 > artifactBytes.Length)
+            {
+                return false;
+            }
+
+            var input = new byte[byteRange.Length1 + byteRange.Length2];
+            artifactBytes.AsSpan(0, (int)byteRange.Length1).CopyTo(input);
+            artifactBytes.AsSpan((int)byteRange.Offset2, (int)byteRange.Length2)
+                .CopyTo(input.AsSpan((int)byteRange.Length1));
+            TimestampClient.ValidateTimestampToken(field.CmsRawData.ToArray(), input, hashAlgorithm);
+            return true;
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or TimestampException or CryptographicException)
+        {
+            return false;
+        }
     }
 
     private static X509Certificate2 GetCertificate(SigningCredential credential) => credential switch
@@ -667,12 +806,14 @@ public sealed class PadesSignerBuilder
                 SigningErrorReason.PrivateKeyMissing);
         }
 
-        if (certificate.NotAfter < DateTime.UtcNow)
+        var signingTime = DateTimeOffset.UtcNow;
+        if (certificate.NotBefore > signingTime || certificate.NotAfter < signingTime)
         {
-            throw new CertificateValidationException(
-                $"Certificate '{certificate.Subject}' expired on {certificate.NotAfter:yyyy-MM-dd HH:mm:ss} UTC. Cannot sign with an expired certificate.",
-                certificate.Thumbprint,
-                certificate.Subject);
+            throw new SigningException(
+                $"Certificate '{certificate.Subject}' is not valid at {signingTime:yyyy-MM-dd HH:mm:ss} UTC.",
+                certificate.NotAfter < signingTime
+                    ? SigningErrorReason.CertificateExpired
+                    : SigningErrorReason.CertificateNotCurrentlyValid);
         }
 
         _ = opId;
@@ -728,7 +869,7 @@ public sealed class PadesSignerBuilder
             _options.SigningTime,
             chain,
             BuildExtraAttributes(),
-            _options.PadesAttributes,
+            padesAttributes: true,
             sigOid,
             _options.Dependencies.Logger);
     }
@@ -737,6 +878,7 @@ public sealed class PadesSignerBuilder
         byte[] signedBytes,
         HashAlgorithmName effectiveHash,
         string sigOid,
+        RsaPssParameters? rsaPssParameters,
         X509Certificate2 certificate,
         IReadOnlyList<X509Certificate2> chain,
         ExternalCredential external,
@@ -748,20 +890,40 @@ public sealed class PadesSignerBuilder
         byte[] contentHash = CmsSignatureBuilder.ComputeHash(signedBytes, effectiveHash);
         var time = _options.SigningTime ?? DateTimeOffset.UtcNow;
         byte[] signedAttrs = CmsSignatureBuilder.BuildSignedAttributes(
-            contentHash, digestOid, time, certificate, BuildExtraAttributes(), _options.PadesAttributes);
+            contentHash, digestOid, time, certificate, BuildExtraAttributes(), padesAttributes: true);
 
         var request = new ExternalSigningRequest(
             signedAttrs,
             effectiveHash,
             sigOid,
             ExternalSigningPayloadKind.CmsSignedAttributes,
-            _options.OperationId);
-        ReadOnlyMemory<byte> signature = await external.Signer.SignAsync(request, cancellationToken).ConfigureAwait(false);
+            _options.OperationId,
+            rsaPssParameters);
+        ReadOnlyMemory<byte> signature;
+        try
+        {
+            signature = await external.Signer.SignAsync(request, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            throw new SigningException("External signer failed to produce a signature.",
+                SigningErrorReason.ExternalSignerFailure, ex);
+        }
         if (signature.Length == 0)
         {
             throw new SigningException(
                 "External signer returned an empty signature.",
                 SigningErrorReason.ExternalSignerReturnedEmpty);
+        }
+
+        if (!CmsSignatureBuilder.VerifyExternalSignature(signedAttrs, signature.Span, certificate, effectiveHash, sigOid))
+        {
+            throw new SigningException("External signer returned a signature that does not verify with the configured certificate.",
+                SigningErrorReason.AlgorithmIncompatible);
         }
 
         List<X509Certificate2> allCerts = [certificate, .. chain];
@@ -801,8 +963,10 @@ public sealed class PadesSignerBuilder
         var logger = _options.Dependencies.Logger;
         logger.TimestampRequested(opId, timestampOptions.Endpoint.ToString());
         var tsaClient = CreateTimestampClient(timestampOptions.Endpoint.ToString(), timestampOptions.HttpClientProvider);
-        return await tsaClient.GetTimestampAsync(
-            TimestampClient.ExtractSignatureValue(cms), effectiveHash, cancellationToken).ConfigureAwait(false);
+        byte[] signatureValue = TimestampClient.ExtractSignatureValue(cms);
+        byte[] token = await tsaClient.GetTimestampAsync(signatureValue, effectiveHash, cancellationToken).ConfigureAwait(false);
+        TimestampClient.ValidateTimestampToken(token, signatureValue, effectiveHash);
+        return token;
     }
 
     private ITimestampClient CreateTimestampClient(string endpoint, IHttpClientProvider? scopedProvider)
@@ -847,7 +1011,17 @@ public sealed class PadesSignerBuilder
         // B-LT material. Inspect the produced DSS: B-LT requires certificate values AND
         // revocation values (OCSP or CRL).
         var dss = await DssExtractor.TryReadFullDssDataAsync(outputStream, cancellationToken, logger).ConfigureAwait(false);
-        bool dssEmbedded = dss.GlobalCerts.Count > 0 && (dss.GlobalCrls.Count > 0 || dss.GlobalOcsps.Count > 0);
+        var requiredCertificates = BuildRequiredLtvCertificates(timestampTokenBytes, out var disposableTsaCertificates);
+        bool dssEmbedded;
+        try
+        {
+            dssEmbedded = dss.GlobalCerts.Count > 0 &&
+                LtvEmbedder.HasCompleteEvidence(dss, requiredCertificates);
+        }
+        finally
+        {
+            DisposeCertificates(disposableTsaCertificates);
+        }
         if (!dssEmbedded)
         {
             logger.LtvEmbeddingFailed(opId);
@@ -945,6 +1119,45 @@ public sealed class PadesSignerBuilder
         return chain;
     }
 
+    private List<X509Certificate2> BuildRequiredLtvCertificates(
+        byte[]? timestampTokenBytes,
+        out List<X509Certificate2> disposableTsaCertificates)
+    {
+        var requiredCertificates = BuildChainWithSigner();
+        disposableTsaCertificates = [];
+        if (timestampTokenBytes is null)
+        {
+            return requiredCertificates;
+        }
+
+        foreach (var tsaCertificate in TsaCertificateExtractor.ExtractCertificates(timestampTokenBytes))
+        {
+            if (requiredCertificates.Any(certificate => certificate.Thumbprint == tsaCertificate.Thumbprint))
+            {
+                tsaCertificate.Dispose();
+                continue;
+            }
+
+            requiredCertificates.Add(tsaCertificate);
+            disposableTsaCertificates.Add(tsaCertificate);
+        }
+
+        return requiredCertificates;
+    }
+
+    private static void DisposeCertificates(IEnumerable<X509Certificate2>? certificates)
+    {
+        if (certificates is null)
+        {
+            return;
+        }
+
+        foreach (var certificate in certificates)
+        {
+            certificate.Dispose();
+        }
+    }
+
     #endregion
 
     #region Builder helpers
@@ -953,10 +1166,50 @@ public sealed class PadesSignerBuilder
         With(_options with { Credential = credential });
 
     private PadesSignerBuilder With(PadesSigningOptions options) =>
-        new(_inputPdf, options);
+        new(_inputPdf, options, _executionGate);
+
+    private void EnterExecution()
+    {
+        if (_executionGate is not null && !_executionGate.TryEnter())
+        {
+            throw new SigningException(
+                "A builder created from a stream may execute only once. Create a new builder for another signing operation.",
+                SigningErrorReason.DocumentNotSignable);
+        }
+    }
+
+    private sealed class PadesExecutionGate
+    {
+        private int _entered;
+
+        public bool TryEnter() => Interlocked.Exchange(ref _entered, 1) == 0;
+    }
 
     private static IReadOnlyList<X509Certificate2> CopyChain(IReadOnlyList<X509Certificate2> chain) =>
         chain.ToList().AsReadOnly();
+
+    private static SignatureMetadata CopyMetadata(SignatureMetadata source) => new()
+    {
+        SignerName = source.SignerName,
+        SignerId = source.SignerId,
+        SignerIdType = source.SignerIdType,
+        Email = source.Email,
+        IpAddress = source.IpAddress,
+        AuthenticationMethod = source.AuthenticationMethod,
+        InstitutionName = source.InstitutionName,
+        InstitutionId = source.InstitutionId,
+        InstitutionIdType = source.InstitutionIdType,
+        CommitmentType = source.CommitmentType,
+        LegalBasis = source.LegalBasis,
+        PolicyOid = source.PolicyOid,
+        PolicyUri = source.PolicyUri,
+        Reason = source.Reason,
+        ContactInfo = source.ContactInfo,
+        Location = source.Location,
+        ExtraAttributes = source.ExtraAttributes?.ToArray()
+    };
+
+    private static SignatureFieldOptions SnapshotField(SignatureFieldOptions source) => source.Snapshot();
 
     private SignatureFieldOptions CloneField(
         string? fieldName = null,

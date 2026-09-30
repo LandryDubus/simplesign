@@ -8,7 +8,6 @@ using SimpleSign.Core.Validation;
 using SimpleSign.PAdES.Inspection;
 using SimpleSign.PAdES.Validation;
 using SimpleSign.TestHelpers;
-using SimpleSign.TestFixtures;
 using Xunit;
 
 namespace SimpleSign.PAdES.Tests.Signing;
@@ -34,23 +33,27 @@ public sealed class PadesTStandaloneTests
         });
     }
 
-    private static HttpClient BuildRecordedTsaClient() =>
-        new(new MockHttpHandler(_ => Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+    private static HttpClient BuildMockTsaClient() =>
+        new(new MockHttpHandler(async request =>
         {
-            Content = new ByteArrayContent(RecordedFixtures.FreeTsaResponse)
+            byte[] requestBytes = await request.Content!.ReadAsByteArrayAsync().ConfigureAwait(false);
+            return new HttpResponseMessage(System.Net.HttpStatusCode.OK)
             {
-                Headers =
+                Content = new ByteArrayContent(TimestampTestResponseBuilder.CreateForRequest(requestBytes))
                 {
-                    ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/timestamp-reply")
+                    Headers =
+                    {
+                        ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/timestamp-reply")
+                    }
                 }
-            }
-        })));
+            };
+        }));
 
     [Fact(DisplayName = "PAdES-T (B-B + timestamp, no LTV) validates integrity and signature")]
     public async Task SignAsync_PadesT_ValidatesCorrectly()
     {
         using var cert = CreateRsaCert();
-        using var tsaClient = BuildRecordedTsaClient();
+        using var tsaClient = BuildMockTsaClient();
         byte[] pdf = TestPdfFactory.CreateMinimalPdf();
         using var stream = new MemoryStream(await PadesSigner
             .Document(pdf).WithCertificate(cert)
@@ -68,7 +71,7 @@ public sealed class PadesTStandaloneTests
     public async Task SignAsync_PadesT_DetectedAsBaselineT()
     {
         using var cert = CreateRsaCert();
-        using var tsaClient = BuildRecordedTsaClient();
+        using var tsaClient = BuildMockTsaClient();
         byte[] pdf = TestPdfFactory.CreateMinimalPdf();
         byte[] signed = await PadesSigner
             .Document(pdf).WithCertificate(cert)
@@ -85,7 +88,7 @@ public sealed class PadesTStandaloneTests
     public async Task SignAsync_PadesT_HasNoDss()
     {
         using var cert = CreateRsaCert();
-        using var tsaClient = BuildRecordedTsaClient();
+        using var tsaClient = BuildMockTsaClient();
         byte[] pdf = TestPdfFactory.CreateMinimalPdf();
         byte[] signed = await PadesSigner
             .Document(pdf).WithCertificate(cert)
@@ -105,7 +108,7 @@ public sealed class PadesTStandaloneTests
         // A failing revocation provider guarantees no revocation material can be
         // collected (B-LT requires revocation values), so the best-effort downgrade
         // stays at B-T with a real signature timestamp and no DSS.
-        using var tsaClient = BuildRecordedTsaClient();
+        using var tsaClient = BuildMockTsaClient();
         using var failingRevocation = MockHttpHandler.Failing();
         var result = await PadesSigner
             .Document(pdf).WithCertificate(cert)

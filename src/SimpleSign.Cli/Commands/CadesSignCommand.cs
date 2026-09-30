@@ -128,10 +128,15 @@ internal sealed class CadesSignCommand : AsyncCommand<CadesSignCommand.Settings>
         var contentType = ParseContentType(settings.ContentType) ?? CadesContentType.Detached;
 
         var logger = settings.CreateLogger<CadesSignCommand>();
-        var builder = CadesSigner.Document(data, logger)
+        var builder = CadesSigner.Document(data)
             .WithCertificate(cert)
             .WithHashAlgorithm(hashAlg)
             .WithContentType(contentType);
+
+        if (logger is not null)
+        {
+            builder = builder.WithLogger(logger);
+        }
 
         if (settings.TsaUrl is not null && level >= AdesBaselineLevel.Timestamped)
         {

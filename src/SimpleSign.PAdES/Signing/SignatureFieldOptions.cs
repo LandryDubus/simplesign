@@ -38,4 +38,18 @@ public sealed class SignatureFieldOptions
     /// The field must exist and have an empty /V value.
     /// </summary>
     public string? ExistingFieldName { get; init; }
+
+    internal SignatureFieldOptions Snapshot() => new()
+    {
+        FieldName = FieldName,
+        SignerName = SignerName,
+        Reason = Reason,
+        Location = Location,
+        ContactInfo = ContactInfo,
+        ContentsReservedBytes = ContentsReservedBytes,
+        SubFilter = SubFilter,
+        Appearance = Appearance?.Snapshot(),
+        CertificationLevel = CertificationLevel,
+        ExistingFieldName = ExistingFieldName
+    };
 }

@@ -145,10 +145,15 @@ internal sealed class XadesSignCommand : AsyncCommand<XadesSignCommand.Settings>
         var commitment = settings.Commitment is not null ? ParseCommitment(settings.Commitment) : null;
 
         var logger = settings.CreateLogger<XadesSignCommand>();
-        var builder = XadesSigner.Document(xmlData, logger)
+        var builder = XadesSigner.Document(xmlData)
             .WithCertificate(cert)
             .WithHashAlgorithm(hashAlg)
             .WithForm(form);
+
+        if (logger is not null)
+        {
+            builder = builder.WithLogger(logger);
+        }
 
         if (settings.TsaUrl is not null && level >= AdesBaselineLevel.Timestamped)
         {

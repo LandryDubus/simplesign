@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using Shouldly;
 using SimpleSign.Core.Constants;
 using SimpleSign.Core.Crypto;
+using SimpleSign.Core.Signing;
 using SimpleSign.TestHelpers;
 using Xunit;
 
@@ -78,6 +79,63 @@ public sealed class CmsSignatureBuilderCompatibilityTests
                 signatureAlgorithmOid: Oids.EcdsaSha256));
     }
 
+    [Fact(DisplayName = "Combined signature OID with a different digest throws a stable signing error")]
+    public void ValidateDigestCompatibility_CombinedOidAndDifferentDigest_Throws()
+    {
+        var ex = Should.Throw<SigningException>(() =>
+            CmsSignatureBuilder.ValidateSignatureAlgorithmDigestCompatibility(
+                HashAlgorithmName.SHA256, Oids.RsaSha512));
+
+        ex.Reason.ShouldBe(SigningErrorReason.AlgorithmIncompatible);
+    }
+
+    [Fact(DisplayName = "BuildAsync rejects an external signature that does not verify")]
+    public async Task BuildAsync_InvalidExternalSignature_ThrowsAlgorithmIncompatible()
+    {
+        using var cert = TestCertificateFactory.CreateSelfSignedCert();
+
+        var ex = await Should.ThrowAsync<SigningException>(() => CmsSignatureBuilder.BuildAsync(
+            "hello"u8.ToArray(),
+            cert,
+            _ => Task.FromResult(new byte[256]),
+            Oids.RsaSha256,
+            HashAlgorithmName.SHA256));
+
+        ex.Reason.ShouldBe(SigningErrorReason.AlgorithmIncompatible);
+    }
+
+    [Fact(DisplayName = "BuildAsync normalizes an empty external signature")]
+    public async Task BuildAsync_EmptyExternalSignature_ThrowsExternalSignerReturnedEmpty()
+    {
+        using var cert = TestCertificateFactory.CreateSelfSignedCert();
+
+        var ex = await Should.ThrowAsync<SigningException>(() => CmsSignatureBuilder.BuildAsync(
+            "hello"u8.ToArray(),
+            cert,
+            _ => Task.FromResult(Array.Empty<byte>()),
+            Oids.RsaSha256,
+            HashAlgorithmName.SHA256));
+
+        ex.Reason.ShouldBe(SigningErrorReason.ExternalSignerReturnedEmpty);
+    }
+
+    [Fact(DisplayName = "BuildAsync normalizes an external signer exception")]
+    public async Task BuildAsync_ExternalSignerThrows_ThrowsExternalSignerFailure()
+    {
+        using var cert = TestCertificateFactory.CreateSelfSignedCert();
+        var expected = new InvalidOperationException("token disconnected");
+
+        var ex = await Should.ThrowAsync<SigningException>(() => CmsSignatureBuilder.BuildAsync(
+            "hello"u8.ToArray(),
+            cert,
+            _ => Task.FromException<byte[]>(expected),
+            Oids.RsaSha256,
+            HashAlgorithmName.SHA256));
+
+        ex.Reason.ShouldBe(SigningErrorReason.ExternalSignerFailure);
+        ex.InnerException.ShouldBeSameAs(expected);
+    }
+
     // ── EdDSA compatibility tests ─────────────────────────────────────────────
 
     [Fact(DisplayName = "ValidateSignatureAlgorithmCompatibility: Ed25519 cert with Ed25519 OID passes")]
@@ -104,6 +162,22 @@ public sealed class CmsSignatureBuilderCompatibilityTests
         Should.Throw<ArgumentException>(() =>
             CmsSignatureBuilder.ValidateSignatureAlgorithmCompatibility(cert, Oids.RsaSha256))
             .Message.ShouldContain("not compatible");
+    }
+
+    [Fact(DisplayName = "SigningAlgorithmResolver rejects Ed25519 until raw external verification is available on all targets")]
+    public void Resolve_Ed25519Certificate_ThrowsAlgorithmIncompatible()
+    {
+        using var cert = TestCertificateFactory.TryCreateEdDsaCert();
+        if (cert is null)
+        {
+            return;
+        }
+
+        var ex = Should.Throw<SigningException>(() => SigningAlgorithmResolver.Resolve(
+            cert, HashAlgorithmName.SHA256, hashAlgorithmExplicitlySet: false,
+            configuredSignatureAlgorithmOid: Oids.Ed25519));
+
+        ex.Reason.ShouldBe(SigningErrorReason.AlgorithmIncompatible);
     }
 
     // ── CMS parsing helper ────────────────────────────────────────────────────

@@ -279,6 +279,17 @@ public sealed class DssExtractorTests
         result.VriEntries.ShouldBeEmpty();
     }
 
+    [Fact(DisplayName = "TryReadFullDssDataAsync preserves cancellation")]
+    public async Task TryReadFullDssDataAsync_CanceledToken_ThrowsOperationCanceledException()
+    {
+        using var stream = new MemoryStream("not a pdf"u8.ToArray());
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+
+        await Should.ThrowAsync<OperationCanceledException>(
+            () => DssExtractor.TryReadFullDssDataAsync(stream, cancellation.Token));
+    }
+
     [Fact(DisplayName = "TryReadFullDssDataAsync extracts global OCSPs and Certs")]
     public async Task TryReadFullDssDataAsync_WithOcspsAndCerts_ExtractsAll()
     {

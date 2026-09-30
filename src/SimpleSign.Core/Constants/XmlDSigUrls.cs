@@ -19,6 +19,15 @@ public static class XmlDSigUrls
     /// <summary>Exclusive Canonical XML 1.0 (omit comments).</summary>
     public const string ExcC14N = "http://www.w3.org/2001/10/xml-exc-c14n#";
 
+    /// <summary>Exclusive Canonical XML 1.0 (include comments).</summary>
+    public const string ExcC14NWithComments = "http://www.w3.org/2001/10/xml-exc-c14n#WithComments";
+
+    /// <summary>Canonical XML 1.0 (omit comments).</summary>
+    public const string C14N = "http://www.w3.org/TR/2001/REC-xml-c14n-20010315";
+
+    /// <summary>Canonical XML 1.0 (include comments).</summary>
+    public const string C14NWithComments = "http://www.w3.org/TR/2001/REC-xml-c14n-20010315#WithComments";
+
     #endregion
 
     #region Transform Algorithms
@@ -28,6 +37,9 @@ public static class XmlDSigUrls
 
     /// <summary>XPath Transform used to filter an XML signature reference node set.</summary>
     public const string XPathTransform = "http://www.w3.org/TR/1999/REC-xpath-19991116";
+
+    /// <summary>XMLDSig base64 transform.</summary>
+    public const string Base64Transform = "http://www.w3.org/2000/09/xmldsig#base64";
 
     #endregion
 

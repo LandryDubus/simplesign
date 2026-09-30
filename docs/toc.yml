@@ -5,9 +5,9 @@
 - name: Interoperability
   href: interoperability.md
 - name: ADRs
-  href: adr/
+  href: adr/index.md
 - name: Migration Guides
-  href: migration/
+  href: migration/index.md
 - name: API Reference
   href: api/
   homepage: api/index.md

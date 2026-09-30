@@ -3,8 +3,10 @@ using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using Shouldly;
 using SimpleSign.Core.Crypto;
+using SimpleSign.Core.Extensions;
 using SimpleSign.Core.Signing;
 using SimpleSign.Core.Validation;
+using SimpleSign.PAdES.Signing;
 using SimpleSign.PAdES.Validation;
 using SimpleSign.TestHelpers;
 using Xunit;
@@ -122,7 +124,7 @@ public sealed class SignerBuilderEdgeCaseTests
     {
         using X509Certificate2 cert = CreateRsaCert();
         byte[] pdfBytes = TestPdfFactory.CreateMinimalPdf();
-        byte[] array = await PadesSigner.Document(pdfBytes).WithCertificate(cert).WithMetadata("João Silva", "Aprovação de contrato", "São Paulo, BR")
+        byte[] array = await PadesSigner.Document(pdfBytes).WithCertificate(cert).WithTestFieldOptions("João Silva", "Aprovação de contrato", "São Paulo, BR")
             .SignAsync();
         array.ShouldNotBeEmpty();
         string actualValue = Encoding.Latin1.GetString(array);
@@ -130,18 +132,47 @@ public sealed class SignerBuilderEdgeCaseTests
         actualValue.ShouldContain("/Location");
     }
 
-    [Fact(DisplayName = "WithExternalSigner with delegate that throws exception propagates the error")]
-    public async Task ExternalSigner_DelegateThrows_ExceptionPropagates()
+    [Fact(DisplayName = "Structured metadata replaces nullable field values instead of retaining stale values")]
+    public async Task WithMetadata_StructuredMetadata_ClearsPreviousNullableFieldValues()
+    {
+        using X509Certificate2 cert = CreateRsaCert();
+        var field = new SignatureFieldOptions
+        {
+            SignerName = "Old signer",
+            Reason = "Old reason",
+            Location = "Old location",
+            ContactInfo = "Old contact"
+        };
+        var metadata = new SignatureMetadata { SignerName = "New signer" };
+
+        byte[] signedPdf = await PadesSigner.Document(TestPdfFactory.CreateMinimalPdf())
+            .WithCertificate(cert)
+            .WithFieldOptions(field)
+            .WithMetadata(metadata)
+            .SignAsync();
+
+        string text = Encoding.Latin1.GetString(signedPdf);
+        text.ShouldContain("New signer");
+        text.ShouldNotContain("Old signer");
+        text.ShouldNotContain("Old reason");
+        text.ShouldNotContain("Old location");
+        text.ShouldNotContain("Old contact");
+    }
+
+    [Fact(DisplayName = "WithExternalSigner wraps a delegate failure with a stable reason")]
+    public async Task ExternalSigner_DelegateThrows_ReturnsSigningException()
     {
         using X509Certificate2 cert = CreateRsaCert();
         byte[] pdfBytes = TestPdfFactory.CreateMinimalPdf();
-        PadesSignerBuilder builder = PadesSigner.Document(pdfBytes).WithExternalSigner(cert, new FuncExternalSigner(delegate
+        PadesSignerBuilder builder = PadesSigner.Document(pdfBytes).WithExternalSigner(cert, new DelegatingExternalSigner(delegate
         {
             throw new InvalidOperationException("HSM offline");
         }));
         Func<Task<byte[]>> action = () => builder.SignAsync();
-        var ex = await Should.ThrowAsync<InvalidOperationException>(async () => await action());
-        ex.Message.ShouldContain("HSM offline");
+        var ex = await Should.ThrowAsync<SigningException>(async () => await action());
+        ex.Reason.ShouldBe(SigningErrorReason.ExternalSignerFailure);
+        ex.InnerException.ShouldBeOfType<InvalidOperationException>();
+        ex.InnerException.Message.ShouldContain("HSM offline");
     }
 
     [Fact(DisplayName = "WithExternalSigner with delegate returning empty bytes produces error or invalid CMS")]
@@ -149,7 +180,7 @@ public sealed class SignerBuilderEdgeCaseTests
     {
         using X509Certificate2 cert = CreateRsaCert();
         byte[] pdfBytes = TestPdfFactory.CreateMinimalPdf();
-        PadesSignerBuilder signerBuilder = PadesSigner.Document(pdfBytes).WithExternalSigner(cert, new FuncExternalSigner(_ => Task.FromResult(Array.Empty<byte>())));
+        PadesSignerBuilder signerBuilder = PadesSigner.Document(pdfBytes).WithExternalSigner(cert, new DelegatingExternalSigner(_ => Task.FromResult(Array.Empty<byte>())));
         try
         {
             using MemoryStream stream = new MemoryStream(await signerBuilder.SignAsync());
@@ -168,7 +199,7 @@ public sealed class SignerBuilderEdgeCaseTests
     {
         using X509Certificate2 cert = CreateRsaCert();
         byte[] pdfBytes = TestPdfFactory.CreateMinimalPdf();
-        PadesSignerBuilder signerBuilder = PadesSigner.Document(pdfBytes).WithExternalSigner(cert, new FuncExternalSigner(_ => Task.FromResult<byte[]>(null!)));
+        PadesSignerBuilder signerBuilder = PadesSigner.Document(pdfBytes).WithExternalSigner(cert, new DelegatingExternalSigner(_ => Task.FromResult<byte[]>(null!)));
         try
         {
             using MemoryStream stream = new MemoryStream(await signerBuilder.SignAsync());
@@ -247,7 +278,7 @@ public sealed class SignerBuilderEdgeCaseTests
     public void ExternalSigner_AutoDetect_RsaSha256()
     {
         using X509Certificate2 certificate = CreateRsaCert();
-        PadesSignerBuilder actualValue = PadesSigner.Document(TestPdfFactory.CreateMinimalPdf()).WithHashAlgorithm(HashAlgorithmName.SHA256).WithExternalSigner(certificate, new FuncExternalSigner(_ => Task.FromResult(Array.Empty<byte>())));
+        PadesSignerBuilder actualValue = PadesSigner.Document(TestPdfFactory.CreateMinimalPdf()).WithHashAlgorithm(HashAlgorithmName.SHA256).WithExternalSigner(certificate, new DelegatingExternalSigner(_ => Task.FromResult(Array.Empty<byte>())));
         actualValue.ShouldNotBeNull("");
     }
 
@@ -255,7 +286,7 @@ public sealed class SignerBuilderEdgeCaseTests
     public void ExternalSigner_AutoDetect_EcdsaSha256()
     {
         using X509Certificate2 certificate = CreateEcdsaCert();
-        PadesSignerBuilder actualValue = PadesSigner.Document(TestPdfFactory.CreateMinimalPdf()).WithHashAlgorithm(HashAlgorithmName.SHA256).WithExternalSigner(certificate, new FuncExternalSigner(_ => Task.FromResult(Array.Empty<byte>())));
+        PadesSignerBuilder actualValue = PadesSigner.Document(TestPdfFactory.CreateMinimalPdf()).WithHashAlgorithm(HashAlgorithmName.SHA256).WithExternalSigner(certificate, new DelegatingExternalSigner(_ => Task.FromResult(Array.Empty<byte>())));
         actualValue.ShouldNotBeNull("");
     }
 
@@ -263,7 +294,7 @@ public sealed class SignerBuilderEdgeCaseTests
     public void ExternalSigner_AutoDetect_RsaSha384()
     {
         using X509Certificate2 cert = CreateRsaCert();
-        PadesSignerBuilder actualValue = PadesSigner.Document(TestPdfFactory.CreateMinimalPdf()).WithHashAlgorithm(HashAlgorithmName.SHA384).WithExternalSigner(cert, new FuncExternalSigner(_ => Task.FromResult(Array.Empty<byte>())));
+        PadesSignerBuilder actualValue = PadesSigner.Document(TestPdfFactory.CreateMinimalPdf()).WithHashAlgorithm(HashAlgorithmName.SHA384).WithExternalSigner(cert, new DelegatingExternalSigner(_ => Task.FromResult(Array.Empty<byte>())));
         actualValue.ShouldNotBeNull("");
     }
 
@@ -271,7 +302,7 @@ public sealed class SignerBuilderEdgeCaseTests
     public void ExternalSigner_AutoDetect_EcdsaSha384()
     {
         using X509Certificate2 cert = CreateEcdsaCert();
-        PadesSignerBuilder actualValue = PadesSigner.Document(TestPdfFactory.CreateMinimalPdf()).WithHashAlgorithm(HashAlgorithmName.SHA384).WithExternalSigner(cert, new FuncExternalSigner(_ => Task.FromResult(Array.Empty<byte>())));
+        PadesSignerBuilder actualValue = PadesSigner.Document(TestPdfFactory.CreateMinimalPdf()).WithHashAlgorithm(HashAlgorithmName.SHA384).WithExternalSigner(cert, new DelegatingExternalSigner(_ => Task.FromResult(Array.Empty<byte>())));
         actualValue.ShouldNotBeNull("");
     }
 
@@ -280,7 +311,7 @@ public sealed class SignerBuilderEdgeCaseTests
     {
         using X509Certificate2 certificate = CreateRsaCert();
         PadesSignerBuilder actualValue = PadesSigner.Document(TestPdfFactory.CreateMinimalPdf())
-            .WithExternalSigner(certificate, new FuncExternalSigner(_ => Task.FromResult(Array.Empty<byte>())))
+            .WithExternalSigner(certificate, new DelegatingExternalSigner(_ => Task.FromResult(Array.Empty<byte>())))
             .WithSignatureAlgorithm("1.3.101.112");
         actualValue.ShouldNotBeNull("");
     }
@@ -290,7 +321,7 @@ public sealed class SignerBuilderEdgeCaseTests
     {
         using X509Certificate2 certificate = CreateRsaCert();
         PadesSignerBuilder actualValue = PadesSigner.Document(TestPdfFactory.CreateMinimalPdf())
-            .WithExternalSigner(certificate, new FuncExternalSigner(_ => Task.FromResult(Array.Empty<byte>())))
+            .WithExternalSigner(certificate, new DelegatingExternalSigner(_ => Task.FromResult(Array.Empty<byte>())))
             .WithSignatureAlgorithm("1.3.101.113");
         actualValue.ShouldNotBeNull("");
     }

@@ -19,11 +19,36 @@ public sealed class TimestampClientTests
 {
     // ── Helpers ────────────────────────────────────────────────────────────────
 
-    private static byte[] BuildFakeTimestampResponse()
+    private static byte[] BuildTimestampResponseForRequest(
+        byte[] requestBytes,
+        bool alterImprint = false,
+        bool alterNonce = false)
     {
-        // Builds a minimal TSR: SEQUENCE { PKIStatusInfo { status = 0 }, TimeStampToken (CMS) }
-        // We use a fake CMS for the token
-        var fakeCmsToken = BuildFakeCmsToken();
+        var requestReader = new System.Formats.Asn1.AsnReader(
+            requestBytes, System.Formats.Asn1.AsnEncodingRules.DER);
+        var request = requestReader.ReadSequence();
+        _ = request.ReadInteger();
+        var imprint = request.ReadSequence();
+        var algorithm = imprint.ReadSequence();
+        string hashOid = algorithm.ReadObjectIdentifier();
+        if (algorithm.HasData)
+        {
+            _ = algorithm.ReadEncodedValue();
+        }
+
+        byte[] hash = imprint.ReadOctetString();
+        var nonce = request.ReadInteger();
+        if (alterImprint)
+        {
+            hash[0] ^= 0xFF;
+        }
+
+        if (alterNonce)
+        {
+            nonce += 1;
+        }
+
+        var token = BuildTimestampToken(hashOid, hash, nonce);
 
         var writer = new System.Formats.Asn1.AsnWriter(System.Formats.Asn1.AsnEncodingRules.DER);
         using (writer.PushSequence()) // TimeStampResp
@@ -32,15 +57,36 @@ public sealed class TimestampClientTests
             using (writer.PushSequence())
                 writer.WriteInteger(0); // status = granted
 
-            // TimeStampToken (ContentInfo)
-            writer.WriteEncodedValue(fakeCmsToken);
+            writer.WriteEncodedValue(token);
         }
         return writer.Encode();
     }
 
-    private static byte[] BuildFakeCmsToken()
+    private static byte[] BuildTimestampToken(
+        string hashOid,
+        byte[] hash,
+        System.Numerics.BigInteger nonce)
     {
-        // Minimal ContentInfo to simulate a TimeStampToken
+        var tstInfoWriter = new System.Formats.Asn1.AsnWriter(System.Formats.Asn1.AsnEncodingRules.DER);
+        using (tstInfoWriter.PushSequence())
+        {
+            tstInfoWriter.WriteInteger(1);
+            tstInfoWriter.WriteObjectIdentifier("1.2.3.4");
+            using (tstInfoWriter.PushSequence())
+            {
+                using (tstInfoWriter.PushSequence())
+                {
+                    tstInfoWriter.WriteObjectIdentifier(hashOid);
+                    tstInfoWriter.WriteNull();
+                }
+                tstInfoWriter.WriteOctetString(hash);
+            }
+            tstInfoWriter.WriteInteger(1);
+            tstInfoWriter.WriteGeneralizedTime(DateTimeOffset.UtcNow);
+            tstInfoWriter.WriteInteger(nonce);
+        }
+
+        byte[] tstInfo = tstInfoWriter.Encode();
         var writer = new System.Formats.Asn1.AsnWriter(System.Formats.Asn1.AsnEncodingRules.DER);
         using (writer.PushSequence())
         {
@@ -48,7 +94,25 @@ public sealed class TimestampClientTests
             using (writer.PushSequence(new System.Formats.Asn1.Asn1Tag(
                 System.Formats.Asn1.TagClass.ContextSpecific, 0, true)))
             {
-                writer.WriteOctetString([0x01, 0x02, 0x03]);
+                using (writer.PushSequence())
+                {
+                    writer.WriteInteger(1);
+                    using (writer.PushSetOf())
+                    {
+                    }
+                    using (writer.PushSequence())
+                    {
+                        writer.WriteObjectIdentifier("1.2.840.113549.1.9.16.1.4");
+                        using (writer.PushSequence(new System.Formats.Asn1.Asn1Tag(
+                            System.Formats.Asn1.TagClass.ContextSpecific, 0, true)))
+                        {
+                            writer.WriteOctetString(tstInfo);
+                        }
+                    }
+                    using (writer.PushSetOf())
+                    {
+                    }
+                }
             }
         }
         return writer.Encode();
@@ -105,8 +169,16 @@ public sealed class TimestampClientTests
     [Fact(DisplayName = "Valid response returns timestamp token")]
     public async Task GetTimestampAsync_ValidResponse_ReturnsToken()
     {
-        var tsr = BuildFakeTimestampResponse();
-        var httpClient = BuildMockHttpClient(tsr);
+        var httpClient = new HttpClient(new MockHttpHandler(async request =>
+        {
+            byte[] requestBytes = await request.Content!.ReadAsByteArrayAsync();
+            var response = new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new ByteArrayContent(BuildTimestampResponseForRequest(requestBytes))
+            };
+            response.Content.Headers.ContentType = new MediaTypeHeaderValue("application/timestamp-reply");
+            return response;
+        }));
         var client = new TimestampClient(httpClient, "http://tsa.example.com");
 
         var token = await client.GetTimestampAsync(
@@ -114,6 +186,62 @@ public sealed class TimestampClientTests
 
         token.ShouldNotBeNull();
         token.Length.ShouldBeGreaterThan(0);
+    }
+
+    [Fact(DisplayName = "Timestamp response with a different message imprint is rejected")]
+    public async Task GetTimestampAsync_DifferentMessageImprint_ThrowsTimestampException()
+    {
+        var httpClient = new HttpClient(new MockHttpHandler(async request =>
+        {
+            byte[] requestBytes = await request.Content!.ReadAsByteArrayAsync();
+            var response = new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new ByteArrayContent(BuildTimestampResponseForRequest(requestBytes, alterImprint: true))
+            };
+            response.Content.Headers.ContentType = new MediaTypeHeaderValue("application/timestamp-reply");
+            return response;
+        }));
+        var client = new TimestampClient(httpClient, "http://tsa.example.com");
+
+        await Assert.ThrowsAsync<TimestampException>(
+            () => client.GetTimestampAsync(new byte[] { 0x01, 0x02, 0x03 }, HashAlgorithmName.SHA256));
+    }
+
+    [Fact(DisplayName = "Timestamp response with a different nonce is rejected")]
+    public async Task GetTimestampAsync_DifferentNonce_ThrowsTimestampException()
+    {
+        var httpClient = new HttpClient(new MockHttpHandler(async request =>
+        {
+            byte[] requestBytes = await request.Content!.ReadAsByteArrayAsync();
+            var response = new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new ByteArrayContent(BuildTimestampResponseForRequest(requestBytes, alterNonce: true))
+            };
+            response.Content.Headers.ContentType = new MediaTypeHeaderValue("application/timestamp-reply");
+            return response;
+        }));
+        var client = new TimestampClient(httpClient, "http://tsa.example.com");
+
+        await Assert.ThrowsAsync<TimestampException>(
+            () => client.GetTimestampAsync(new byte[] { 0x01, 0x02, 0x03 }, HashAlgorithmName.SHA256));
+    }
+
+    [Fact(DisplayName = "Factory timestamp token is validated against the supplied datum")]
+    public void ValidateTimestampToken_TokenBoundToData_DoesNotThrow()
+    {
+        byte[] data = [0x01, 0x02, 0x03];
+        byte[] token = TimestampTestResponseBuilder.CreateTokenForData(data, HashAlgorithmName.SHA256);
+
+        TimestampClient.ValidateTimestampToken(token, data, HashAlgorithmName.SHA256);
+    }
+
+    [Fact(DisplayName = "Factory timestamp token with a wrong imprint is rejected")]
+    public void ValidateTimestampToken_TokenBoundToDifferentData_ThrowsTimestampException()
+    {
+        byte[] token = TimestampTestResponseBuilder.CreateTokenForData([0x01, 0x02, 0x03], HashAlgorithmName.SHA256);
+
+        Assert.Throws<TimestampException>(
+            () => TimestampClient.ValidateTimestampToken(token, [0x03, 0x02, 0x01], HashAlgorithmName.SHA256));
     }
 
     [Fact(DisplayName = "Server error throws TimestampException")]
@@ -206,5 +334,3 @@ public sealed class TimestampClientTests
         result.AsSpan().IndexOf(fakeToken).ShouldBeGreaterThan(0);
     }
 }
-
-

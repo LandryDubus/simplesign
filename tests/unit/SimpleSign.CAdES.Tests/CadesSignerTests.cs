@@ -116,7 +116,7 @@ public sealed class CadesSignerTests : IDisposable
     public async Task SignAsync_ExternalSigner_CreatesValidCms()
     {
         var cms = await CadesSigner.Document(_data)
-            .WithExternalSigner(_cert, new FuncExternalSigner(async signedAttrs =>
+            .WithExternalSigner(_cert, new DelegatingExternalSigner(async signedAttrs =>
             {
                 using var key = _cert.GetRSAPrivateKey()!;
                 return await Task.FromResult(key.SignData(signedAttrs, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1));
@@ -204,22 +204,19 @@ public sealed class CadesSignerTests : IDisposable
     }
 
     [Fact]
-    public async Task SignAsync_LongTerm_IncludesCertValues()
+    public async Task SignAsync_LongTerm_WithoutRevocationData_Throws()
     {
         var mockTsa = BuildMockTsaHandler();
         using var tsaHttpClient = new HttpClient(mockTsa);
 
-        var cms = await CadesSigner.Document(_data)
+        var exception = await Assert.ThrowsAsync<SigningException>(() => CadesSigner.Document(_data)
             .WithCertificate(_cert, [_pki.IntermediateCa])
             .WithLevel(AdesBaselineProfile.LongTerm(
                 new TimestampOptions(new Uri("http://mock-tsa.example.com"), new SingleClientProvider(tsaHttpClient)),
                 new LongTermValidationOptions(new SingleClientProvider(tsaHttpClient))))
-            .SignAsync();
-        var parsed = CmsParser.Parse(cms);
+            .SignAsync());
 
-        Assert.NotNull(parsed.SignatureTimestampToken);
-        Assert.NotNull(parsed.UnsignedAttributes);
-        Assert.True(parsed.UnsignedAttributes.ContainsKey(Oids.CertValues));
+        Assert.Equal(SigningErrorReason.LevelNotAchievable, exception.Reason);
     }
 
     [Fact]
@@ -237,52 +234,35 @@ public sealed class CadesSignerTests : IDisposable
     }
 
     [Fact]
-    public async Task SignAsync_Archive_IncludesArchiveTimestamp()
+    public async Task SignAsync_Archive_WithoutCollectibleRevocationData_Throws()
     {
         var mockTsa = BuildMockTsaHandler();
         using var tsaHttpClient = new HttpClient(mockTsa);
 
-        var cms = await CadesSigner.Document(_data)
+        var exception = await Assert.ThrowsAsync<SigningException>(() => CadesSigner.Document(_data)
             .WithCertificate(_cert, [_pki.IntermediateCa])
             .WithLevel(AdesBaselineProfile.Archive(
                 new TimestampOptions(new Uri("http://mock-tsa.example.com"), new SingleClientProvider(tsaHttpClient)),
                 new LongTermValidationOptions(new SingleClientProvider(tsaHttpClient))))
-            .SignAsync();
-        var parsed = CmsParser.Parse(cms);
+            .SignAsync());
 
-        Assert.NotNull(parsed.SignatureTimestampToken);
-        Assert.NotNull(parsed.ArchiveTimestampToken);
-        Assert.NotNull(parsed.UnsignedAttributes);
-        Assert.True(parsed.UnsignedAttributes.ContainsKey(Oids.CertValues));
-        Assert.True(parsed.UnsignedAttributes.ContainsKey(Oids.ArchiveTimeStamp));
+        Assert.Equal(SigningErrorReason.LevelNotAchievable, exception.Reason);
     }
 
     [Fact]
-    public async Task SignAndValidate_LongTerm_Roundtrip_Succeeds()
+    public async Task SignAndValidate_LongTerm_WithoutRevocationData_Throws()
     {
         var mockTsa = BuildMockTsaHandler();
         using var tsaHttpClient = new HttpClient(mockTsa);
 
-        var cms = await CadesSigner.Document(_data)
+        var exception = await Assert.ThrowsAsync<SigningException>(() => CadesSigner.Document(_data)
             .WithCertificate(_cert, [_pki.IntermediateCa])
             .WithLevel(AdesBaselineProfile.LongTerm(
                 new TimestampOptions(new Uri("http://mock-tsa.example.com"), new SingleClientProvider(tsaHttpClient)),
                 new LongTermValidationOptions(new SingleClientProvider(tsaHttpClient))))
-            .SignAsync();
+            .SignAsync());
 
-        var directParsed = CmsParser.Parse(cms);
-        Assert.NotNull(directParsed.UnsignedAttributes);
-        Assert.True(directParsed.UnsignedAttributes.ContainsKey(Oids.CertValues));
-
-        var validator = new CadesSignatureValidator(
-            new ValidationOptions { CheckRevocation = false, TrustSystemRoots = false });
-        var result = validator.Validate(cms, _data, [_cert]);
-
-        Assert.True(result.IsIntegrityValid);
-        Assert.True(result.IsSignatureValid);
-        Assert.True(result.IsCertificateChainValid);
-        Assert.True(result.IsValid);
-        Assert.True(result.IsLtvDataValid);
+        Assert.Equal(SigningErrorReason.LevelNotAchievable, exception.Reason);
     }
 
     [Fact]
@@ -311,45 +291,17 @@ public sealed class CadesSignerTests : IDisposable
 
     private static MockHttpHandler BuildMockTsaHandler()
     {
-        var fakeTsr = BuildFakeTimestampResponse();
-        return new MockHttpHandler(async _ =>
+        return new MockHttpHandler(async request =>
         {
+            byte[] requestBytes = await request.Content!.ReadAsByteArrayAsync();
             var response = new HttpResponseMessage(HttpStatusCode.OK)
             {
-                Content = new ByteArrayContent(fakeTsr)
+                Content = new ByteArrayContent(TimestampTestResponseBuilder.CreateForRequest(requestBytes))
             };
             response.Content.Headers.ContentType =
                 new MediaTypeHeaderValue("application/timestamp-reply");
-            await Task.CompletedTask;
             return response;
         });
     }
 
-    private static byte[] BuildFakeTimestampResponse()
-    {
-        var fakeCmsToken = BuildFakeCmsToken();
-        var writer = new System.Formats.Asn1.AsnWriter(System.Formats.Asn1.AsnEncodingRules.DER);
-        using (writer.PushSequence())
-        {
-            using (writer.PushSequence())
-                writer.WriteInteger(0);
-            writer.WriteEncodedValue(fakeCmsToken);
-        }
-        return writer.Encode();
-    }
-
-    private static byte[] BuildFakeCmsToken()
-    {
-        var writer = new System.Formats.Asn1.AsnWriter(System.Formats.Asn1.AsnEncodingRules.DER);
-        using (writer.PushSequence())
-        {
-            writer.WriteObjectIdentifier("1.2.840.113549.1.7.2");
-            using (writer.PushSequence(new System.Formats.Asn1.Asn1Tag(
-                System.Formats.Asn1.TagClass.ContextSpecific, 0, true)))
-            {
-                writer.WriteOctetString([0x01, 0x02, 0x03]);
-            }
-        }
-        return writer.Encode();
-    }
 }

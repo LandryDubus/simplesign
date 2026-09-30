@@ -45,7 +45,7 @@ public sealed class LevelFulfillmentContractTests
     [InlineData("xades")]
     public async Task StrictLongTerm_WithoutRevocationData_Throws(string format)
     {
-        using var cert = ContractFixtures.CreateSignerCertificate();
+        using var pki = new SyntheticPki("http://crl.example.com/test-ca.crl", "http://ocsp.example.com");
         using var tsaClient = ContractFixtures.BuildMockTsaClient();
         using var failing = ContractFixtures.BuildFailingClient();
 
@@ -53,7 +53,8 @@ public sealed class LevelFulfillmentContractTests
             TimestampOptionsWith(tsaClient),
             new LongTermValidationOptions(new SingleClientProvider(failing)));
 
-        await Should.ThrowAsync<SigningException>(() => SignAsync(format, cert, profile));
+        await Should.ThrowAsync<SigningException>(
+            () => SignAsync(format, pki.Leaf, profile, pki.IntermediatesAndRoot()));
     }
 
     [Theory]
@@ -62,7 +63,7 @@ public sealed class LevelFulfillmentContractTests
     [InlineData("xades")]
     public async Task BestEffortLongTerm_WithoutRevocationData_DowngradesWithWarnings(string format)
     {
-        using var cert = ContractFixtures.CreateSignerCertificate();
+        using var pki = new SyntheticPki("http://crl.example.com/test-ca.crl", "http://ocsp.example.com");
         using var tsaClient = ContractFixtures.BuildMockTsaClient();
         using var failing = ContractFixtures.BuildFailingClient();
 
@@ -71,7 +72,7 @@ public sealed class LevelFulfillmentContractTests
             new LongTermValidationOptions(new SingleClientProvider(failing)),
             failureBehavior: SigningLevelFailureBehavior.ReturnLowerLevel);
 
-        ISigningResult result = await SignAsync(format, cert, profile);
+        ISigningResult result = await SignAsync(format, pki.Leaf, profile, pki.IntermediatesAndRoot());
 
         result.RequestedLevel.ShouldBe(AdesBaselineLevel.LongTerm);
         result.AchievedLevel.ShouldBe(AdesBaselineLevel.Timestamped);
@@ -152,20 +153,21 @@ public sealed class LevelFulfillmentContractTests
     private static async Task<ISigningResult> SignAsync(
         string format,
         X509Certificate2 cert,
-        AdesBaselineProfile profile)
+        AdesBaselineProfile profile,
+        IReadOnlyList<X509Certificate2>? chain = null)
     {
         return format switch
         {
             "pades" => await PadesSigner.Document(TestPdfFactory.CreateMinimalPdf())
-                .WithCertificate(cert)
+                .WithCertificate(cert, chain ?? [])
                 .WithLevel(profile)
                 .SignWithDetailsAsync(),
             "cades" => await CadesSigner.Document(ContractFixtures.BinaryContent)
-                .WithCertificate(cert)
+                .WithCertificate(cert, chain ?? [])
                 .WithLevel(profile)
                 .SignWithDetailsAsync(),
             "xades" => await XadesSigner.Document(ContractFixtures.XmlDocument)
-                .WithCertificate(cert)
+                .WithCertificate(cert, chain ?? [])
                 .WithLevel(profile)
                 .SignWithDetailsAsync(),
             _ => throw new ArgumentOutOfRangeException(nameof(format))

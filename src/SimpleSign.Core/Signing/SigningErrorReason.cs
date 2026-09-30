@@ -14,6 +14,12 @@ public enum SigningErrorReason
     /// <summary>The signing certificate is not within its validity period.</summary>
     CertificateExpired = 2,
 
+    /// <summary>The signing certificate is not valid at the configured signing time.</summary>
+    CertificateNotCurrentlyValid = 12,
+
+    /// <summary>The configured external signer failed to produce a signature.</summary>
+    ExternalSignerFailure = 13,
+
     /// <summary>The signature/hash algorithm combination is unsupported or incompatible.</summary>
     AlgorithmIncompatible = 3,
 
@@ -25,6 +31,9 @@ public enum SigningErrorReason
 
     /// <summary>The external signer returned an empty or null signature.</summary>
     ExternalSignerReturnedEmpty = 6,
+
+    /// <summary>The external signer returned a signature that does not verify with the configured certificate.</summary>
+    ExternalSignerReturnedInvalidSignature = 14,
 
     /// <summary>The byte-only terminal was used with a best-effort level profile.</summary>
     DowngradeRequiresDetailedResult = 7,

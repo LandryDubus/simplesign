@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
+using System.Threading.Channels;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using SimpleSign.Core.Http;
@@ -9,86 +10,74 @@ using SimpleSign.Core.Signing;
 
 namespace SimpleSign.PAdES.Signing;
 
-/// <summary>
-/// High-performance batch signer that reuses certificate, HTTP connections, and TSA sessions
-/// to sign multiple PDFs efficiently.
-/// </summary>
+/// <summary>Signs multiple PDFs with one immutable PAdES configuration.</summary>
 public sealed class BatchSigner : IAsyncDisposable
 {
     private readonly X509Certificate2 _certificate;
-    private readonly IReadOnlyList<X509Certificate2>? _chain;
-    private readonly Func<byte[], Task<byte[]>>? _externalSigner;
-    private readonly string? _externalSignerOid;
-    private readonly string? _tsaUrl;
+    private readonly IReadOnlyList<X509Certificate2> _chain;
+    private readonly IExternalSigner? _externalSigner;
+    private readonly HashAlgorithmName _hashAlgorithm;
+    private readonly bool _hashAlgorithmExplicitlySet;
+    private readonly string? _signatureAlgorithmOid;
+    private readonly AdesBaselineProfile _profile;
     private readonly IHttpClientProvider _httpClientProvider;
     private readonly ILogger _logger;
-    private readonly HashAlgorithmName _hashAlgorithm;
-    private readonly string? _signerName;
-    private readonly string? _reason;
-    private readonly string? _location;
-    private readonly SignatureAppearance? _appearance;
-    private readonly bool _enableLtv;
-    private readonly string? _archivalTsaUrl;
+    private readonly SignatureFieldOptions? _fieldOptions;
+    private readonly string? _operationId;
     private readonly int _maxConcurrency;
-
     private int _successCount;
     private int _failureCount;
     private long _totalElapsedMs;
 
     private BatchSigner(BatchSignerBuilder builder)
     {
-        _certificate = builder.Certificate ?? throw new InvalidOperationException("Certificate is required.");
+        _certificate = builder.Certificate;
         _chain = builder.Chain;
         _externalSigner = builder.ExternalSigner;
-        _externalSignerOid = builder.ExternalSignerOid;
-        _tsaUrl = builder.TsaUrl;
         _hashAlgorithm = builder.HashAlgorithm;
-        _signerName = builder.SignerName;
-        _reason = builder.Reason;
-        _location = builder.Location;
-        _appearance = builder.Appearance;
-        _enableLtv = builder.EnableLtv;
-        _archivalTsaUrl = builder.ArchivalTsaUrl;
+        _hashAlgorithmExplicitlySet = builder.HashAlgorithmExplicitlySet;
+        _signatureAlgorithmOid = builder.SignatureAlgorithmOid;
+        _profile = builder.Profile;
+        _httpClientProvider = builder.HttpClientProvider;
+        _logger = builder.Logger;
+        _fieldOptions = builder.FieldOptions?.Snapshot();
+        _operationId = builder.OperationId;
         _maxConcurrency = builder.MaxConcurrency;
-        _logger = builder.Logger ?? NullLogger.Instance;
-        _httpClientProvider = builder.HttpClientProvider ?? DefaultHttpClientProvider.Instance;
     }
 
-    /// <summary>Creates a new <see cref="BatchSignerBuilder"/> for configuring the batch signer.</summary>
-    public static BatchSignerBuilder Create(X509Certificate2 certificate) => new(certificate);
+    /// <summary>Creates a batch configuration for <paramref name="certificate"/>.</summary>
+    public static BatchSignerBuilder Create(X509Certificate2 certificate)
+    {
+        ArgumentNullException.ThrowIfNull(certificate);
+        return new BatchSignerBuilder(certificate);
+    }
 
-    /// <summary>Number of PDFs successfully signed.</summary>
+    /// <summary>Number of successfully signed documents.</summary>
     public int SuccessCount => _successCount;
 
-    /// <summary>Number of PDFs that failed to sign.</summary>
+    /// <summary>Number of signing failures.</summary>
     public int FailureCount => _failureCount;
 
-    /// <summary>Average signing time per document in milliseconds.</summary>
+    /// <summary>Average terminal-operation time in milliseconds.</summary>
     public double AverageElapsedMs
     {
         get
         {
-            var total = _successCount + _failureCount;
-            return total > 0 ? (double)_totalElapsedMs / total : 0;
+            int total = Volatile.Read(ref _successCount) + Volatile.Read(ref _failureCount);
+            long elapsed = Interlocked.Read(ref _totalElapsedMs);
+            return total == 0 ? 0 : (double)elapsed / total;
         }
     }
 
-    /// <summary>
-    /// Signs a single PDF using the pre-configured certificate and options.
-    /// </summary>
-    /// <param name="pdfStream">Seekable input PDF stream.</param>
-    /// <param name="outputStream">Output stream for the signed PDF.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <summary>Signs one PDF into a caller-owned destination stream.</summary>
     public async Task SignAsync(Stream pdfStream, Stream outputStream, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(pdfStream);
         ArgumentNullException.ThrowIfNull(outputStream);
-
-        var sw = Stopwatch.StartNew();
+        var stopwatch = Stopwatch.StartNew();
         try
         {
-            var builder = ConfigureBuilder(PadesSigner.Document(pdfStream));
-            await builder.SignAsync(outputStream, cancellationToken).ConfigureAwait(false);
+            await Configure(PadesSigner.Document(pdfStream)).SignAsync(outputStream, cancellationToken).ConfigureAwait(false);
             Interlocked.Increment(ref _successCount);
         }
         catch
@@ -98,26 +87,21 @@ public sealed class BatchSigner : IAsyncDisposable
         }
         finally
         {
-            sw.Stop();
-            Interlocked.Add(ref _totalElapsedMs, sw.ElapsedMilliseconds);
+            stopwatch.Stop();
+            Interlocked.Add(ref _totalElapsedMs, stopwatch.ElapsedMilliseconds);
         }
     }
 
-    /// <summary>
-    /// Signs a single PDF and returns the signed bytes.
-    /// </summary>
-    /// <param name="pdfBytes">Input PDF bytes.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>Signed PDF bytes.</returns>
+    /// <summary>Signs one PDF and returns the result.</summary>
     public async Task<byte[]> SignAsync(byte[] pdfBytes, CancellationToken cancellationToken = default)
     {
-        var sw = Stopwatch.StartNew();
+        ArgumentNullException.ThrowIfNull(pdfBytes);
+        var stopwatch = Stopwatch.StartNew();
         try
         {
-            var builder = ConfigureBuilder(PadesSigner.Document(pdfBytes));
-            var result = await builder.SignAsync(cancellationToken).ConfigureAwait(false);
+            byte[] signed = await Configure(PadesSigner.Document(pdfBytes)).SignAsync(cancellationToken).ConfigureAwait(false);
             Interlocked.Increment(ref _successCount);
-            return result;
+            return signed;
         }
         catch
         {
@@ -126,121 +110,52 @@ public sealed class BatchSigner : IAsyncDisposable
         }
         finally
         {
-            sw.Stop();
-            Interlocked.Add(ref _totalElapsedMs, sw.ElapsedMilliseconds);
+            stopwatch.Stop();
+            Interlocked.Add(ref _totalElapsedMs, stopwatch.ElapsedMilliseconds);
         }
     }
 
-    /// <summary>
-    /// Signs all PDFs from an async enumerable, yielding results as they complete.
-    /// Respects <see cref="BatchSignerBuilder.MaxConcurrency"/> for parallel execution.
-    /// </summary>
-    /// <param name="inputs">Async enumerable of (identifier, PDF bytes) pairs.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>Async enumerable of batch results.</returns>
+    /// <summary>Signs inputs with bounded concurrency and yields results as operations complete.</summary>
+    /// <remarks>
+    /// Results are completion-ordered rather than input-ordered. Disposing the asynchronous
+    /// enumeration cancels pending work and the source enumeration through its cancellation token.
+    /// </remarks>
     public async IAsyncEnumerable<BatchSignResult> SignAllAsync(
         IAsyncEnumerable<(string Id, byte[] PdfBytes)> inputs,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        using var semaphore = new SemaphoreSlim(_maxConcurrency, _maxConcurrency);
-        var tasks = new List<Task<BatchSignResult>>();
-
-        await foreach (var (id, pdfBytes) in inputs.WithCancellation(cancellationToken).ConfigureAwait(false))
+        ArgumentNullException.ThrowIfNull(inputs);
+        using var linkedCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var channel = Channel.CreateBounded<BatchSignResult>(new BoundedChannelOptions(_maxConcurrency)
         {
-            await semaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
+            SingleReader = true,
+            SingleWriter = false,
+            FullMode = BoundedChannelFullMode.Wait
+        });
+        Task producer = ProduceResultsAsync(inputs, channel.Writer, linkedCancellation.Token);
 
-            tasks.Add(Task.Run(async () =>
+        try
+        {
+            await foreach (BatchSignResult result in channel.Reader.ReadAllAsync(linkedCancellation.Token).ConfigureAwait(false))
             {
-                try
-                {
-                    var signed = await SignAsync(pdfBytes, cancellationToken).ConfigureAwait(false);
-                    return new BatchSignResult(id, signed, null);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "Batch sign failed for {Id}", id);
-                    return new BatchSignResult(id, null, ex);
-                }
-                finally
-                {
-                    semaphore.Release();
-                }
-            }, cancellationToken));
-
-            // Yield completed tasks as they finish
-            for (var i = tasks.Count - 1; i >= 0; i--)
-            {
-                if (tasks[i].IsCompleted)
-                {
-                    yield return await tasks[i].ConfigureAwait(false);
-                    tasks.RemoveAt(i);
-                }
+                yield return result;
             }
         }
-
-        // Drain remaining
-        foreach (var task in tasks)
+        finally
         {
-            yield return await task.ConfigureAwait(false);
+            linkedCancellation.Cancel();
+            try
+            {
+                await producer.ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (linkedCancellation.IsCancellationRequested)
+            {
+                // Enumeration was cancelled or disposed before all inputs were consumed.
+            }
         }
     }
 
-    private PadesSignerBuilder ConfigureBuilder(PadesSignerBuilder builder)
-    {
-        if (_externalSigner is not null)
-        {
-            builder = builder.WithExternalSigner(_certificate, new FuncExternalSigner(_externalSigner), _chain ?? []);
-            if (_externalSignerOid is not null)
-            {
-                builder = builder.WithSignatureAlgorithm(_externalSignerOid);
-            }
-        }
-        else if (_chain is not null)
-        {
-            builder = builder.WithCertificate(_certificate, _chain);
-        }
-        else
-        {
-            builder = builder.WithCertificate(_certificate);
-        }
-
-        builder = builder.WithHashAlgorithm(_hashAlgorithm);
-
-        if (_tsaUrl is not null)
-        {
-            var timestampOptions = new TimestampOptions(new Uri(_tsaUrl));
-            var profile = _enableLtv
-                ? _archivalTsaUrl is not null
-                    ? AdesBaselineProfile.Archive(
-                        timestampOptions,
-                        new LongTermValidationOptions(),
-                        new ArchiveTimestampOptions(new Uri(_archivalTsaUrl)))
-                    : AdesBaselineProfile.LongTerm(timestampOptions, new LongTermValidationOptions())
-                : AdesBaselineProfile.Timestamped(timestampOptions);
-            builder = builder.WithLevel(profile);
-        }
-
-        builder = builder.WithHttpClientProvider(_httpClientProvider);
-
-        if (_signerName is not null || _reason is not null || _location is not null)
-        {
-            builder = builder.WithMetadata(_signerName, _reason, _location);
-        }
-
-        if (_appearance is not null)
-        {
-            builder = builder.WithAppearance(_appearance);
-        }
-
-        return builder;
-    }
-
-    /// <inheritdoc/>
-    public ValueTask DisposeAsync() => ValueTask.CompletedTask;
-
-    /// <summary>
-    /// Resets the success/failure counters and average elapsed time.
-    /// </summary>
+    /// <summary>Resets the batch metrics.</summary>
     public void ResetMetrics()
     {
         Interlocked.Exchange(ref _successCount, 0);
@@ -248,177 +163,205 @@ public sealed class BatchSigner : IAsyncDisposable
         Interlocked.Exchange(ref _totalElapsedMs, 0);
     }
 
-    /// <summary>Builder for configuring a <see cref="BatchSigner"/>.</summary>
+    /// <inheritdoc/>
+    public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+
+    private PadesSignerBuilder Configure(PadesSignerBuilder builder)
+    {
+        builder = _externalSigner is null
+            ? builder.WithCertificate(_certificate, _chain)
+            : builder.WithExternalSigner(_certificate, _externalSigner, _chain);
+        if (_hashAlgorithmExplicitlySet)
+        {
+            builder = builder.WithHashAlgorithm(_hashAlgorithm);
+        }
+
+        builder = builder.WithLevel(_profile).WithHttpClientProvider(_httpClientProvider).WithLogger(_logger);
+        if (_signatureAlgorithmOid is not null)
+        {
+            builder = builder.WithSignatureAlgorithm(_signatureAlgorithmOid);
+        }
+        if (_fieldOptions is not null)
+        {
+            builder = builder.WithFieldOptions(_fieldOptions);
+        }
+        if (_operationId is not null)
+        {
+            builder = builder.WithOperationId(_operationId);
+        }
+        return builder;
+    }
+
+    private async Task ProduceResultsAsync(
+        IAsyncEnumerable<(string Id, byte[] PdfBytes)> inputs,
+        ChannelWriter<BatchSignResult> writer,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await Parallel.ForEachAsync(
+                inputs,
+                new ParallelOptions
+                {
+                    MaxDegreeOfParallelism = _maxConcurrency,
+                    CancellationToken = cancellationToken
+                },
+                async (input, token) =>
+                {
+                    BatchSignResult result;
+                    try
+                    {
+                        result = new BatchSignResult(
+                            input.Id,
+                            await SignAsync(input.PdfBytes, token).ConfigureAwait(false),
+                            null);
+                    }
+                    catch (OperationCanceledException) when (token.IsCancellationRequested)
+                    {
+                        throw;
+                    }
+                    catch (Exception exception)
+                    {
+                        _logger.LogWarning(exception, "Batch sign failed for {Id}", input.Id);
+                        result = new BatchSignResult(input.Id, null, exception);
+                    }
+
+                    await writer.WriteAsync(result, token).ConfigureAwait(false);
+                }).ConfigureAwait(false);
+            writer.TryComplete();
+        }
+        catch (Exception exception)
+        {
+            writer.TryComplete(exception);
+        }
+    }
+
+    /// <summary>Immutable builder for <see cref="BatchSigner"/>.</summary>
     public sealed class BatchSignerBuilder
     {
-        internal X509Certificate2? Certificate { get; }
-        internal IReadOnlyList<X509Certificate2>? Chain { get; }
-        internal Func<byte[], Task<byte[]>>? ExternalSigner { get; }
-        internal string? ExternalSignerOid { get; }
-        internal string? TsaUrl { get; }
-        internal IHttpClientProvider? HttpClientProvider { get; }
-        internal ILogger? Logger { get; }
-        internal HashAlgorithmName HashAlgorithm { get; }
-        internal string? SignerName { get; }
-        internal string? Reason { get; }
-        internal string? Location { get; }
-        internal SignatureAppearance? Appearance { get; }
-        internal bool EnableLtv { get; }
-        internal string? ArchivalTsaUrl { get; }
-        internal int MaxConcurrency { get; }
-
         internal BatchSignerBuilder(X509Certificate2 certificate)
         {
             Certificate = certificate;
+            Chain = [];
             HashAlgorithm = HashAlgorithmName.SHA256;
+            HashAlgorithmExplicitlySet = false;
+            Profile = AdesBaselineProfile.Basic();
+            HttpClientProvider = DefaultHttpClientProvider.Instance;
+            Logger = NullLogger.Instance;
             MaxConcurrency = 4;
         }
 
-        private BatchSignerBuilder(
-            X509Certificate2? certificate,
-            IReadOnlyList<X509Certificate2>? chain,
-            Func<byte[], Task<byte[]>>? externalSigner,
-            string? externalSignerOid,
-            string? tsaUrl,
-            IHttpClientProvider? httpClientProvider,
-            ILogger? logger,
-            HashAlgorithmName hashAlgorithm,
-            string? signerName,
-            string? reason,
-            string? location,
-            SignatureAppearance? appearance,
-            bool enableLtv,
-            string? archivalTsaUrl,
-            int maxConcurrency)
+        private BatchSignerBuilder(BatchSignerBuilder source, IReadOnlyList<X509Certificate2>? chain = null,
+            IExternalSigner? externalSigner = null, bool replaceExternalSigner = false,
+            HashAlgorithmName? hashAlgorithm = null, bool? hashAlgorithmExplicitlySet = null,
+            string? signatureAlgorithmOid = null,
+            bool replaceSignatureAlgorithm = false, AdesBaselineProfile? profile = null,
+            IHttpClientProvider? httpClientProvider = null, ILogger? logger = null,
+            SignatureFieldOptions? fieldOptions = null, bool replaceFieldOptions = false,
+            string? operationId = null, bool replaceOperationId = false, int? maxConcurrency = null)
         {
-            Certificate = certificate;
-            Chain = chain;
-            ExternalSigner = externalSigner;
-            ExternalSignerOid = externalSignerOid;
-            TsaUrl = tsaUrl;
-            HttpClientProvider = httpClientProvider;
-            Logger = logger;
-            HashAlgorithm = hashAlgorithm;
-            SignerName = signerName;
-            Reason = reason;
-            Location = location;
-            Appearance = appearance;
-            EnableLtv = enableLtv;
-            ArchivalTsaUrl = archivalTsaUrl;
-            MaxConcurrency = maxConcurrency;
+            Certificate = source.Certificate;
+            Chain = chain ?? source.Chain;
+            ExternalSigner = replaceExternalSigner ? externalSigner : source.ExternalSigner;
+            HashAlgorithm = hashAlgorithm ?? source.HashAlgorithm;
+            HashAlgorithmExplicitlySet = hashAlgorithmExplicitlySet ?? source.HashAlgorithmExplicitlySet;
+            SignatureAlgorithmOid = replaceSignatureAlgorithm ? signatureAlgorithmOid : source.SignatureAlgorithmOid;
+            Profile = profile ?? source.Profile;
+            HttpClientProvider = httpClientProvider ?? source.HttpClientProvider;
+            Logger = logger ?? source.Logger;
+            FieldOptions = replaceFieldOptions ? fieldOptions?.Snapshot() : source.FieldOptions;
+            OperationId = replaceOperationId ? operationId : source.OperationId;
+            MaxConcurrency = maxConcurrency ?? source.MaxConcurrency;
         }
 
-        private BatchSignerBuilder With(
-            X509Certificate2? certificate = null,
-            IReadOnlyList<X509Certificate2>? chain = null,
-            Func<byte[], Task<byte[]>>? externalSigner = null,
-            string? externalSignerOid = null,
-            string? tsaUrl = null,
-            IHttpClientProvider? httpClientProvider = null,
-            ILogger? logger = null,
-            HashAlgorithmName? hashAlgorithm = null,
-            string? signerName = null,
-            string? reason = null,
-            string? location = null,
-            SignatureAppearance? appearance = null,
-            bool? enableLtv = null,
-            string? archivalTsaUrl = null,
-            int? maxConcurrency = null) =>
-            new(
-                certificate ?? Certificate,
-                chain ?? Chain,
-                externalSigner ?? ExternalSigner,
-                externalSignerOid ?? ExternalSignerOid,
-                tsaUrl ?? TsaUrl,
-                httpClientProvider ?? HttpClientProvider,
-                logger ?? Logger,
-                hashAlgorithm ?? HashAlgorithm,
-                signerName ?? SignerName,
-                reason ?? Reason,
-                location ?? Location,
-                appearance ?? Appearance,
-                enableLtv ?? EnableLtv,
-                archivalTsaUrl ?? ArchivalTsaUrl,
-                maxConcurrency ?? MaxConcurrency);
+        internal X509Certificate2 Certificate { get; }
+        internal IReadOnlyList<X509Certificate2> Chain { get; }
+        internal IExternalSigner? ExternalSigner { get; }
+        internal HashAlgorithmName HashAlgorithm { get; }
+        internal bool HashAlgorithmExplicitlySet { get; }
+        internal string? SignatureAlgorithmOid { get; }
+        internal AdesBaselineProfile Profile { get; }
+        internal IHttpClientProvider HttpClientProvider { get; }
+        internal ILogger Logger { get; }
+        internal SignatureFieldOptions? FieldOptions { get; }
+        internal string? OperationId { get; }
+        internal int MaxConcurrency { get; }
 
-        /// <summary>Sets the certificate chain for LTV embedding.</summary>
-        public BatchSignerBuilder WithChain(IReadOnlyList<X509Certificate2> chain) =>
-            With(chain: chain);
+        /// <summary>Sets the certificate chain included with every signature.</summary>
+        public BatchSignerBuilder WithChain(IReadOnlyList<X509Certificate2> chain)
+        {
+            ArgumentNullException.ThrowIfNull(chain);
+            return new BatchSignerBuilder(this, chain: [.. chain]);
+        }
 
-        /// <summary>Uses an external signer (A3 token, HSM, cloud KMS).</summary>
-        public BatchSignerBuilder WithExternalSigner(Func<byte[], Task<byte[]>> signer, string? signatureAlgorithmOid = null) =>
-            With(externalSigner: signer, externalSignerOid: signatureAlgorithmOid);
+        /// <summary>Uses an external signer for each document.</summary>
+        public BatchSignerBuilder WithExternalSigner(IExternalSigner signer)
+        {
+            ArgumentNullException.ThrowIfNull(signer);
+            return new BatchSignerBuilder(this, externalSigner: signer, replaceExternalSigner: true);
+        }
 
-        /// <summary>Configures TSA URL for timestamping.</summary>
-        public BatchSignerBuilder WithTimestamp(string tsaUrl) =>
-            With(tsaUrl: tsaUrl);
-
-        /// <summary>Configures the HTTP client provider.</summary>
-        public BatchSignerBuilder WithHttpClientProvider(IHttpClientProvider provider) =>
-            With(httpClientProvider: provider);
-
-        /// <summary>Configures the hash algorithm. Default: SHA-256.</summary>
+        /// <summary>Sets the signing hash algorithm.</summary>
         public BatchSignerBuilder WithHashAlgorithm(HashAlgorithmName algorithm) =>
-            With(hashAlgorithm: algorithm);
+            new(this, hashAlgorithm: algorithm, hashAlgorithmExplicitlySet: true);
 
-        /// <summary>Configures signer metadata.</summary>
-        public BatchSignerBuilder WithMetadata(string? signerName = null, string? reason = null, string? location = null) =>
-            With(signerName: signerName, reason: reason, location: location);
+        /// <summary>Sets the signature algorithm OID.</summary>
+        public BatchSignerBuilder WithSignatureAlgorithm(string signatureAlgorithmOid)
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(signatureAlgorithmOid);
+            return new BatchSignerBuilder(this, signatureAlgorithmOid: signatureAlgorithmOid, replaceSignatureAlgorithm: true);
+        }
 
-        /// <summary>Configures visual signature appearance.</summary>
-        public BatchSignerBuilder WithAppearance(SignatureAppearance appearance) =>
-            With(appearance: appearance);
+        /// <summary>Sets the complete ADeS baseline profile.</summary>
+        public BatchSignerBuilder WithLevel(AdesBaselineProfile profile)
+        {
+            ArgumentNullException.ThrowIfNull(profile);
+            return new BatchSignerBuilder(this, profile: profile);
+        }
 
-        /// <summary>Enables LTV (Long-Term Validation) with DSS embedding.</summary>
-        public BatchSignerBuilder WithLtv() =>
-            With(enableLtv: true);
+        /// <summary>Sets the HTTP provider used during enrichment.</summary>
+        public BatchSignerBuilder WithHttpClientProvider(IHttpClientProvider provider)
+        {
+            ArgumentNullException.ThrowIfNull(provider);
+            return new BatchSignerBuilder(this, httpClientProvider: provider);
+        }
 
-        /// <summary>
-        /// Enables archival timestamp (PAdES-B-LTA).
-        /// Requires <see cref="WithLtv"/> to be called first.
-        /// </summary>
-        public BatchSignerBuilder WithArchivalTimestamp(string tsaUrl) =>
-            With(archivalTsaUrl: tsaUrl);
+        /// <summary>Sets the complete PDF signature field configuration.</summary>
+        public BatchSignerBuilder WithFieldOptions(SignatureFieldOptions fieldOptions)
+        {
+            ArgumentNullException.ThrowIfNull(fieldOptions);
+            return new BatchSignerBuilder(this, fieldOptions: fieldOptions, replaceFieldOptions: true);
+        }
 
-        /// <summary>Sets maximum concurrent signing operations. Default: 4.</summary>
+        /// <summary>Sets the operation identifier passed to external signers.</summary>
+        public BatchSignerBuilder WithOperationId(string operationId)
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(operationId);
+            return new BatchSignerBuilder(this, operationId: operationId, replaceOperationId: true);
+        }
+
+        /// <summary>Sets the logger.</summary>
+        public BatchSignerBuilder WithLogger(ILogger logger)
+        {
+            ArgumentNullException.ThrowIfNull(logger);
+            return new BatchSignerBuilder(this, logger: logger);
+        }
+
+        /// <summary>Sets the maximum concurrent terminal operations.</summary>
         public BatchSignerBuilder WithMaxConcurrency(int maxConcurrency)
         {
-            if (maxConcurrency < 1)
-            {
-                throw new ArgumentOutOfRangeException(nameof(maxConcurrency), "Must be at least 1.");
-            }
-
-            return With(maxConcurrency: maxConcurrency);
+            ArgumentOutOfRangeException.ThrowIfLessThan(maxConcurrency, 1);
+            return new BatchSignerBuilder(this, maxConcurrency: maxConcurrency);
         }
 
-        /// <summary>Sets the logger for diagnostic output.</summary>
-        public BatchSignerBuilder WithLogger(ILogger logger) =>
-            With(logger: logger);
-
-        /// <summary>Builds the <see cref="BatchSigner"/> instance.</summary>
-        public BatchSigner Build()
-        {
-            if (EnableLtv && TsaUrl is null && ArchivalTsaUrl is null)
-            {
-                throw new SigningException("LTV requires a timestamp. Call WithTimestamp() before enabling LTV, or use WithArchivalTimestamp().");
-            }
-
-            if (ArchivalTsaUrl is not null && !EnableLtv)
-            {
-                throw new SigningException("Archival timestamp (B-LTA) requires LTV. Call .WithLtv() before .WithArchivalTimestamp() to produce PAdES B-LTA.");
-            }
-
-            return new(this);
-        }
+        /// <summary>Builds the configured batch signer.</summary>
+        public BatchSigner Build() => new(this);
     }
 }
 
-/// <summary>Result of a single batch signing operation.</summary>
-/// <param name="Id">Identifier of the input PDF.</param>
-/// <param name="SignedPdf">Signed PDF bytes, or null if signing failed.</param>
-/// <param name="Error">Exception if signing failed, or null on success.</param>
+/// <summary>Result of one batch item.</summary>
 public sealed record BatchSignResult(string Id, byte[]? SignedPdf, Exception? Error)
 {
-    /// <summary>Whether the signing operation succeeded.</summary>
+    /// <summary>Whether the item was signed successfully.</summary>
     public bool IsSuccess => Error is null;
 }

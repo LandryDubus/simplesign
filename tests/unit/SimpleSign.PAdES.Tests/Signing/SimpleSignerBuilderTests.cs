@@ -103,7 +103,7 @@ public sealed class SimpleSignerBuilderTests
     public void WithMetadata_Chainable_ReturnsDifferentInstance()
     {
         var builder = PadesSigner.Document([0x25]);
-        var builder2 = builder.WithMetadata(signerName: "João Silva", reason: "Aprovação", location: "Vitória-ES");
+        var builder2 = builder.WithTestFieldOptions(signerName: "João Silva", reason: "Aprovação", location: "Vitória-ES");
 
         builder.ShouldNotBeSameAs(builder2);
     }
@@ -113,7 +113,7 @@ public sealed class SimpleSignerBuilderTests
     {
         var builder = PadesSigner.Document([0x25]);
         Assert.Throws<ArgumentNullException>(() =>
-            builder.WithExternalSigner(null!, new FuncExternalSigner(_ => Task.FromResult(Array.Empty<byte>()))).WithSignatureAlgorithm("1.2.840.113549.1.1.11"));
+            builder.WithExternalSigner(null!, new DelegatingExternalSigner(_ => Task.FromResult(Array.Empty<byte>()))).WithSignatureAlgorithm("1.2.840.113549.1.1.11"));
     }
 
     [Fact(DisplayName = "WithExternalSigner with null delegate throws exception")]
@@ -130,7 +130,7 @@ public sealed class SimpleSignerBuilderTests
     {
         using var cert = TestCertificateFactory.CreateSelfSignedCert();
         var builder = PadesSigner.Document([0x25]);
-        var builder2 = builder.WithExternalSigner(cert, new FuncExternalSigner(_ => Task.FromResult(Array.Empty<byte>())));
+        var builder2 = builder.WithExternalSigner(cert, new DelegatingExternalSigner(_ => Task.FromResult(Array.Empty<byte>())));
 
         builder.ShouldNotBeSameAs(builder2);
     }
@@ -142,7 +142,7 @@ public sealed class SimpleSignerBuilderTests
         var builder = PadesSigner.Document([0x25]);
 
         // Should not throw — RSA key auto-detects to RsaSha256
-        var builder2 = builder.WithExternalSigner(cert, new FuncExternalSigner(_ => Task.FromResult(Array.Empty<byte>())));
+        var builder2 = builder.WithExternalSigner(cert, new DelegatingExternalSigner(_ => Task.FromResult(Array.Empty<byte>())));
         builder2.ShouldNotBeNull();
     }
 

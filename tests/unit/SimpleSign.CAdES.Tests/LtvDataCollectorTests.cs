@@ -1,4 +1,5 @@
 using System.Security.Cryptography.X509Certificates;
+using System.Formats.Asn1;
 using SimpleSign.TestHelpers;
 using Shouldly;
 using Xunit;
@@ -37,6 +38,7 @@ public sealed class LtvDataCollectorTests : IDisposable
         result.OcspResponses[0].ShouldBe([4, 5, 6]);
         result.Crls.ShouldHaveSingleItem();
         result.Crls[0].ShouldBe([7, 8, 9]);
+        result.HasCompleteCoverage.ShouldBeFalse();
     }
 
     [Fact]
@@ -51,6 +53,7 @@ public sealed class LtvDataCollectorTests : IDisposable
         result.CertificateRawData[0].ShouldBe(_selfSigned.RawData);
         result.OcspResponses.ShouldBeEmpty();
         result.Crls.ShouldBeEmpty();
+        result.HasCompleteCoverage.ShouldBeTrue();
     }
 
     [Fact]
@@ -65,6 +68,7 @@ public sealed class LtvDataCollectorTests : IDisposable
         result.CertificateRawData.Count.ShouldBeGreaterThanOrEqualTo(2);
         result.OcspResponses.ShouldBeEmpty();
         result.Crls.ShouldBeEmpty();
+        result.HasCompleteCoverage.ShouldBeFalse();
     }
 
     [Fact]
@@ -112,5 +116,110 @@ public sealed class LtvDataCollectorTests : IDisposable
         result.CertificateRawData.Count.ShouldBe(2);
         result.CertificateRawData.ShouldContain(b => b.SequenceEqual(_pki.Leaf.RawData));
         result.CertificateRawData.ShouldContain(b => b.SequenceEqual(_pki.IntermediateCa.RawData));
+    }
+
+    [Fact]
+    public async Task CollectAsync_WithPerCertificateCrls_RecordsCompleteEvidenceForEachPathCertificate()
+    {
+        using var pki = new SyntheticPki(
+            crlDistributionPoint: "http://198.51.100.1/leaf.crl",
+            intermediateCrlDistributionPoint: "http://198.51.100.1/intermediate.crl");
+        byte[] leafCrl = pki.BuildLeafCrl();
+        byte[] intermediateCrl = pki.BuildIntermediateCrl();
+        var leafCrlReader = new AsnReader(leafCrl, AsnEncodingRules.DER).ReadSequence().ReadSequence();
+        _ = leafCrlReader.ReadSequence();
+        leafCrlReader.ReadEncodedValue().ToArray().ShouldBe(pki.IntermediateCa.SubjectName.RawData);
+        LtvDataCollector.IsCrlIssuedFor(leafCrl, pki.Leaf, null).ShouldBeTrue();
+        LtvDataCollector.IsCrlIssuedFor(intermediateCrl, pki.IntermediateCa, null).ShouldBeTrue();
+        using var httpClient = new HttpClient(new MockHttpHandler(request =>
+        {
+            byte[]? response = request.RequestUri?.AbsolutePath switch
+            {
+                "/leaf.crl" => leafCrl,
+                "/intermediate.crl" => intermediateCrl,
+                _ => null,
+            };
+            return Task.FromResult(response is null
+                ? new HttpResponseMessage(System.Net.HttpStatusCode.NotFound)
+                : new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+                {
+                    Content = new ByteArrayContent(response)
+                });
+        }));
+
+        var result = await LtvDataCollector.CollectAsync(
+            httpClient, pki.Leaf, pki.IntermediatesAndRoot(), null);
+
+        result.HasCompleteCoverage.ShouldBeTrue();
+        result.CertificateEvidence.ShouldNotBeNull();
+        result.CertificateEvidence!.Count.ShouldBe(3);
+        result.CertificateEvidence!.ShouldContain(e =>
+            e.Thumbprint == pki.Leaf.Thumbprint && e.RevocationEvidenceKind == LtvRevocationEvidenceKind.Crl);
+        result.CertificateEvidence!.ShouldContain(e =>
+            e.Thumbprint == pki.IntermediateCa.Thumbprint && e.RevocationEvidenceKind == LtvRevocationEvidenceKind.Crl);
+        result.CertificateEvidence!.ShouldContain(e =>
+            e.Thumbprint == pki.RootCa.Thumbprint && e.RevocationEvidenceKind == LtvRevocationEvidenceKind.NotRequired);
+    }
+
+    [Fact]
+    public async Task CollectAsync_MissingIssuerPublishedByAia_CompletesCertificatePath()
+    {
+        const string leafCrlUrl = "http://198.51.100.1/leaf.crl";
+        const string intermediateCrlUrl = "http://198.51.100.1/intermediate.crl";
+        const string rootCertificateUrl = "http://198.51.100.1/root.crt";
+        using var pki = new SyntheticPki(
+            crlDistributionPoint: leafCrlUrl,
+            intermediateCrlDistributionPoint: intermediateCrlUrl,
+            intermediateCaIssuersUrl: rootCertificateUrl);
+        byte[] leafCrl = pki.BuildLeafCrl();
+        byte[] intermediateCrl = pki.BuildIntermediateCrl();
+        using var httpClient = new HttpClient(new MockHttpHandler(request =>
+        {
+            byte[]? response = request.RequestUri?.ToString() switch
+            {
+                leafCrlUrl => leafCrl,
+                intermediateCrlUrl => intermediateCrl,
+                rootCertificateUrl => pki.RootCa.RawData,
+                _ => null,
+            };
+            return Task.FromResult(response is null
+                ? new HttpResponseMessage(System.Net.HttpStatusCode.NotFound)
+                : new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+                {
+                    Content = new ByteArrayContent(response)
+                });
+        }));
+
+        var result = await LtvDataCollector.CollectAsync(
+            httpClient,
+            pki.Leaf,
+            [pki.IntermediateCa],
+            logger: null);
+
+        result.HasCompleteCoverage.ShouldBeTrue();
+        result.CertificateRawData.ShouldContain(raw => raw.SequenceEqual(pki.RootCa.RawData));
+        result.CertificateEvidence.ShouldNotBeNull();
+        result.CertificateEvidence!.ShouldContain(item =>
+            item.Thumbprint == pki.RootCa.Thumbprint &&
+            item.RevocationEvidenceKind == LtvRevocationEvidenceKind.NotRequired);
+    }
+
+    [Fact]
+    public async Task CollectAsync_WithIrrelevantCrl_DoesNotMarkCertificateComplete()
+    {
+        using var pki = new SyntheticPki(crlDistributionPoint: "http://198.51.100.1/leaf.crl");
+        using var httpClient = new HttpClient(new MockHttpHandler(_ => Task.FromResult(
+            new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+            {
+                Content = new ByteArrayContent(pki.BuildIntermediateCrl())
+            })));
+
+        var result = await LtvDataCollector.CollectAsync(
+            httpClient, pki.Leaf, [pki.IntermediateCa], null);
+
+        result.HasCompleteCoverage.ShouldBeFalse();
+        result.CertificateEvidence!.ShouldContain(e =>
+            e.Thumbprint == pki.Leaf.Thumbprint && !e.IsComplete &&
+            e.RevocationEvidenceKind == LtvRevocationEvidenceKind.None);
     }
 }

@@ -158,6 +158,16 @@ public sealed class LtvEmbedder : ILtvEmbedder
                     {
                         var issuerCert = allCertsSnapshot.FindIssuerOf(cert);
                         var ocspResult = await ocspClient.FetchOcspResponseAsync(cert, issuerCert, ocspUrl, ct).ConfigureAwait(false);
+                        if (!ocspResult.IsValid)
+                        {
+                            foreach (var responderCertificate in ocspResult.ResponderCertificates)
+                            {
+                                responderCertificate.Dispose();
+                            }
+
+                            throw new InvalidDataException("OCSP responder did not report a good certificate status.");
+                        }
+
                         ocspBag.Add(ocspResult.ResponseBytes);
 
                         foreach (var respCert in ocspResult.ResponderCertificates)
@@ -183,7 +193,7 @@ public sealed class LtvEmbedder : ILtvEmbedder
                     try
                     {
                         var crl = await ResilientHttp.GetBytesAsync(_httpClient, crlUrl, logger: _logger, ct: ct).ConfigureAwait(false);
-                        if (crl is not null)
+                        if (crl is not null && IsCrlIssuedFor(crl, cert))
                         {
                             crlBag.Add(crl);
 
@@ -210,6 +220,10 @@ public sealed class LtvEmbedder : ILtvEmbedder
                                     }
                                 }
                             }
+                        }
+                        else if (crl is not null)
+                        {
+                            _logger.CrlDownloadFailed("Downloaded CRL does not belong to the certificate issuer.");
                         }
                     }
                     catch (HttpRequestException ex)
@@ -264,6 +278,51 @@ public sealed class LtvEmbedder : ILtvEmbedder
         var existingDss = Validation.DssExtractor.ParseExistingDss(signedPdf);
 
         return AppendDssDictionary(signedPdf, crlData, ocspData, allCerts, signatureHashes, existingDss, timestampTokenBytes);
+    }
+
+    internal static bool HasCompleteEvidence(
+        Validation.DssValidationData dss,
+        IReadOnlyList<X509Certificate2> requiredCertificates)
+    {
+        foreach (var certificate in requiredCertificates)
+        {
+            if (!dss.GlobalCerts.Any(raw => raw.AsSpan().SequenceEqual(certificate.RawData)))
+            {
+                return false;
+            }
+
+            if (certificate.IsSelfSigned())
+            {
+                continue;
+            }
+
+            bool hasCrl = dss.GlobalCrls.Any(crl => IsCrlIssuedFor(crl, certificate));
+            bool hasOcsp = dss.GlobalOcsps.Any(ocsp => IsValidOcspFor(ocsp, certificate));
+            if (!hasCrl && !hasOcsp)
+            {
+                return false;
+            }
+        }
+
+        return requiredCertificates.Count > 0;
+    }
+
+    private static bool IsCrlIssuedFor(byte[] crl, X509Certificate2 certificate)
+    {
+        byte[]? issuer = CrlClient.ExtractCrlIssuerDn(crl);
+        return issuer is not null && issuer.AsSpan().SequenceEqual(certificate.IssuerName.RawData);
+    }
+
+    private static bool IsValidOcspFor(byte[] ocsp, X509Certificate2 certificate)
+    {
+        try
+        {
+            return OcspClient.ParseOcspResponse(ocsp, certificate, NullLogger.Instance);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or InvalidDataException or System.Formats.Asn1.AsnContentException or CryptographicException)
+        {
+            return false;
+        }
     }
 
     private static byte[] EnsureTrailingEol(byte[] data)

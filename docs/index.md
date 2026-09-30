@@ -21,13 +21,18 @@ dotnet add package SimpleSign.PAdES
 ```
 
 ```csharp
+using SimpleSign.Core.Extensions;
 using SimpleSign.PAdES;
 
 // Sign a PDF
 byte[] signedPdf = await PadesSigner
     .Document(pdfBytes)
     .WithCertificate(certificate)
-    .WithMetadata(signerName: "John Doe", reason: "Approval")
+    .WithMetadata(new SignatureMetadata
+    {
+        SignerName = "John Doe",
+        Reason = "Approval"
+    })
     .SignAsync();
 ```
 
@@ -53,8 +58,8 @@ byte[] signedPdf = await PadesSigner
 - [Standards Conformance](conformance.md)
 - [Interoperability](interoperability.md)
 - [Benchmarks](benchmarks.md)
-- [ADRs](adr/) — Architecture Decision Records
-- [Migration Guides](migration/)
+- [ADRs](adr/index.md) — Architecture Decision Records
+- [Migration Guides](migration/index.md)
 - [HostSigner](https://github.com/eupassarin/SimpleSign/tree/main/src/SimpleSign.HostSigner) — Windows tray app for local signing
 - [CLI Tool](https://www.nuget.org/packages/SimpleSign.Cli) — command-line signing and validation
 - [GitHub Repository](https://github.com/eupassarin/SimpleSign)

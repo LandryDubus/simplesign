@@ -30,16 +30,33 @@ public sealed class SyntheticPki : IDisposable
     /// <summary>End-entity leaf signed by the Intermediate (1y validity, has private key).</summary>
     public X509Certificate2 Leaf { get; }
 
-    /// <summary>Optional CRL Distribution Point URL embedded in Intermediate and Leaf.</summary>
+    /// <summary>Optional CRL Distribution Point URL embedded in the leaf signer certificate.</summary>
     public string? CrlDistributionPoint { get; }
+
+    /// <summary>Optional CRL Distribution Point URL embedded in the intermediate CA.</summary>
+    public string? IntermediateCrlDistributionPoint { get; }
 
     /// <summary>Optional OCSP responder URL embedded in Intermediate and Leaf.</summary>
     public string? OcspResponder { get; }
 
-    public SyntheticPki(string? crlDistributionPoint = null, string? ocspResponder = null)
+    /// <summary>Optional CA Issuers URL embedded in the intermediate CA.</summary>
+    public string? IntermediateCaIssuersUrl { get; }
+
+    /// <summary>Optional CA Issuers URL embedded in the leaf certificate.</summary>
+    public string? LeafCaIssuersUrl { get; }
+
+    public SyntheticPki(
+        string? crlDistributionPoint = null,
+        string? ocspResponder = null,
+        string? intermediateCrlDistributionPoint = null,
+        string? intermediateCaIssuersUrl = null,
+        string? leafCaIssuersUrl = null)
     {
         CrlDistributionPoint = crlDistributionPoint;
+        IntermediateCrlDistributionPoint = intermediateCrlDistributionPoint ?? crlDistributionPoint;
         OcspResponder = ocspResponder;
+        IntermediateCaIssuersUrl = intermediateCaIssuersUrl;
+        LeafCaIssuersUrl = leafCaIssuersUrl;
 
         _rootKey = RSA.Create(2048);
         _intermediateKey = RSA.Create(2048);
@@ -79,7 +96,7 @@ public sealed class SyntheticPki : IDisposable
         req.CertificateExtensions.Add(
             new X509SubjectKeyIdentifierExtension(req.PublicKey, critical: false));
         AddAuthorityKeyIdentifier(req, issuer);
-        AddCrlAndOcspExtensions(req);
+        AddCrlAndOcspExtensions(req, IntermediateCrlDistributionPoint, IntermediateCaIssuersUrl);
 
         // Use a unique serial — required so revocation tests can distinguish certs.
         byte[] serial = RandomNumberGenerator.GetBytes(16);
@@ -106,7 +123,7 @@ public sealed class SyntheticPki : IDisposable
         req.CertificateExtensions.Add(
             new X509SubjectKeyIdentifierExtension(req.PublicKey, critical: false));
         AddAuthorityKeyIdentifier(req, issuer);
-        AddCrlAndOcspExtensions(req);
+        AddCrlAndOcspExtensions(req, CrlDistributionPoint, LeafCaIssuersUrl);
 
         byte[] serial = RandomNumberGenerator.GetBytes(16);
         serial[0] &= 0x7F;
@@ -133,15 +150,18 @@ public sealed class SyntheticPki : IDisposable
         req.CertificateExtensions.Add(new X509Extension("2.5.29.35", writer.Encode(), critical: false));
     }
 
-    private void AddCrlAndOcspExtensions(CertificateRequest req)
+    private void AddCrlAndOcspExtensions(
+        CertificateRequest req,
+        string? crlDistributionPoint,
+        string? caIssuersUrl)
     {
-        if (CrlDistributionPoint is not null)
+        if (crlDistributionPoint is not null)
         {
-            req.CertificateExtensions.Add(BuildCrlDistributionPointExtension(CrlDistributionPoint));
+            req.CertificateExtensions.Add(BuildCrlDistributionPointExtension(crlDistributionPoint));
         }
-        if (OcspResponder is not null)
+        if (OcspResponder is not null || caIssuersUrl is not null)
         {
-            req.CertificateExtensions.Add(BuildAuthorityInfoAccessExtension(OcspResponder));
+            req.CertificateExtensions.Add(BuildAuthorityInfoAccessExtension(OcspResponder, caIssuersUrl));
         }
     }
 
@@ -168,7 +188,7 @@ public sealed class SyntheticPki : IDisposable
         return new X509Extension("2.5.29.31", writer.Encode(), critical: false);
     }
 
-    private static X509Extension BuildAuthorityInfoAccessExtension(string ocspUrl)
+    private static X509Extension BuildAuthorityInfoAccessExtension(string? ocspUrl, string? caIssuersUrl)
     {
         // AuthorityInfoAccessSyntax ::= SEQUENCE OF AccessDescription
         // AccessDescription ::= SEQUENCE { accessMethod OID, accessLocation GeneralName }
@@ -176,10 +196,22 @@ public sealed class SyntheticPki : IDisposable
         var writer = new AsnWriter(AsnEncodingRules.DER);
         using (writer.PushSequence())
         {
-            using (writer.PushSequence())
+            if (ocspUrl is not null)
             {
-                writer.WriteObjectIdentifier("1.3.6.1.5.5.7.48.1");
-                writer.WriteCharacterString(UniversalTagNumber.IA5String, ocspUrl, new Asn1Tag(TagClass.ContextSpecific, 6));
+                using (writer.PushSequence())
+                {
+                    writer.WriteObjectIdentifier("1.3.6.1.5.5.7.48.1");
+                    writer.WriteCharacterString(UniversalTagNumber.IA5String, ocspUrl, new Asn1Tag(TagClass.ContextSpecific, 6));
+                }
+            }
+
+            if (caIssuersUrl is not null)
+            {
+                using (writer.PushSequence())
+                {
+                    writer.WriteObjectIdentifier("1.3.6.1.5.5.7.48.2");
+                    writer.WriteCharacterString(UniversalTagNumber.IA5String, caIssuersUrl, new Asn1Tag(TagClass.ContextSpecific, 6));
+                }
             }
         }
         return new X509Extension("1.3.6.1.5.5.7.1.1", writer.Encode(), critical: false);
@@ -202,17 +234,43 @@ public sealed class SyntheticPki : IDisposable
     /// Serves as realistic revocation data for LTV collection in tests that require
     /// B-LT/B-LTA material. Pair with a local HTTP handler answering the CDP URL.
     /// </summary>
-    public byte[] BuildLeafCrl()
+    public byte[] BuildLeafCrl() => BuildCrl(IntermediateCa, _intermediateKey);
+
+    /// <summary>Builds a DER-encoded CRL signed by the root CA covering the intermediate CA.</summary>
+    public byte[] BuildIntermediateCrl() => BuildCrl(RootCa, _rootKey);
+
+    private static byte[] BuildCrl(X509Certificate2 issuer, RSA issuerKey)
     {
-        var builder = new CertificateRevocationListBuilder();
-        builder.AddEntry(Leaf, DateTimeOffset.UtcNow.AddDays(-1));
-        return builder.Build(
-            IntermediateCa,
-            new System.Numerics.BigInteger(0x0C0D),
-            DateTimeOffset.UtcNow.AddDays(30),
-            HashAlgorithmName.SHA256,
-            RSASignaturePadding.Pkcs1,
-            DateTimeOffset.UtcNow.AddDays(-1));
+        var tbsWriter = new AsnWriter(AsnEncodingRules.DER);
+        using (tbsWriter.PushSequence())
+        {
+            using (tbsWriter.PushSequence())
+            {
+                tbsWriter.WriteObjectIdentifier("1.2.840.113549.1.1.11");
+                tbsWriter.WriteNull();
+            }
+
+            tbsWriter.WriteEncodedValue(issuer.SubjectName.RawData);
+            tbsWriter.WriteUtcTime(DateTimeOffset.UtcNow.AddDays(-1));
+            tbsWriter.WriteUtcTime(DateTimeOffset.UtcNow.AddDays(30));
+        }
+
+        byte[] tbs = tbsWriter.Encode();
+        byte[] signature = issuerKey.SignData(tbs, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+        var crlWriter = new AsnWriter(AsnEncodingRules.DER);
+        using (crlWriter.PushSequence())
+        {
+            crlWriter.WriteEncodedValue(tbs);
+            using (crlWriter.PushSequence())
+            {
+                crlWriter.WriteObjectIdentifier("1.2.840.113549.1.1.11");
+                crlWriter.WriteNull();
+            }
+
+            crlWriter.WriteBitString(signature);
+        }
+
+        return crlWriter.Encode();
     }
 
     public void Dispose()

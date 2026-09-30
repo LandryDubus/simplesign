@@ -2,7 +2,7 @@ using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using Shouldly;
-using SimpleSign.Core.Validation;
+using SimpleSign.Core.Signing;
 using SimpleSign.PAdES.Signing;
 using SimpleSign.TestHelpers;
 using Xunit;
@@ -82,7 +82,8 @@ public sealed class BatchErrorRecoveryTests
 
         var act = () => signer.SignAsync(CreateMinimalPdf());
 
-        var exception = await Should.ThrowAsync<CertificateValidationException>(act);
+        var exception = await Should.ThrowAsync<SigningException>(act);
+        exception.Reason.ShouldBe(SigningErrorReason.CertificateExpired);
         exception.Message.ShouldContain("expired");
     }
 

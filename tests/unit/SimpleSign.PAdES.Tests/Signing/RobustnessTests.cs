@@ -3,6 +3,7 @@ using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using Shouldly;
 using SimpleSign.Core.Crypto;
+using SimpleSign.Core.Signing;
 using SimpleSign.Core.Validation;
 using SimpleSign.PAdES.Signing;
 using SimpleSign.PAdES.Validation;
@@ -88,7 +89,7 @@ public sealed class RobustnessTests
     {
         using X509Certificate2 cert = CreateCert();
         string signerName = new string('A', 500);
-        byte[] array = await PadesSigner.Document(BuildMinimalPdf()).WithCertificate(cert).WithMetadata(signerName)
+        byte[] array = await PadesSigner.Document(BuildMinimalPdf()).WithCertificate(cert).WithTestFieldOptions(signerName)
             .SignAsync();
         array.ShouldNotBeEmpty("");
         using MemoryStream stream = new MemoryStream(array);
@@ -102,7 +103,7 @@ public sealed class RobustnessTests
     {
         using X509Certificate2 cert = CreateCert();
         string reason = new string('R', 1000);
-        byte[] array = await PadesSigner.Document(BuildMinimalPdf()).WithCertificate(cert).WithMetadata(null, reason)
+        byte[] array = await PadesSigner.Document(BuildMinimalPdf()).WithCertificate(cert).WithTestFieldOptions(null, reason)
             .SignAsync();
         array.ShouldNotBeEmpty("");
         using MemoryStream stream = new MemoryStream(array);
@@ -118,7 +119,7 @@ public sealed class RobustnessTests
     public async Task Robustness_UnicodeSignerName_DoesNotCrash(string unicodeName)
     {
         using X509Certificate2 cert = CreateCert();
-        byte[] array = await PadesSigner.Document(BuildMinimalPdf()).WithCertificate(cert).WithMetadata(unicodeName)
+        byte[] array = await PadesSigner.Document(BuildMinimalPdf()).WithCertificate(cert).WithTestFieldOptions(unicodeName)
             .SignAsync();
         array.ShouldNotBeEmpty("");
         using MemoryStream stream = new MemoryStream(array);
@@ -321,7 +322,8 @@ public sealed class RobustnessTests
         {
             byte[] pdf = BuildMinimalPdf();
             Func<Task<byte[]>> action = () => PadesSigner.Document(pdf).WithCertificate(cert).SignAsync();
-            var ex = await Should.ThrowAsync<CertificateValidationException>(async () => await action());
+            var ex = await Should.ThrowAsync<SigningException>(async () => await action());
+            ex.Reason.ShouldBe(SigningErrorReason.CertificateExpired);
             ex.Message.ShouldContain("expired");
         }
         finally

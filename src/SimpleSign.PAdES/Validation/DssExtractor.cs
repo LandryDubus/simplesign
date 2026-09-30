@@ -65,6 +65,10 @@ internal static partial class DssExtractor
 
             return new DssValidationData(globalCrls, globalOcsps, globalCerts, vriEntries);
         }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
         // S2221: intentional broad catch — data extraction from untrusted PDF
         catch (Exception ex)
         {

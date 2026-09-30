@@ -20,11 +20,13 @@ public class DeferredSigningBenchmarks
     // Pre-computed for CompleteAsync benchmark
     private byte[] _sessionData = null!;
     private byte[] _signedHash = null!;
+    private byte[] _sessionIntegrityKey = null!;
 
     [GlobalSetup]
     public async Task Setup()
     {
         _pdfBytes = PdfHelper.BuildMinimalPdf();
+        _sessionIntegrityKey = RandomNumberGenerator.GetBytes(32);
         _rsa = RSA.Create(2048);
 
         var req = new CertificateRequest("CN=Bench Deferred", _rsa, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
@@ -33,7 +35,10 @@ public class DeferredSigningBenchmarks
         _cert = req.CreateSelfSigned(DateTimeOffset.UtcNow.AddMinutes(-5), DateTimeOffset.UtcNow.AddYears(1));
 
         // Pre-compute a prepare result for the CompleteAsync-only benchmark
-        var prepResult = await DeferredSigner.PrepareAsync(_pdfBytes, _cert);
+        var prepResult = await DeferredSigner.Document(_pdfBytes)
+            .WithCertificate(_cert)
+            .WithSessionIntegrityKey(_sessionIntegrityKey)
+            .PrepareAsync();
         _sessionData = prepResult.SessionData;
         _signedHash = _rsa.SignData(prepResult.HashToSign, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
     }
@@ -56,18 +61,24 @@ public class DeferredSigningBenchmarks
     [Benchmark(Description = "Deferred: PrepareAsync only")]
     public async Task<byte[]> PrepareOnly()
     {
-        var result = await DeferredSigner.PrepareAsync(_pdfBytes, _cert);
+        var result = await DeferredSigner.Document(_pdfBytes)
+            .WithCertificate(_cert)
+            .WithSessionIntegrityKey(_sessionIntegrityKey)
+            .PrepareAsync();
         return result.HashToSign;
     }
 
     [Benchmark(Description = "Deferred: CompleteAsync only")]
-    public async Task<byte[]> CompleteOnly() => await DeferredSigner.CompleteAsync(_sessionData, _signedHash);
+    public async Task<byte[]> CompleteOnly() => await DeferredSigner.Resume(_sessionData, _sessionIntegrityKey).CompleteAsync(_signedHash);
 
     [Benchmark(Description = "Deferred: full roundtrip (Prepare + sign + Complete)")]
     public async Task<byte[]> FullRoundtrip()
     {
-        var prepResult = await DeferredSigner.PrepareAsync(_pdfBytes, _cert);
+        var signer = DeferredSigner.Document(_pdfBytes)
+            .WithCertificate(_cert)
+            .WithSessionIntegrityKey(_sessionIntegrityKey);
+        var prepResult = await signer.PrepareAsync();
         var signedHash = _rsa.SignData(prepResult.HashToSign, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
-        return await DeferredSigner.CompleteAsync(prepResult.SessionData, signedHash);
+        return await DeferredSigner.Resume(prepResult.SessionData, _sessionIntegrityKey).CompleteAsync(signedHash);
     }
 }

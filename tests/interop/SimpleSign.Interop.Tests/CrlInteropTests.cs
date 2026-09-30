@@ -5,7 +5,6 @@ using SimpleSign.Core.Signing;
 using SimpleSign.PAdES;
 using SimpleSign.PAdES.Inspection;
 using SimpleSign.PAdES.Validation;
-using SimpleSign.TestHelpers;
 using Xunit;
 using Xunit.Abstractions;
 
@@ -24,8 +23,8 @@ public sealed class CrlInteropTests(ITestOutputHelper output)
         SkipIfDockerUnavailable();
 
         var pdf = MinimalPdf();
-        using var pki = new SyntheticPki(crlDistributionPoint: "http://crl.example.com/test-ca.crl");
-        using var crlClient = TestRevocation.BuildCrlClient(pki.BuildLeafCrl());
+        using var pki = TestRevocation.CreatePki();
+        using var crlClient = TestRevocation.BuildCrlClient(pki);
 
         var signed = await PadesSigner.Document(pdf)
             .WithCertificate(pki.Leaf, pki.IntermediatesAndRoot())
@@ -66,8 +65,8 @@ public sealed class CrlInteropTests(ITestOutputHelper output)
         SkipIfDockerUnavailable();
 
         var pdf = MinimalPdf();
-        using var pki = new SyntheticPki(crlDistributionPoint: "http://crl.example.com/test-ca.crl");
-        using var crlClient = TestRevocation.BuildCrlClient(pki.BuildLeafCrl());
+        using var pki = TestRevocation.CreatePki();
+        using var crlClient = TestRevocation.BuildCrlClient(pki);
 
         var signed = await PadesSigner.Document(pdf)
             .WithCertificate(pki.Leaf, pki.IntermediatesAndRoot())

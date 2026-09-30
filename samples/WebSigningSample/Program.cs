@@ -1,11 +1,16 @@
+using System.Collections.Concurrent;
+using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using SimpleSign.PAdES;
+using SimpleSign.PAdES.Signing;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddAntiforgery();
 
 var app = builder.Build();
 app.UseStaticFiles();
+var deferredSessions = new ConcurrentDictionary<string, byte[]>();
+byte[] sessionIntegrityKey = RandomNumberGenerator.GetBytes(32);
 
 // POST /api/prepare — receives PDF files + certificate, returns hashes to sign
 app.MapPost("/api/prepare", async (HttpRequest request) =>
@@ -42,31 +47,30 @@ app.MapPost("/api/prepare", async (HttpRequest request) =>
 
         try
         {
-            var signerName = cert.GetNameInfo(X509NameType.SimpleName, false) ?? "Signer";
-            var deferredBuilder = new DeferredSignerBuilder(pdfBytes, cert)
-                .WithSignerName(signerName);
-
             var reason = form["reason"].ToString();
             var location = form["location"].ToString();
 
-            if (!string.IsNullOrWhiteSpace(reason))
+            var fieldOptions = new SignatureFieldOptions
             {
-                deferredBuilder = deferredBuilder.WithReason(reason);
-            }
-
-            if (!string.IsNullOrWhiteSpace(location))
-            {
-                deferredBuilder = deferredBuilder.WithLocation(location);
-            }
+                SignerName = cert.GetNameInfo(X509NameType.SimpleName, false) ?? "Signer",
+                Reason = string.IsNullOrWhiteSpace(reason) ? null : reason,
+                Location = string.IsNullOrWhiteSpace(location) ? null : location
+            };
+            var deferredBuilder = DeferredSigner.Document(pdfBytes)
+                .WithCertificate(cert)
+                .WithSessionIntegrityKey(sessionIntegrityKey)
+                .WithFieldOptions(fieldOptions);
 
             var prepared = await deferredBuilder.PrepareAsync();
+            string sessionId = Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
+            deferredSessions[sessionId] = prepared.SessionData;
 
             preparedDocs.Add(new
             {
                 index = i,
                 fileName = file.FileName,
                 hashBase64 = Convert.ToBase64String(prepared.HashToSign),
-                sessionDataBase64 = Convert.ToBase64String(prepared.SessionData),
+                sessionId,
                 digestAlgorithm = prepared.DigestAlgorithm,
                 signatureAlgorithmOid = prepared.SignatureAlgorithmOid
             });
@@ -85,21 +89,25 @@ app.MapPost("/api/prepare", async (HttpRequest request) =>
     return Results.Ok(preparedDocs);
 }).DisableAntiforgery();
 
-// POST /api/complete — receives sessionData + signature, returns signed PDF
+// POST /api/complete — receives a server-side session ID + signature, returns signed PDF
 app.MapPost("/api/complete", async (HttpRequest request) =>
 {
     var body = await request.ReadFromJsonAsync<CompleteRequest>();
-    if (body is null || string.IsNullOrEmpty(body.SignedHashBase64) || string.IsNullOrEmpty(body.SignedHashBase64))
+    if (body is null || string.IsNullOrEmpty(body.SessionId) || string.IsNullOrEmpty(body.SignedHashBase64))
     {
-        return Results.BadRequest(new { error = "FileId and SignedHashBase64 are required" });
+        return Results.BadRequest(new { error = "SessionId and SignedHashBase64 are required" });
     }
 
     try
     {
-        var sessionData = Convert.FromBase64String(body.SessionDataBase64);
+        if (!deferredSessions.TryRemove(body.SessionId, out byte[]? sessionData))
+        {
+            return Results.BadRequest(new { error = "Session not found or already completed" });
+        }
+
         var signature = Convert.FromBase64String(body.SignedHashBase64);
 
-        var signedPdf = await DeferredSigner.CompleteAsync(sessionData, signature);
+        var signedPdf = await DeferredSigner.Resume(sessionData, sessionIntegrityKey).CompleteAsync(signature);
 
         return Results.Ok(new { signedPdfBase64 = Convert.ToBase64String(signedPdf) });
     }
@@ -116,6 +124,6 @@ app.Run();
 
 public sealed class CompleteRequest
 {
-    public string SessionDataBase64 { get; set; } = "";
+    public string SessionId { get; set; } = "";
     public string SignedHashBase64 { get; set; } = "";
 }

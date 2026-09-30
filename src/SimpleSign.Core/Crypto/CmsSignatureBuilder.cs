@@ -89,7 +89,7 @@ public sealed class CmsSignatureBuilder
     /// <param name="certificate">The signer's public certificate (private key NOT required).</param>
     /// <param name="externalSigner">
     /// A delegate that receives the DER-encoded signed attributes and returns the raw signature bytes.
-    /// For RSA: PKCS#1 v1.5 signature. For ECDSA: DER SEQUENCE { r, s } (RFC 3279). For EdDSA: raw signature bytes.
+    /// For RSA: PKCS#1 v1.5 or PSS signature. For ECDSA: DER SEQUENCE { r, s } (RFC 3279).
     /// </param>
     /// <param name="signatureAlgorithmOid">
     /// The OID of the signature algorithm (e.g., "1.2.840.113549.1.1.11" for RSA-SHA256).
@@ -125,6 +125,13 @@ public sealed class CmsSignatureBuilder
         cancellationToken.ThrowIfCancellationRequested();
 
         ValidateSignatureAlgorithmCompatibility(certificate, signatureAlgorithmOid);
+        ValidateSignatureAlgorithmDigestCompatibility(hashAlgorithm, signatureAlgorithmOid);
+        if (signatureAlgorithmOid is Oids.Ed25519 or Oids.Ed448)
+        {
+            throw new SigningException(
+                "EdDSA signing is not supported because the net8.0 target cannot verify raw external EdDSA output.",
+                SigningErrorReason.AlgorithmIncompatible);
+        }
 
         var time = signingTime ?? DateTimeOffset.UtcNow;
         string digestOid = GetDigestOid(hashAlgorithm);
@@ -135,10 +142,35 @@ public sealed class CmsSignatureBuilder
         byte[] signedAttrs = BuildSignedAttributes(contentHash, digestOid, time, certificate, extraAttributes, padesAttributes);
 
         (logger ?? NullLogger.Instance).CmsExternalSignerInvoked(signedAttrs.Length);
-        byte[] signature = await externalSigner(signedAttrs).ConfigureAwait(false);
+        byte[] signature;
+        try
+        {
+            signature = await externalSigner(signedAttrs).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            throw new SigningException(
+                "External signer failed to produce a signature.",
+                SigningErrorReason.ExternalSignerFailure,
+                ex);
+        }
+
         if (signature is null || signature.Length == 0)
         {
-            throw new SigningException("External signer returned null or empty signature.");
+            throw new SigningException(
+                "External signer returned null or empty signature.",
+                SigningErrorReason.ExternalSignerReturnedEmpty);
+        }
+
+        if (!VerifyExternalSignature(signedAttrs, signature, certificate, hashAlgorithm, signatureAlgorithmOid))
+        {
+            throw new SigningException(
+                "External signer returned a signature that does not verify with the configured certificate.",
+                SigningErrorReason.AlgorithmIncompatible);
         }
 
         (logger ?? NullLogger.Instance).CmsExternalSignatureReceived(signature.Length);
@@ -512,12 +544,11 @@ public sealed class CmsSignatureBuilder
         if (keyOid is Oids.Ed25519 or Oids.Ed448)
         {
             throw new NotSupportedException(
-                $"EdDSA key algorithm '{cert.PublicKey.Oid.FriendlyName}' is not supported for direct signing. " +
-                "Use the external signer pipeline (BuildAsync) with an external signing delegate.");
+                $"EdDSA key algorithm '{cert.PublicKey.Oid.FriendlyName}' is not supported for signing.");
         }
 
         throw new NotSupportedException(
-            $"Certificate key algorithm '{cert.PublicKey.Oid.FriendlyName}' is not supported. Use RSA, ECDSA, or EdDSA via external signer.");
+            $"Certificate key algorithm '{cert.PublicKey.Oid.FriendlyName}' is not supported. Use RSA or ECDSA.");
 
     }
 
@@ -527,6 +558,42 @@ public sealed class CmsSignatureBuilder
     /// </summary>
     public static RSASignaturePadding DetectRsaPadding(X509Certificate2 cert)
         => CryptoUtility.DetectRsaPadding(cert);
+
+    /// <summary>
+    /// Verifies raw bytes returned by an external signer before they are embedded in a CMS or XML container.
+    /// </summary>
+    /// <param name="data">The exact bytes handed to the external signer.</param>
+    /// <param name="signature">The raw signature returned by the external signer.</param>
+    /// <param name="certificate">The public certificate for the signing key.</param>
+    /// <param name="hashAlgorithm">The resolved digest algorithm.</param>
+    /// <param name="signatureAlgorithmOid">The resolved signature algorithm OID.</param>
+    /// <returns><see langword="true"/> when the signature verifies with the certificate public key.</returns>
+    public static bool VerifyExternalSignature(
+        ReadOnlySpan<byte> data,
+        ReadOnlySpan<byte> signature,
+        X509Certificate2 certificate,
+        HashAlgorithmName hashAlgorithm,
+        string signatureAlgorithmOid)
+    {
+        using var rsa = certificate.GetRSAPublicKey();
+        if (rsa is not null)
+        {
+            var padding = signatureAlgorithmOid == Oids.RsaPss
+                ? RSASignaturePadding.Pss
+                : RSASignaturePadding.Pkcs1;
+            return rsa.VerifyData(data, signature, hashAlgorithm, padding);
+        }
+
+        using var ecdsa = certificate.GetECDsaPublicKey();
+        if (ecdsa is not null)
+        {
+            return ecdsa.VerifyData(data, signature, hashAlgorithm, DSASignatureFormat.Rfc3279DerSequence);
+        }
+
+        throw new NotSupportedException(
+            $"External signature verification is not supported for certificate key algorithm " +
+            $"'{certificate.PublicKey.Oid.FriendlyName}'.");
+    }
 
     /// <summary>Computes a cryptographic hash of the provided data using the specified algorithm.</summary>
     public static byte[] ComputeHash(ReadOnlySpan<byte> data, HashAlgorithmName algorithm)
@@ -602,6 +669,36 @@ public sealed class CmsSignatureBuilder
                 $"Signature algorithm OID '{signatureAlgorithmOid}' is not compatible with " +
                 $"certificate key type '{cert.PublicKey.Oid.FriendlyName}' ({keyOid}). " +
                 "Use an OID from the same algorithm family as the certificate's public key.");
+        }
+    }
+
+    /// <summary>
+    /// Validates that an algorithm OID which encodes a digest is not combined with a different digest.
+    /// </summary>
+    /// <param name="hashAlgorithm">The digest used by the signing operation.</param>
+    /// <param name="signatureAlgorithmOid">The signature algorithm OID written to the container.</param>
+    /// <exception cref="SigningException">The OID and digest contradict each other.</exception>
+    public static void ValidateSignatureAlgorithmDigestCompatibility(
+        HashAlgorithmName hashAlgorithm,
+        string signatureAlgorithmOid)
+    {
+        HashAlgorithmName? requiredHash = signatureAlgorithmOid switch
+        {
+            Oids.RsaSha256 or Oids.EcdsaSha256 => HashAlgorithmName.SHA256,
+            Oids.RsaSha384 or Oids.EcdsaSha384 => HashAlgorithmName.SHA384,
+            Oids.RsaSha512 or Oids.EcdsaSha512 => HashAlgorithmName.SHA512,
+            Oids.RsaSha3_256 or Oids.EcdsaSha3_256 => HashAlgorithmName.SHA3_256,
+            Oids.RsaSha3_384 or Oids.EcdsaSha3_384 => HashAlgorithmName.SHA3_384,
+            Oids.RsaSha3_512 or Oids.EcdsaSha3_512 => HashAlgorithmName.SHA3_512,
+            _ => null
+        };
+
+        if (requiredHash is not null && requiredHash != hashAlgorithm)
+        {
+            throw new SigningException(
+                $"Signature algorithm OID '{signatureAlgorithmOid}' requires {requiredHash.Value.Name}, " +
+                $"but the signing operation uses {hashAlgorithm.Name}.",
+                SigningErrorReason.AlgorithmIncompatible);
         }
     }
 
@@ -744,10 +841,9 @@ public sealed class CmsSignatureBuilder
                     using (writer.PushSequence())
                     {
                         writer.WriteObjectIdentifier(oid);
-                        using (writer.PushSetOf())
-                        {
-                            writer.WriteEncodedValue(val);
-                        }
+                        // val already contains the complete Attribute.attrValues SET OF encoding.
+                        // Re-wrapping it creates SET OF SET OF and invalidates preserved timestamps.
+                        writer.WriteEncodedValue(val);
                     }
                 }
                 foreach (var attr in unsignedAttributes)

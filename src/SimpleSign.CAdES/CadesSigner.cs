@@ -1,5 +1,3 @@
-using Microsoft.Extensions.Logging;
-
 namespace SimpleSign.CAdES;
 
 /// <summary>
@@ -12,12 +10,11 @@ public static class CadesSigner
     /// Creates a new fluent builder for signing data with CAdES.
     /// </summary>
     /// <param name="data">The original document bytes to sign. The array is copied; the caller may mutate it afterwards.</param>
-    /// <param name="logger">Optional logger.</param>
     /// <returns>A <see cref="CadesSignerBuilder"/> configured with defaults.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="data"/> is null.</exception>
-    public static CadesSignerBuilder Document(byte[] data, ILogger? logger = null)
+    public static CadesSignerBuilder Document(byte[] data)
     {
         ArgumentNullException.ThrowIfNull(data);
-        return new CadesSignerBuilder(data, logger);
+        return new CadesSignerBuilder(data, logger: null);
     }
 }

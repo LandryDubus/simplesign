@@ -9,13 +9,18 @@ Browser (JavaScript)                    Server (ASP.NET)              HostSigner
 ────────────────────                    ────────────────              ───────────────────────────
 1. GET /api/certificates  ─────────────────────────────────────────→  Returns certs
 2. Select cert + upload PDFs
-3. POST /api/prepare (PDF + cert)  ──→  DeferredSigner.PrepareAsync() → hash
+3. POST /api/prepare (PDF + cert)  ──→  Document(...).WithCertificate(...).WithSessionIntegrityKey(key).PrepareAsync() → hash
 4. POST /api/sign (hashes)  ───────────────────────────────────────→  Signs with key
-5. POST /api/complete (session + sig) → DeferredSigner.CompleteAsync() → signed PDF
+5. POST /api/complete (session + sig) → DeferredSigner.Resume(..., key).CompleteAsync() → signed PDF
 6. Download signed PDFs ✓
 ```
 
 The **private key never leaves the user's machine**. The server only receives the public certificate and hash digests — HostSigner signs locally.
+
+The sample keeps each serialized deferred session in server memory and sends the browser a
+single-use random identifier only. A production deployment should use a shared, expiring
+server-side store (for example Redis). The session is already authenticated by the mandatory
+server-owned HMAC key passed to the deferred builder and `Resume`.
 
 If HostSigner is not running, the browser offers a "Launch HostSigner" button that opens `simplesign://` to start it automatically.
 
@@ -55,8 +60,8 @@ Open http://localhost:5133 (or https://localhost:7180) in your browser.
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `POST` | `/api/prepare` | Receives a PDF + base64 certificate, returns `hashToSign` and `sessionData` |
-| `POST` | `/api/complete` | Receives `sessionData` + raw signature, returns the signed PDF |
+| `POST` | `/api/prepare` | Receives a PDF + base64 certificate, stores the session server-side, and returns `hashToSign` plus a one-time `sessionId` |
+| `POST` | `/api/complete` | Receives `sessionId` + raw signature, consumes the server-side session, and returns the signed PDF |
 
 ## HostSigner Endpoints (called from browser JS)
 

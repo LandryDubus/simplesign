@@ -33,47 +33,51 @@ public sealed class DocTimeStampWithAppearanceTests
             "startxref\n181\n%%EOF");
     }
 
-    private static byte[] BuildFakeTimestampResponse()
-    {
-        var fakeCmsToken = BuildFakeCmsToken();
-        var writer = new System.Formats.Asn1.AsnWriter(System.Formats.Asn1.AsnEncodingRules.DER);
-        using (writer.PushSequence())
-        {
-            using (writer.PushSequence())
-                writer.WriteInteger(0); // status = granted
-            writer.WriteEncodedValue(fakeCmsToken);
-        }
-        return writer.Encode();
-    }
-
-    private static byte[] BuildFakeCmsToken()
-    {
-        var writer = new System.Formats.Asn1.AsnWriter(System.Formats.Asn1.AsnEncodingRules.DER);
-        using (writer.PushSequence())
-        {
-            writer.WriteObjectIdentifier("1.2.840.113549.1.7.2");
-            using (writer.PushSequence(new System.Formats.Asn1.Asn1Tag(
-                System.Formats.Asn1.TagClass.ContextSpecific, 0, true)))
-            {
-                writer.WriteOctetString(new byte[100]);
-            }
-        }
-        return writer.Encode();
-    }
-
     internal static HttpClient BuildMockTsaClient()
     {
-        var tsr = BuildFakeTimestampResponse();
-        return new HttpClient(new MockHttpHandler(_ =>
+        return new HttpClient(new MockHttpHandler(async request =>
         {
+            byte[] requestBytes = await request.Content!.ReadAsByteArrayAsync().ConfigureAwait(false);
+            byte[] responseBytes = TimestampTestResponseBuilder.CreateForRequest(requestBytes);
             var resp = new HttpResponseMessage(HttpStatusCode.OK)
             {
-                Content = new ByteArrayContent(tsr)
+                Content = new ByteArrayContent(responseBytes)
             };
             resp.Content.Headers.ContentType =
                 new System.Net.Http.Headers.MediaTypeHeaderValue("application/timestamp-reply");
-            return Task.FromResult(resp);
+            return resp;
         }));
+    }
+
+    [Fact(DisplayName = "Timestamped incremental signing inspects the newest regular signature")]
+    public async Task SignWithDetailsAsync_MultiplePriorSignaturesAndDocumentTimestamp_ReportsTimestampForNewSignature()
+    {
+        using var certificate = TestCertificateFactory.CreateSelfSignedCert("CN=Incremental timestamp signer");
+        using var httpClient = BuildMockTsaClient();
+        var profile = AdesBaselineProfile.Timestamped(
+            new TimestampOptions(new Uri("http://tsa.example.com"), new SingleClientProvider(httpClient)));
+
+        byte[] firstSignature = await PadesSigner.Document(BuildPdfWithPage())
+            .WithCertificate(certificate)
+            .WithLevel(profile)
+            .SignAsync();
+
+        byte[] withDocumentTimestamp = await DocTimeStampWriter.AppendDocTimeStampAsync(
+            firstSignature, "http://tsa.example.com", httpClient);
+
+        byte[] secondSignature = await PadesSigner.Document(withDocumentTimestamp)
+            .WithCertificate(certificate)
+            .WithLevel(profile)
+            .SignAsync();
+
+        PadesSigningResult thirdSignature = await PadesSigner.Document(secondSignature)
+            .WithCertificate(certificate)
+            .WithLevel(profile)
+            .SignWithDetailsAsync();
+
+        thirdSignature.RequestedLevel.ShouldBe(AdesBaselineLevel.Timestamped);
+        thirdSignature.AchievedLevel.ShouldBe(AdesBaselineLevel.Timestamped);
+        thirdSignature.HasSignatureTimestamp.ShouldBeTrue();
     }
 
     [Fact(DisplayName = "DocTimeStamp after visible appearance produces valid PDF structure")]
@@ -169,7 +173,7 @@ public sealed class DocTimeStampWithAppearanceTests
                 ShowDate = true,
                 ShowReason = true
             })
-            .WithMetadata("Test User", "Testing")
+            .WithTestFieldOptions("Test User", "Testing")
             .SignAsync();
 
         // Now append DocTimeStamp

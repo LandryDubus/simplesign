@@ -6,43 +6,69 @@ using SimpleSign.Core.Constants;
 using SimpleSign.Core.Crypto;
 using SimpleSign.Core.Http;
 using SimpleSign.Core.Signing;
-using SimpleSign.Core.Validation;
 using SimpleSign.PAdES.Signing;
+using SimpleSign.PAdES.Validation;
 using SimpleSign.Pdf;
 
 namespace SimpleSign.PAdES;
 
 /// <summary>
-/// Two-phase (deferred) signing API for web applications where the private key
-/// resides on a different machine (e.g., A3 hardware token in user's browser).
+/// Entry point for two-phase PAdES signing where the private key resides on a
+/// different machine (for example, an A3 hardware token in a user's browser).
 /// </summary>
 /// <example>
 /// <code>
-/// // Phase 1 — Server: prepare PDF and get hash for external signing
-/// var result = await DeferredSigner.PrepareAsync(pdfBytes, publicCert);
+/// // Phase 1 — Server: prepare PDF and get hash for external signing.
+/// var signer = DeferredSigner.Document(pdfBytes).WithCertificate(publicCert);
+/// var result = await signer.PrepareAsync();
 /// // Send result.HashToSign to the client; store result.SessionData on server
 ///
 /// // Phase 2 — Server: complete signing with the raw signature from client
-/// byte[] signedPdf = await DeferredSigner.CompleteAsync(sessionData, rawSignature);
+/// byte[] signedPdf = await DeferredSigner.Resume(result.SessionData, sessionIntegrityKey).CompleteAsync(rawSignature);
 /// </code>
 /// </example>
 public static class DeferredSigner
 {
     /// <summary>
-    /// Phase 1: Prepares a PDF for signing and returns the signed attributes to be signed externally.
-    /// The <see cref="DeferredSigningPrepareResult.HashToSign"/> is the DER-encoded signed attributes
-    /// that the external signer must sign (RSA PKCS#1 v1.5, ECDSA DER, or EdDSA raw).
+    /// Creates a deferred PAdES builder for the supplied PDF bytes.
+    /// </summary>
+    /// <param name="pdfBytes">PDF bytes to snapshot for the deferred operation.</param>
+    /// <returns>A builder that requires <c>WithCertificate</c> before preparation.</returns>
+    public static DeferredSignerBuilder Document(byte[] pdfBytes)
+    {
+        ArgumentNullException.ThrowIfNull(pdfBytes);
+        return new DeferredSignerBuilder(pdfBytes);
+    }
+
+    /// <summary>
+    /// Resumes phase two of a deferred signing operation from server-side session data.
+    /// </summary>
+    /// <param name="sessionData">Integrity-protected serialized session returned by phase one.</param>
+    /// <param name="sessionIntegrityKey">The server-owned HMAC key used during phase one.</param>
+    /// <returns>A builder that can configure completion and embed the returned external signature.</returns>
+    public static DeferredSignerBuilder Resume(byte[] sessionData, byte[] sessionIntegrityKey)
+    {
+        ArgumentNullException.ThrowIfNull(sessionData);
+        ArgumentOutOfRangeException.ThrowIfZero(sessionData.Length);
+        ArgumentNullException.ThrowIfNull(sessionIntegrityKey);
+        var session = DeferredSigningSession.Deserialize(sessionData, sessionIntegrityKey);
+        return new DeferredSignerBuilder(sessionData, sessionIntegrityKey, RestoreProfile(session), resume: true);
+    }
+
+    /// <summary>
+    /// Internal phase-one implementation shared by the immutable deferred builder.
     /// </summary>
     /// <param name="pdfBytes">The original PDF document bytes.</param>
     /// <param name="certificate">The signer's public certificate (private key NOT required).</param>
     /// <param name="options">Optional signing configuration.</param>
     /// <param name="logger">Optional logger for debug diagnostics.</param>
+    /// <param name="sessionIntegrityKey">Server-owned HMAC key used to authenticate the serialized session.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Prepare result containing the hash to sign and serialized session data.</returns>
-    /// <exception cref="SigningException">Certificate is expired or document is DocMDP-locked.</exception>
-    public static async Task<DeferredSigningPrepareResult> PrepareAsync(
+    internal static async Task<DeferredSigningPrepareResult> PrepareAsync(
         byte[] pdfBytes,
         X509Certificate2 certificate,
+        byte[] sessionIntegrityKey,
         DeferredSigningOptions? options = null,
         ILogger? logger = null,
         CancellationToken cancellationToken = default)
@@ -51,34 +77,33 @@ public static class DeferredSigner
         ArgumentNullException.ThrowIfNull(certificate);
 
         options ??= new DeferredSigningOptions();
+        ArgumentNullException.ThrowIfNull(sessionIntegrityKey);
 
-        // Resolve the effective hash: explicit user choice wins; if an explicit signature OID
-        // was provided, infer hash from it (RS512 → SHA512, etc.); otherwise infer from the
-        // cert (PSS params for PSS certs, key size for RSA PKCS#1; default SHA-256 for ECDSA).
-        HashAlgorithmName effectiveHash = AlgorithmInference.ResolveEffectiveHashAlgorithm(
+        var resolvedAlgorithm = SigningAlgorithmResolver.Resolve(
             certificate, options.HashAlgorithm, options.HashAlgorithmExplicitlySet,
             options.SignatureAlgorithmOid);
+        HashAlgorithmName effectiveHash = resolvedAlgorithm.HashAlgorithm;
 
         (logger ?? NullLogger.Instance).DeferredPrepareStarted(certificate.Subject, effectiveHash.Name!);
 
         var fieldOptions = options.FieldOptions ?? new SignatureFieldOptions();
 
-        if (certificate.NotAfter < DateTime.UtcNow)
+        var operationTime = DateTimeOffset.UtcNow;
+        if (certificate.NotBefore > operationTime)
         {
-            throw new CertificateValidationException(
-                $"Certificate '{certificate.Subject}' expired on {certificate.NotAfter:yyyy-MM-dd} UTC. Cannot prepare deferred signing.",
-                certificate.Thumbprint,
-                certificate.Subject);
+            throw new SigningException(
+                $"Certificate '{certificate.Subject}' is not valid until {certificate.NotBefore:yyyy-MM-dd} UTC.",
+                SigningErrorReason.CertificateNotCurrentlyValid);
         }
 
-        if (options.SignatureAlgorithmOid is not null)
+        if (certificate.NotAfter < operationTime)
         {
-            CmsSignatureBuilder.ValidateSignatureAlgorithmCompatibility(
-                certificate, options.SignatureAlgorithmOid);
+            throw new SigningException(
+                $"Certificate '{certificate.Subject}' expired on {certificate.NotAfter:yyyy-MM-dd} UTC.",
+                SigningErrorReason.CertificateExpired);
         }
 
-        string sigAlgOid = options.SignatureAlgorithmOid
-                           ?? DetectSignatureAlgorithmOid(certificate, effectiveHash);
+        string sigAlgOid = resolvedAlgorithm.SignatureAlgorithmOid;
         string digestOid = CmsSignatureBuilder.GetDigestOid(effectiveHash);
 
         // Check DocMDP lock
@@ -123,13 +148,17 @@ public static class DeferredSigner
             DigestOid = digestOid,
             SignatureAlgorithmOid = sigAlgOid,
             SigningTime = signingTime,
-            SigDictObjectNumber = prepareResult.SigDictObjectNumber
+            SigDictObjectNumber = prepareResult.SigDictObjectNumber,
+            RequestedLevel = options.Profile?.Level ?? AdesBaselineLevel.Basic,
+            LevelFailureBehavior = options.Profile?.FailureBehavior ?? SigningLevelFailureBehavior.Throw,
+            TimestampEndpoint = options.Profile?.Timestamp?.Endpoint.ToString(),
+            ArchiveTimestampEndpoint = options.Profile?.ArchiveTimestamp?.Endpoint?.ToString()
         };
 
         var result = new DeferredSigningPrepareResult
         {
             HashToSign = signedAttrs,
-            SessionData = session.Serialize(),
+            SessionData = session.Serialize(sessionIntegrityKey),
             DigestAlgorithm = effectiveHash.Name!,
             SignatureAlgorithmOid = sigAlgOid
         };
@@ -140,21 +169,24 @@ public static class DeferredSigner
     }
 
     /// <summary>
-    /// Phase 2: Completes the signing using the raw signature bytes produced by the external signer.
+    /// Internal phase-two implementation shared by the immutable deferred builder.
     /// </summary>
     /// <param name="sessionData">Serialized session from <see cref="DeferredSigningPrepareResult.SessionData"/>.</param>
     /// <param name="rawSignature">
-    /// Raw signature bytes from the external signer.
-    /// For RSA: PKCS#1 v1.5 signature. For ECDSA: DER SEQUENCE { r, s }. For EdDSA: raw signature.
+    /// Raw signature bytes from the external signer. The signature is verified against
+    /// the certificate and the resolved session algorithm before a CMS is written.
+    /// For RSA: PKCS#1 v1.5 or PSS signature. For ECDSA: DER SEQUENCE { r, s }.
     /// </param>
     /// <param name="options">Optional completion configuration (e.g., timestamp).</param>
     /// <param name="logger">Optional logger for debug diagnostics.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <param name="tsaFactory">Optional TSA client factory for DI integration.</param>
+    /// <param name="sessionIntegrityKey">Server-owned HMAC key used to verify the serialized session.</param>
     /// <returns>The fully signed PDF bytes.</returns>
-    public static async Task<byte[]> CompleteAsync(
+    internal static async Task<byte[]> CompleteAsync(
         byte[] sessionData,
         byte[] rawSignature,
+        byte[] sessionIntegrityKey,
         DeferredSigningCompleteOptions? options = null,
         ILogger? logger = null,
         ITimestampClientFactory? tsaFactory = null,
@@ -170,8 +202,9 @@ public static class DeferredSigner
         (logger ?? NullLogger.Instance).DeferredCompleteStarted(sessionData.Length, rawSignature.Length);
 
         options ??= new DeferredSigningCompleteOptions();
+        ArgumentNullException.ThrowIfNull(sessionIntegrityKey);
 
-        var session = DeferredSigningSession.Deserialize(sessionData);
+        var session = DeferredSigningSession.Deserialize(sessionData, sessionIntegrityKey);
         using var certificate = CertificateLoader.LoadCertificate(session.CertificateDer);
 
         var extraCerts = session.ExtraCertificatesDer?
@@ -181,12 +214,27 @@ public static class DeferredSigner
         try
         {
             List<X509Certificate2> allCerts = [certificate, .. extraCerts];
+            HashAlgorithmName hashAlgorithm = HashAlgorithmFromDigestOid(session.DigestOid);
+            ResolvedSigningAlgorithm resolvedAlgorithm = SigningAlgorithmResolver.Resolve(
+                certificate, hashAlgorithm, hashAlgorithmExplicitlySet: true, session.SignatureAlgorithmOid);
+
+            if (!CmsSignatureBuilder.VerifyExternalSignature(
+                session.SignedAttributes,
+                rawSignature,
+                certificate,
+                resolvedAlgorithm.HashAlgorithm,
+                resolvedAlgorithm.SignatureAlgorithmOid))
+            {
+                throw new SigningException(
+                    "The external signature does not verify with the configured certificate.",
+                    SigningErrorReason.ExternalSignerReturnedInvalidSignature);
+            }
 
             // Build complete CMS/SignedData with the externally-produced signature
             byte[] cms = CmsSignatureBuilder.BuildSignedData(
                 session.DigestOid,
                 session.SignatureAlgorithmOid,
-                HashAlgorithmFromDigestOid(session.DigestOid),
+                resolvedAlgorithm.HashAlgorithm,
                 session.SignedAttributes,
                 rawSignature,
                 certificate,
@@ -194,17 +242,22 @@ public static class DeferredSigner
 
             (logger ?? NullLogger.Instance).DeferredCmsAssembled(cms.Length);
 
-            // Apply timestamp if configured
-            if (options.TsaUrl is not null)
+            // Apply the signature timestamp from the complete baseline profile.
+            AdesBaselineProfile? profile = options.Profile;
+            TimestampOptions? timestampOptions = profile?.Timestamp;
+            byte[]? timestampToken = null;
+            if (timestampOptions is not null)
             {
-                var httpClient = options.HttpClient ?? DefaultHttpClientProvider.Instance.GetClient();
-                var hashAlg = HashAlgorithmFromDigestOid(session.DigestOid);
+                string endpoint = timestampOptions.Endpoint.ToString();
+                var provider = timestampOptions.HttpClientProvider ?? options.HttpClientProvider;
+                var httpClient = provider?.GetClient() ?? DefaultHttpClientProvider.Instance.GetClient();
+                var hashAlg = resolvedAlgorithm.HashAlgorithm;
                 var tsaClient = tsaFactory is not null
-                    ? tsaFactory.Create(options.TsaUrl)
-                    : new TimestampClient(httpClient, options.TsaUrl);
-                byte[] tsToken = await tsaClient.GetTimestampAsync(
+                    ? tsaFactory.Create(endpoint)
+                    : new TimestampClient(httpClient, endpoint, logger);
+                timestampToken = await tsaClient.GetTimestampAsync(
                     TimestampClient.ExtractSignatureValue(cms), hashAlg, cancellationToken).ConfigureAwait(false);
-                cms = TimestampClient.EmbedTimestampInCms(cms, tsToken);
+                cms = TimestampClient.EmbedTimestampInCms(cms, timestampToken);
             }
 
             // Reconstruct PDF prepare result
@@ -229,6 +282,64 @@ public static class DeferredSigner
 
             var signedPdf = outputStream.ToArray();
 
+            if (profile?.Level >= AdesBaselineLevel.LongTerm)
+            {
+                if (timestampToken is null)
+                {
+                    throw new SigningException(
+                        "B-LT/B-LTA deferred signing requires a signature timestamp token.",
+                        SigningErrorReason.LevelNotAchievable);
+                }
+
+                var ltvProvider = profile.LongTermValidation!.HttpClientProvider ??
+                    options.HttpClientProvider ?? DefaultHttpClientProvider.Instance;
+                signedPdf = await new LtvEmbedder(ltvProvider, logger).EmbedLtvDataAsync(
+                    signedPdf, allCerts, timestampToken, cancellationToken).ConfigureAwait(false);
+
+                var requiredCertificates = new List<X509Certificate2>(allCerts);
+                var tsaCertificates = TsaCertificateExtractor.ExtractCertificates(timestampToken);
+                try
+                {
+                    requiredCertificates.AddRange(tsaCertificates.Where(tsa => requiredCertificates.All(
+                        certificateInChain => !string.Equals(certificateInChain.Thumbprint, tsa.Thumbprint, StringComparison.OrdinalIgnoreCase))));
+                    await using var dssStream = new MemoryStream(signedPdf, writable: false);
+                    var dss = await DssExtractor.TryReadFullDssDataAsync(dssStream, cancellationToken, logger).ConfigureAwait(false);
+                    if (!LtvEmbedder.HasCompleteEvidence(dss, requiredCertificates))
+                    {
+                        throw new SigningException(
+                            "B-LT deferred signing could not embed complete validation evidence for every signer and TSA certificate path.",
+                            SigningErrorReason.LevelNotAchievable);
+                    }
+                }
+                finally
+                {
+                    foreach (var tsaCertificate in tsaCertificates)
+                    {
+                        tsaCertificate.Dispose();
+                    }
+                }
+            }
+
+            if (profile?.Level >= AdesBaselineLevel.Archive)
+            {
+                var archive = profile.ArchiveTimestamp;
+                var signatureTimestamp = profile.Timestamp!;
+                var endpoint = archive?.Endpoint ?? signatureTimestamp.Endpoint;
+                var provider = archive?.HttpClientProvider ?? signatureTimestamp.HttpClientProvider ??
+                    options.HttpClientProvider ?? DefaultHttpClientProvider.Instance;
+                await using var pdfStream = new MemoryStream(signedPdf, writable: false);
+                var pdfALevel = await PdfStructureReader.DetectPdfALevelAsync(pdfStream, cancellationToken: cancellationToken)
+                    .ConfigureAwait(false);
+                signedPdf = await DocTimeStampWriter.AppendDocTimeStampAsync(
+                    signedPdf,
+                    endpoint.ToString(),
+                    provider.GetClient(),
+                    resolvedAlgorithm.HashAlgorithm,
+                    pdfALevel,
+                    tsaFactory,
+                    cancellationToken).ConfigureAwait(false);
+            }
+
             (logger ?? NullLogger.Instance).DeferredCompleteFinished(signedPdf.Length);
 
             return signedPdf;
@@ -241,9 +352,6 @@ public static class DeferredSigner
             }
         }
     }
-
-    private static string DetectSignatureAlgorithmOid(X509Certificate2 cert, HashAlgorithmName hashAlg)
-        => CryptoUtility.DetectSignatureAlgorithmOid(cert, hashAlg);
 
     /// <summary>
     /// Maps a digest algorithm OID (as stored in the deferred signing session) back to a
@@ -263,6 +371,39 @@ public static class DeferredSigner
         _ => throw new NotSupportedException(
             $"Unsupported digest OID '{digestOid}' in deferred signing session.")
     };
+
+    private static AdesBaselineProfile RestoreProfile(DeferredSigningSession session)
+    {
+        if (session.RequestedLevel == AdesBaselineLevel.Basic)
+        {
+            return AdesBaselineProfile.Basic();
+        }
+
+        if (string.IsNullOrWhiteSpace(session.TimestampEndpoint) ||
+            !Uri.TryCreate(session.TimestampEndpoint, UriKind.Absolute, out Uri? timestampEndpoint))
+        {
+            throw new ArgumentException(
+                "The deferred session requests a timestamped baseline level but has no valid TSA endpoint.",
+                nameof(session));
+        }
+
+        var timestamp = new TimestampOptions(timestampEndpoint);
+        return session.RequestedLevel switch
+        {
+            AdesBaselineLevel.Timestamped => AdesBaselineProfile.Timestamped(timestamp, session.LevelFailureBehavior),
+            AdesBaselineLevel.LongTerm => AdesBaselineProfile.LongTerm(
+                timestamp, new LongTermValidationOptions(), session.LevelFailureBehavior),
+            AdesBaselineLevel.Archive => AdesBaselineProfile.Archive(
+                timestamp,
+                new LongTermValidationOptions(),
+                string.IsNullOrWhiteSpace(session.ArchiveTimestampEndpoint)
+                    ? null
+                    : new ArchiveTimestampOptions(new Uri(session.ArchiveTimestampEndpoint, UriKind.Absolute)),
+                session.LevelFailureBehavior),
+            _ => throw new ArgumentOutOfRangeException(
+                nameof(session), "The deferred session contains an unsupported requested baseline level.")
+        };
+    }
 }
 
 /// <summary>Result of the deferred signing preparation phase.</summary>
@@ -275,8 +416,8 @@ public sealed class DeferredSigningPrepareResult
     public required byte[] HashToSign { get; init; }
 
     /// <summary>
-    /// Serialized session data. Store this on the server (Redis, DB, etc.)
-    /// and pass it to <see cref="DeferredSigner.CompleteAsync"/> when the signature arrives.
+    /// Serialized session data. Store this on the server (Redis, DB, etc.) and
+    /// resume it through <see cref="DeferredSigner.Resume(byte[], byte[])"/> when the signature arrives.
     /// </summary>
     public required byte[] SessionData { get; init; }
 
@@ -287,8 +428,8 @@ public sealed class DeferredSigningPrepareResult
     public required string SignatureAlgorithmOid { get; init; }
 }
 
-/// <summary>Options for <see cref="DeferredSigner.PrepareAsync"/>.</summary>
-public sealed class DeferredSigningOptions
+/// <summary>Internal configuration used while a deferred builder prepares a signature.</summary>
+internal sealed class DeferredSigningOptions
 {
     /// <summary>Hash algorithm for the signature. Default: SHA-256.</summary>
     public HashAlgorithmName HashAlgorithm { get; init; } = HashAlgorithmName.SHA256;
@@ -296,9 +437,9 @@ public sealed class DeferredSigningOptions
     /// <summary>
     /// Set to <see langword="true"/> when the caller has explicitly chosen
     /// <see cref="HashAlgorithm"/>. When <see langword="false"/> (default), the library
-    /// infers the effective hash from the certificate: PSS-issued certificates use the
-    /// hash declared in their <c>RSASSA-PSS-params</c> structure, RSA PKCS#1 certificates
-    /// use SHA-384 for keys ≥ 3072 bits and SHA-256 otherwise, and other key types use SHA-256.
+    /// uses SHA-256 unless a combined signature-algorithm OID is configured. PSS restrictions
+    /// are read only from an <c>id-RSASSA-PSS</c> subject public-key identifier; a certificate
+    /// merely issued with a PSS signature does not restrict its RSA signing key.
     /// </summary>
     public bool HashAlgorithmExplicitlySet { get; init; }
 
@@ -313,14 +454,20 @@ public sealed class DeferredSigningOptions
 
     /// <summary>Extra certificates (chain) to include in the CMS.</summary>
     public IReadOnlyList<X509Certificate2>? ExtraCertificates { get; init; }
+
+    /// <summary>Baseline profile persisted into the session for phase-two resumption.</summary>
+    public AdesBaselineProfile? Profile { get; init; }
 }
 
-/// <summary>Options for <see cref="DeferredSigner.CompleteAsync"/>.</summary>
-public sealed class DeferredSigningCompleteOptions
+/// <summary>Internal configuration used while a deferred builder completes a signature.</summary>
+internal sealed class DeferredSigningCompleteOptions
 {
-    /// <summary>TSA URL to add a timestamp to the signature. Null to skip timestamping.</summary>
-    public string? TsaUrl { get; init; }
+    /// <summary>
+    /// Complete baseline-level request and its scoped HTTP providers.
+    /// </summary>
+    public AdesBaselineProfile? Profile { get; init; }
 
-    /// <summary>HttpClient to use for TSA requests. If null, a default instance is created.</summary>
-    public HttpClient? HttpClient { get; init; }
+    /// <summary>Builder-wide fallback provider for timestamp and validation-data retrieval.</summary>
+    public IHttpClientProvider? HttpClientProvider { get; init; }
+
 }

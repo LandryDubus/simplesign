@@ -1,80 +1,45 @@
 # SimpleSign
 
-> Pure .NET library for PAdES (PDF Advanced Electronic Signatures) — sign, validate, and inspect digitally signed PDF documents. No third-party crypto dependencies. Native AOT compatible. Targets .NET 8 and .NET 10.
+Pure .NET, Native-AOT-oriented digital-signature library for PAdES, CAdES and XAdES.
+Targets .NET 8 and .NET 10, uses `System.Security.Cryptography`, and has no third-party
+cryptographic dependency.
 
-SimpleSign implements ETSI EN 319 142 (PAdES) with conformance levels B-B, B-T, B-LT, and B-LTA. All cryptography uses `System.Security.Cryptography` from the BCL — no BouncyCastle, no native libraries.
+## Canonical signing API
 
-## Core API
+All signing formats start with their format-qualified factory and use one shared ADeS profile:
 
 ```csharp
-// Sign a PDF
-var signed = await SimpleSigner.Document(pdfBytes)
-    .WithCertificate(cert)
-    .WithTimestamp("http://timestamp.digicert.com")
-    .WithLtv()
-    .SignAsync();
+var profile = AdesBaselineProfile.LongTerm(
+    new TimestampOptions(new Uri("https://tsa.example")),
+    new LongTermValidationOptions());
 
-// Validate signatures
-var results = await new PdfSignatureValidator(new ValidationOptions
-{
-    CheckRevocation = true,
-    TrustSystemRoots = true
-}).ValidateAsync(stream);
-
-// Inspect (fast, no crypto)
-var info = await PdfSignatureInspector.InspectAsync(stream);
-
-// Deferred signing (hash on server, sign on client)
-var prepared = await DeferredSigner.PrepareAsync(pdfBytes, cert);
-byte[] signedPdf = await DeferredSigner.CompleteAsync(prepared.SessionData, clientSignature);
-
-// Batch signing
-var batch = BatchSigner.Create(cert).WithTimestamp(url).WithLtv().Build();
-byte[] signed = await batch.SignAsync(pdfBytes);
-await foreach (var r in batch.SignAllAsync(inputs)) { }
+var result = await PadesSigner.Document(pdfBytes)
+    .WithCertificate(certificate, chain)
+    .WithLevel(profile)
+    .SignWithDetailsAsync();
 ```
 
-## Packages
+Use `CadesSigner.Document(data)` and `XadesSigner.Document(xml)` for the other formats.
+Configure diagnostics with `.WithLogger(logger)`, HTTP with `.WithHttpClientProvider(provider)`,
+and external signing with `.WithExternalSigner(certificate, signer, chain)`. `IExternalSigner`
+receives `ExternalSigningRequest`, including resolved PSS parameters when applicable.
 
-```
-dotnet add package SimpleSign.CAdES   # standalone CMS/PKCS#7 signing
-dotnet add package SimpleSign.Brasil  # ICP-Brasil, Gov.br, Lei 14.063
-dotnet add package SimpleSign         # Meta-package (all)
-```
+`SignAsync` is strict. Best-effort enrichment requires `SignWithDetailsAsync` and an explicit
+`SigningLevelFailureBehavior.ReturnLowerLevel` profile.
 
-## Package Map
+## Important constraints
 
-```
-SimpleSign (meta-package)
-├── SimpleSign.PAdES     PAdES B-B/T/LT/LTA signing & validation
-│   ├── SimpleSign.Pdf   PDF structure parser
-│   └── SimpleSign.Core  Crypto primitives, CMS, TSA, revocation
-├── SimpleSign.CAdES     standalone CMS/PKCS#7 signing & validation
-│   └── SimpleSign.Core  (shared)
-├── SimpleSign.Brasil    ICP-Brasil + Gov.br extensions
-├── SimpleSign.HtmlToPdf Pure-.NET HTML→PDF converter
-├── SimpleSign.Cli       CLI tool (Spectre.Console)
-└── SimpleSign.HostSigner Windows tray app — local signing API
-```
+- Timestamp endpoints must be absolute HTTP(S) URIs.
+- RSA and ECDSA external signatures are verified before packaging; EdDSA signing is rejected.
+- Unsupported XMLDSig archive transforms and topologies fail closed.
+- CAdES does not expose a buffering stream facade; CAdES streaming is deferred.
 
-## Docs
+## Repository guidance
 
-- [API Reference](docs/api/): Full XML-documented public API
-- [Conformance](docs/conformance.md): ETSI standards compliance
-- [Interoperability](docs/interoperability.md): Cross-platform testing
-- [Benchmarks](docs/benchmarks.md): BenchmarkDotNet results
-- [ADRs](docs/adr/): Architecture Decision Records
+- Build: `dotnet build SimpleSign.sln`
+- Focused unit suite: `dotnet test tests/unit/SimpleSign.PAdES.Tests`
+- Interop suite: `dotnet test tests/interop/SimpleSign.Interop.Tests`
+- AOT smoke: `dotnet publish tests/smoke/SimpleSign.AotSmokeTest -r linux-x64 -f net10.0`
 
-## Key Constraints
-
-- .NET 8+ required (multi-targets net8.0 and net10.0)
-- No third-party cryptography (all via System.Security.Cryptography)
-- Native AOT compatible
-- No native/COM dependencies — runs on Windows, macOS, Linux
-- MIT licensed
-
-## Optional
-
-- [Samples](samples/): Working examples for common scenarios
-- [CHANGELOG](CHANGELOG.md): Version history
-- [CONTRIBUTING](CONTRIBUTING.md): How to contribute
+See `README.md`, `docs/conformance.md`, `docs/interoperability.md`, and migration guides for
+supported topology details and release-specific breaking changes.

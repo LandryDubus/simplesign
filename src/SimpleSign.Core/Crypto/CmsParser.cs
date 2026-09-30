@@ -281,7 +281,7 @@ public static class CmsParser
                         {
                             timestampToken = values[0];
                         }
-                        else if (uOid == Oids.ArchiveTimeStamp && values.Count > 0)
+                        else if ((uOid == Oids.ArchiveTimeStamp || uOid == Oids.ArchiveTimeStampV3) && values.Count > 0)
                         {
                             archiveTimestampToken = values[0];
                         }

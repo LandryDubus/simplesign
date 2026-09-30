@@ -10,7 +10,7 @@ namespace SimpleSign.Core.Tests.Crypto;
 public sealed class DisposalEdgeCaseTests
 {
     private static X509Certificate2 CreateExportableCert(string cn = "CN=DisposalTest")
-        => TestCertificateFactory.CreateSelfSignedCert(cn);
+        => TestCertificateFactory.CreateEcdsaCert(subject: cn);
 
     [Fact(DisplayName = "SystemCertificateStore: Double Dispose does not throw")]
     public void SystemCertificateStore_DoubleDispose_DoesNotThrow()
@@ -62,10 +62,12 @@ public sealed class DisposalEdgeCaseTests
     {
         var cache = new InMemoryCertificateCache();
 
-        // Add many entries
+        using var cert = CreateExportableCert();
+
+        // Exercise repeated cache updates without making this disposal test depend
+        // on generating one hundred independent private keys.
         for (int i = 0; i < 100; i++)
         {
-            using var cert = CreateExportableCert($"CN=Test{i}");
             cache.Set(cert);
         }
 

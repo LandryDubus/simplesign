@@ -47,8 +47,8 @@ public sealed class PadesDssInteropTests(ITestOutputHelper output)
         SkipIfDockerUnavailable();
 
         var pdf = MinimalPdf();
-        using var pki = new SyntheticPki(crlDistributionPoint: "http://crl.example.com/test-ca.crl");
-        using var crlClient = TestRevocation.BuildCrlClient(pki.BuildLeafCrl());
+        using var pki = TestRevocation.CreatePki();
+        using var crlClient = TestRevocation.BuildCrlClient(pki);
 
         var signed = await PadesSigner.Document(pdf)
             .WithCertificate(pki.Leaf, pki.IntermediatesAndRoot())
@@ -277,7 +277,7 @@ public sealed class PadesDssInteropTests(ITestOutputHelper output)
         var signed = await PadesSigner.Document(pdf)
             .WithCertificate(cert)
             .WithAppearance(SignatureAppearance.Auto())
-            .WithMetadata("Visual Signer", "Interop test", "Brazil")
+            .WithTestFieldOptions("Visual Signer", "Interop test", "Brazil")
             .SignAsync();
 
         var tmpDir = Path.Combine(Path.GetTempPath(), $"simplesign-interop-{Guid.NewGuid():N}");
@@ -314,7 +314,7 @@ public sealed class PadesDssInteropTests(ITestOutputHelper output)
                 ShowReason = true,
                 ShowLocation = true,
             })
-            .WithMetadata("Test Signer", "Visual interop", "São Paulo")
+            .WithTestFieldOptions("Test Signer", "Visual interop", "São Paulo")
             .SignAsync();
 
         var tmp = Path.Combine(Path.GetTempPath(), $"simplesign-interop-{Guid.NewGuid():N}.pdf");
@@ -367,7 +367,7 @@ public sealed class PadesDssInteropTests(ITestOutputHelper output)
         using var cert = TestCertificateFactory.CreateSelfSignedCert("CN=PAdES Metadata Interop");
         var signed = await PadesSigner.Document(pdf)
             .WithCertificate(cert)
-            .WithMetadata("André Almeida", "Contract approval", "Vitória, ES")
+            .WithTestFieldOptions("André Almeida", "Contract approval", "Vitória, ES")
             .SignAsync();
 
         var tmpDir = Path.Combine(Path.GetTempPath(), $"simplesign-interop-{Guid.NewGuid():N}");
@@ -430,14 +430,18 @@ public sealed class PadesDssInteropTests(ITestOutputHelper output)
         using var cert = TestCertificateFactory.CreateSelfSignedCert("CN=PAdES Deferred Interop");
 
         // Phase 1: prepare
-        var prepResult = await DeferredSigner.PrepareAsync(pdf, cert);
+        byte[] sessionIntegrityKey = RandomNumberGenerator.GetBytes(32);
+        var signer = DeferredSigner.Document(pdf)
+            .WithCertificate(cert)
+            .WithSessionIntegrityKey(sessionIntegrityKey);
+        var prepResult = await signer.PrepareAsync();
 
         // Phase 2: sign the hash with the private key (simulating HSM)
         using var rsa = cert.GetRSAPrivateKey()!;
         var signedHash = rsa.SignData(prepResult.HashToSign, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
 
         // Phase 3: complete
-        var signed = await DeferredSigner.CompleteAsync(prepResult.SessionData, signedHash);
+        var signed = await DeferredSigner.Resume(prepResult.SessionData, sessionIntegrityKey).CompleteAsync(signedHash);
 
         // Validate CMS
         using var stream = new MemoryStream(signed);
@@ -486,8 +490,8 @@ public sealed class PadesDssInteropTests(ITestOutputHelper output)
     {
         SkipIfDockerUnavailable();
         var pdf = MinimalPdf();
-        using var pki = new SyntheticPki(crlDistributionPoint: "http://crl.example.com/test-ca.crl");
-        using var crlClient = TestRevocation.BuildCrlClient(pki.BuildLeafCrl());
+        using var pki = TestRevocation.CreatePki();
+        using var crlClient = TestRevocation.BuildCrlClient(pki);
         var signed = await PadesSigner.Document(pdf)
             .WithCertificate(pki.Leaf, pki.IntermediatesAndRoot())
             .WithLevel(AdesBaselineProfile.LongTerm(

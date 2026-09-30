@@ -11,40 +11,37 @@ using Xunit;
 namespace SimpleSign.PAdES.Tests.Signing;
 
 /// <summary>
-/// Tests for v0.3.4 algorithm-inference fixes:
-///   - Gap 1: PSS cert's RSASSA-PSS-params (RFC 4055 §3.1) honoured when inferring hash.
-///   - Gap 2: <see cref="PadesSignerBuilder.WithSignatureAlgorithm"/> forces PSS on
-///     rsaEncryption certs; <c>CmsSignatureBuilder.ValidateSignatureAlgorithmCompatibility</c>
-///     throws on key-family mismatches.
-///   - Gap 3: RSA PKCS#1 keys ≥ 3072 bits get SHA-384 by default; smaller keys get SHA-256.
+/// Tests for the resolved signing-algorithm contract. Certificate signature algorithms
+/// and RSA key size do not implicitly choose a digest; the default is SHA-256 unless a
+/// combined signature OID or PSS-restricted subject public key requires otherwise.
 /// </summary>
 [Trait("Category", "Unit")]
-public sealed class AlgorithmInferenceTests
+public sealed class SigningAlgorithmResolutionTests
 {
 
 
-    // ── Gap 1: PSS cert hash inference ────────────────────────────────────────
+    // ── Certificate issuer signature is not a key restriction ────────────────
 
-    [Fact(DisplayName = "PSS cert with SHA-512 params, no user override → CMS uses SHA-512")]
-    public async Task SignAsync_PssCertWithSha512Params_DefaultHash_ResolvesSha512()
+    [Fact(DisplayName = "PSS-issued certificate with no key restriction uses default SHA-256")]
+    public async Task SignAsync_PssIssuedCert_DefaultHash_UsesSha256()
     {
         using var cert = TestCertificateFactory.CreatePssSelfSignedCert(HashAlgorithmName.SHA512);
         byte[] signed = await PadesSigner.Document(TestPdfFactory.CreateMinimalPdf())
             .WithCertificate(cert)
             .SignAsync();
 
-        ExtractDigestOid(signed).ShouldBe(Oids.Sha512);
+        ExtractDigestOid(signed).ShouldBe(Oids.Sha256);
     }
 
-    [Fact(DisplayName = "PSS cert with SHA-384 params, no user override → CMS uses SHA-384")]
-    public async Task SignAsync_PssCertWithSha384Params_DefaultHash_ResolvesSha384()
+    [Fact(DisplayName = "PSS-issued certificate with SHA-384 issuer signature uses default SHA-256")]
+    public async Task SignAsync_PssIssuedCertSha384_DefaultHash_UsesSha256()
     {
         using var cert = TestCertificateFactory.CreatePssSelfSignedCert(HashAlgorithmName.SHA384);
         byte[] signed = await PadesSigner.Document(TestPdfFactory.CreateMinimalPdf())
             .WithCertificate(cert)
             .SignAsync();
 
-        ExtractDigestOid(signed).ShouldBe(Oids.Sha384);
+        ExtractDigestOid(signed).ShouldBe(Oids.Sha256);
     }
 
     [Fact(DisplayName = "PSS cert SHA-512: explicit WithHashAlgorithm(SHA256) wins over PSS params")]
@@ -59,10 +56,10 @@ public sealed class AlgorithmInferenceTests
         ExtractDigestOid(signed).ShouldBe(Oids.Sha256);
     }
 
-    // ── Gap 3: RSA PKCS#1 key-size hash selection ────────────────────────────
+    // ── RSA key size does not silently select a digest ───────────────────────
 
-    [Fact(DisplayName = "RSA 4096-bit PKCS#1 cert, no user override → SHA-384")]
-    public async Task SignAsync_Rsa4096Bit_DefaultHash_UsesSha384()
+    [Fact(DisplayName = "RSA 4096-bit certificate with no user override uses SHA-256")]
+    public async Task SignAsync_Rsa4096Bit_DefaultHash_UsesSha256()
     {
         using var cert = TestCertificateFactory.CreateSelfSignedCert(
             "CN=Large RSA, O=Tests", keySize: 4096, hashAlgorithm: HashAlgorithmName.SHA256);
@@ -70,7 +67,7 @@ public sealed class AlgorithmInferenceTests
             .WithCertificate(cert)
             .SignAsync();
 
-        ExtractDigestOid(signed).ShouldBe(Oids.Sha384);
+        ExtractDigestOid(signed).ShouldBe(Oids.Sha256);
     }
 
     [Fact(DisplayName = "RSA 2048-bit PKCS#1 cert, no user override → SHA-256")]
@@ -84,7 +81,7 @@ public sealed class AlgorithmInferenceTests
         ExtractDigestOid(signed).ShouldBe(Oids.Sha256);
     }
 
-    [Fact(DisplayName = "RSA 4096-bit cert: explicit WithHashAlgorithm(SHA256) wins over key-size inference")]
+    [Fact(DisplayName = "RSA 4096-bit certificate accepts explicit SHA-256")]
     public async Task SignAsync_Rsa4096Bit_UserOverridesHash_UsesUserChoice()
     {
         using var cert = TestCertificateFactory.CreateSelfSignedCert(
@@ -97,7 +94,7 @@ public sealed class AlgorithmInferenceTests
         ExtractDigestOid(signed).ShouldBe(Oids.Sha256);
     }
 
-    // ── Gap 2: WithSignatureAlgorithm + compatibility check ──────────────────
+    // ── WithSignatureAlgorithm + compatibility check ─────────────────────────
 
     [Fact(DisplayName = "WithSignatureAlgorithm(RsaPss) on rsaEncryption cert → CMS uses PSS")]
     public async Task WithSignatureAlgorithm_PssOnRsaEncryptionCert_AppliesPss()
@@ -111,7 +108,7 @@ public sealed class AlgorithmInferenceTests
         ExtractSignatureAlgorithmOid(signed).ShouldBe(Oids.RsaPss);
     }
 
-    [Fact(DisplayName = "WithSignatureAlgorithm(RsaSha256) on ECDSA cert → throws ArgumentException")]
+    [Fact(DisplayName = "WithSignatureAlgorithm(RsaSha256) on ECDSA cert → SigningException.AlgorithmIncompatible")]
     public async Task WithSignatureAlgorithm_RsaPkcs1OnEcdsaCert_Throws()
     {
         using var cert = TestCertificateFactory.CreateEcdsaCert();
@@ -120,11 +117,11 @@ public sealed class AlgorithmInferenceTests
             .WithSignatureAlgorithm(Oids.RsaSha256)
             .SignAsync();
 
-        (await Should.ThrowAsync<ArgumentException>(act)).Message
-            .ShouldContain("not compatible");
+        (await Should.ThrowAsync<SigningException>(act)).Reason
+            .ShouldBe(SigningErrorReason.AlgorithmIncompatible);
     }
 
-    [Fact(DisplayName = "WithSignatureAlgorithm(EcdsaSha256) on RSA cert → throws ArgumentException")]
+    [Fact(DisplayName = "WithSignatureAlgorithm(EcdsaSha256) on RSA cert → SigningException.AlgorithmIncompatible")]
     public async Task WithSignatureAlgorithm_EcdsaOnRsaCert_Throws()
     {
         using var cert = TestCertificateFactory.CreateSelfSignedCert();
@@ -133,8 +130,8 @@ public sealed class AlgorithmInferenceTests
             .WithSignatureAlgorithm(Oids.EcdsaSha256)
             .SignAsync();
 
-        (await Should.ThrowAsync<ArgumentException>(act)).Message
-            .ShouldContain("not compatible");
+        (await Should.ThrowAsync<SigningException>(act)).Reason
+            .ShouldBe(SigningErrorReason.AlgorithmIncompatible);
     }
 
     [Fact(DisplayName = "WithSignatureAlgorithm(null/whitespace) → throws ArgumentException at builder time")]
@@ -161,7 +158,7 @@ public sealed class AlgorithmInferenceTests
         byte[] signed = await PadesSigner
             .Document(TestPdfFactory.CreateMinimalPdf())
             .WithSignatureAlgorithm(Oids.RsaSha512)
-            .WithExternalSigner(cert, new FuncExternalSigner(signedAttrs =>
+            .WithExternalSigner(cert, new DelegatingExternalSigner(signedAttrs =>
                 Task.FromResult(rsaKey.SignData(signedAttrs, HashAlgorithmName.SHA512, RSASignaturePadding.Pkcs1))))
             .SignAsync();
 
@@ -181,7 +178,7 @@ public sealed class AlgorithmInferenceTests
             .Document(TestPdfFactory.CreateMinimalPdf())
             .WithSignatureAlgorithm(Oids.RsaSha512)
             .WithExternalSigner(cert,
-                new FuncExternalSigner(signedAttrs => Task.FromResult(rsaKey.SignData(signedAttrs, HashAlgorithmName.SHA512, RSASignaturePadding.Pkcs1))),
+                new DelegatingExternalSigner(signedAttrs => Task.FromResult(rsaKey.SignData(signedAttrs, HashAlgorithmName.SHA512, RSASignaturePadding.Pkcs1))),
                 chain)
             .SignAsync();
 

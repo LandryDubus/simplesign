@@ -553,7 +553,7 @@ async function doSign() {
             const cResp = await fetch('/api/complete', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ sessionDataBase64: doc.sessionDataBase64, SignedHashBase64: sigBase64 })
+                body: JSON.stringify({ sessionId: doc.sessionId, SignedHashBase64: sigBase64 })
             });
 
             if (!cResp.ok) {

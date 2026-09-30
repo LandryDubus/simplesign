@@ -1,3 +1,4 @@
+using System.Formats.Asn1;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using Microsoft.Extensions.Logging;
@@ -6,7 +7,6 @@ using SimpleSign.Core.Constants;
 using SimpleSign.Core.Crypto;
 using SimpleSign.Core.Http;
 using SimpleSign.Core.Signing;
-using SimpleSign.Core.Validation;
 
 namespace SimpleSign.CAdES;
 
@@ -265,19 +265,19 @@ public sealed class CadesSignerBuilder
         ValidatePrerequisites(credential);
 
         var warnings = new List<SigningWarning>();
-        var hashAlg = _options.HashAlgorithm;
-        string sigAlgOid = _options.SignatureAlgorithmOid
-            ?? CryptoUtility.DetectSignatureAlgorithmOid(certificate, hashAlg);
-        CmsSignatureBuilder.ValidateSignatureAlgorithmCompatibility(certificate, sigAlgOid);
+        var resolvedAlgorithm = SigningAlgorithmResolver.Resolve(
+            certificate, _options.HashAlgorithm, _options.HashAlgorithmExplicitlySet, _options.SignatureAlgorithmOid);
+        var hashAlg = resolvedAlgorithm.HashAlgorithm;
+        string sigAlgOid = resolvedAlgorithm.SignatureAlgorithmOid;
 
         byte[] cms;
         if (credential is CadesExternalCredential external)
         {
-            cms = await SignExternalCoreAsync(external, certificate, chain, sigAlgOid, cancellationToken).ConfigureAwait(false);
+            cms = await SignExternalCoreAsync(external, certificate, chain, hashAlg, sigAlgOid, resolvedAlgorithm.RsaPssParameters, cancellationToken).ConfigureAwait(false);
         }
         else
         {
-            cms = SignLocalCore(certificate, chain, sigAlgOid);
+            cms = SignLocalCore(certificate, chain, hashAlg, sigAlgOid);
         }
 
         byte[]? timestampTokenBytes = null;
@@ -311,14 +311,13 @@ public sealed class CadesSignerBuilder
             }
         }
 
-        bool hasLtvMaterial = false;
+        CadesLtvEmbeddingResult? ltvEmbedding = null;
         if (timestampTokenBytes is not null && profile.Level >= AdesBaselineLevel.LongTerm)
         {
-            byte[]? ltvCms = await ApplyLtvAsync(cms, certificate, chain, cancellationToken).ConfigureAwait(false);
-            if (ltvCms is not null)
+            ltvEmbedding = await ApplyLtvAsync(cms, certificate, chain, cancellationToken).ConfigureAwait(false);
+            if (ltvEmbedding is not null)
             {
-                cms = ltvCms;
-                hasLtvMaterial = true;
+                cms = ltvEmbedding.SignedCms;
             }
             else
             {
@@ -328,11 +327,11 @@ public sealed class CadesSignerBuilder
         }
 
         bool hasArchiveTimestamp = false;
-        if (hasLtvMaterial && profile.Level >= AdesBaselineLevel.Archive)
+        if (ltvEmbedding is not null && profile.Level >= AdesBaselineLevel.Archive)
         {
             try
             {
-                cms = await ApplyArchiveTimestampAsync(cms, hashAlg, profile, cancellationToken).ConfigureAwait(false);
+                cms = await ApplyArchiveTimestampAsync(cms, hashAlg, cancellationToken).ConfigureAwait(false);
                 hasArchiveTimestamp = true;
             }
             catch (OperationCanceledException)
@@ -341,39 +340,60 @@ public sealed class CadesSignerBuilder
             }
             catch (Exception ex)
             {
+                const string archiveMessage = "CAdES archiveTimestampV3 could not be applied.";
                 if (profile.FailureBehavior == SigningLevelFailureBehavior.Throw)
                 {
-                    throw new SigningException(
-                        $"Archive timestamp request failed: {ex.Message}",
-                        SigningErrorReason.NetworkFailure,
-                        ex);
+                    throw new SigningException(archiveMessage, SigningErrorReason.LevelNotAchievable, ex);
                 }
 
                 AddDowngradeWarnings(warnings, SigningWarningCode.ArchiveTimestampUnavailable,
-                    $"Archive timestamp could not be applied: {ex.Message}");
+                    $"{archiveMessage} {ex.Message}");
             }
         }
 
-        var achieved = ComputeAchievedLevel(timestampTokenBytes, hasLtvMaterial, hasArchiveTimestamp);
+        (bool artifactHasTimestamp, bool artifactHasLtvMaterial, bool artifactHasArchiveTimestamp) = InspectProducedArtifact(
+            cms, _data, timestampTokenBytes, ltvEmbedding?.Evidence, hasArchiveTimestamp);
+        if (timestampTokenBytes is not null && !artifactHasTimestamp)
+        {
+            HandleArtifactInspectionFailure(
+                profile, warnings, SigningWarningCode.SignatureTimestampUnavailable,
+                "The produced CMS does not contain the requested signature timestamp token.");
+        }
+
+        if (ltvEmbedding is not null && !artifactHasLtvMaterial)
+        {
+            HandleArtifactInspectionFailure(
+                profile, warnings, SigningWarningCode.LongTermValidationMaterialUnavailable,
+                "The produced CMS does not contain complete LTV attributes.");
+        }
+
+        if (hasArchiveTimestamp && !artifactHasArchiveTimestamp)
+        {
+            HandleArtifactInspectionFailure(
+                profile, warnings, SigningWarningCode.ArchiveTimestampUnavailable,
+                "The produced CMS does not contain a valid archiveTimestampV3 covering its ETSI-defined input.");
+        }
+
+        var achieved = ComputeAchievedLevel(artifactHasTimestamp, artifactHasLtvMaterial, artifactHasArchiveTimestamp);
 
         return new CadesSigningResult
         {
             SignedArtifact = cms,
             RequestedLevel = profile.Level,
             AchievedLevel = achieved,
-            HasSignatureTimestamp = timestampTokenBytes is not null,
-            HasLongTermValidationMaterial = hasLtvMaterial,
-            HasArchiveTimestamp = hasArchiveTimestamp,
+            HasSignatureTimestamp = artifactHasTimestamp,
+            HasLongTermValidationMaterial = artifactHasLtvMaterial,
+            HasArchiveTimestamp = artifactHasArchiveTimestamp,
             Warnings = warnings.AsReadOnly()
         };
     }
 
     private static AdesBaselineLevel ComputeAchievedLevel(
-        byte[]? timestampTokenBytes,
+        bool hasSignatureTimestamp,
         bool hasLtvMaterial,
         bool hasArchiveTimestamp)
     {
-        if (timestampTokenBytes is null)
+        if (!hasSignatureTimestamp)
         {
             return AdesBaselineLevel.Basic;
         }
@@ -392,6 +412,132 @@ public sealed class CadesSignerBuilder
         warnings.Add(new SigningWarning(
             SigningWarningCode.LevelDowngraded,
             "The requested baseline level could not be achieved; the artifact was downgraded."));
+    }
+
+    private static void HandleArtifactInspectionFailure(
+        AdesBaselineProfile profile,
+        List<SigningWarning> warnings,
+        SigningWarningCode code,
+        string message)
+    {
+        if (profile.FailureBehavior == SigningLevelFailureBehavior.Throw)
+        {
+            throw new SigningException(message, SigningErrorReason.LevelNotAchievable);
+        }
+
+        AddDowngradeWarnings(warnings, code, message);
+    }
+
+    private static (bool HasTimestamp, bool HasLtvMaterial, bool HasArchiveTimestamp) InspectProducedArtifact(
+        byte[] cms,
+        byte[] signedData,
+        byte[]? expectedTimestampToken,
+        LtvCollectionResult? expectedLtvEvidence,
+        bool expectedArchiveTimestamp)
+    {
+        try
+        {
+            CmsSignedData parsed = CmsParser.Parse(cms);
+            bool hasTimestamp = expectedTimestampToken is not null &&
+                parsed.SignatureTimestampToken is not null &&
+                CryptographicOperations.FixedTimeEquals(parsed.SignatureTimestampToken, expectedTimestampToken);
+            bool hasLtvMaterial = expectedLtvEvidence is not null &&
+                HasExpectedLtvEvidence(parsed, expectedLtvEvidence);
+            bool hasArchiveTimestamp = expectedArchiveTimestamp &&
+                CadesArchiveTimestampV3.Validate(cms, signedData, []);
+            return (hasTimestamp, hasLtvMaterial, hasArchiveTimestamp);
+        }
+        catch (Exception)
+        {
+            return (false, false, false);
+        }
+    }
+
+    internal static bool HasExpectedLtvEvidence(CmsSignedData cms, LtvCollectionResult expectedEvidence)
+    {
+        if (!expectedEvidence.HasCompleteCoverage || cms.UnsignedAttributes is null ||
+            !cms.UnsignedAttributes.TryGetValue(Oids.CertValues, out byte[][]? certificateValues) ||
+            !cms.UnsignedAttributes.TryGetValue(Oids.RevocationValues, out byte[][]? revocationValues))
+        {
+            return false;
+        }
+
+        var embeddedCertificates = new List<byte[]>();
+        try
+        {
+            foreach (byte[] certificateValue in certificateValues)
+            {
+                var reader = new AsnReader(certificateValue, AsnEncodingRules.BER);
+                var certificates = reader.ReadSequence();
+                while (certificates.HasData)
+                {
+                    embeddedCertificates.Add(certificates.ReadEncodedValue().ToArray());
+                }
+            }
+        }
+        catch (AsnContentException)
+        {
+            return false;
+        }
+
+        foreach (byte[] expectedCertificate in expectedEvidence.CertificateRawData)
+        {
+            if (!embeddedCertificates.Any(value => value.AsSpan().SequenceEqual(expectedCertificate)))
+            {
+                return false;
+            }
+        }
+
+        var embeddedOcspResponses = new List<byte[]>();
+        var embeddedCrls = new List<byte[]>();
+        try
+        {
+            foreach (byte[] revocationValue in revocationValues)
+            {
+                var reader = new AsnReader(revocationValue, AsnEncodingRules.BER);
+                var values = reader.ReadSequence();
+                while (values.HasData)
+                {
+                    Asn1Tag tag = values.PeekTag();
+                    if (tag == new Asn1Tag(TagClass.ContextSpecific, 0, isConstructed: true))
+                    {
+                        ReadEncodedValues(values.ReadSequence(tag), embeddedCrls);
+                    }
+                    else if (tag == new Asn1Tag(TagClass.ContextSpecific, 1, isConstructed: true))
+                    {
+                        ReadEncodedValues(values.ReadSequence(tag), embeddedOcspResponses);
+                    }
+                    else
+                    {
+                        return false;
+                    }
+                }
+
+                reader.ThrowIfNotEmpty();
+            }
+        }
+        catch (AsnContentException)
+        {
+            return false;
+        }
+
+        return ContainsAll(embeddedOcspResponses, expectedEvidence.OcspResponses) &&
+            ContainsAll(embeddedCrls, expectedEvidence.Crls) &&
+            (expectedEvidence.OcspResponses.Count > 0 || expectedEvidence.Crls.Count > 0);
+    }
+
+    private static void ReadEncodedValues(AsnReader reader, ICollection<byte[]> destination)
+    {
+        while (reader.HasData)
+        {
+            destination.Add(reader.ReadEncodedValue().ToArray());
+        }
+    }
+
+    private static bool ContainsAll(IReadOnlyList<byte[]> embeddedValues, IReadOnlyList<byte[]> expectedValues)
+    {
+        return expectedValues.All(expected =>
+            embeddedValues.Any(value => value.AsSpan().SequenceEqual(expected)));
     }
 
     private void EnsureStrictProfile()
@@ -415,12 +561,14 @@ public sealed class CadesSignerBuilder
                 SigningErrorReason.PrivateKeyMissing);
         }
 
-        if (certificate.NotAfter < DateTime.UtcNow)
+        var signingTime = DateTimeOffset.UtcNow;
+        if (certificate.NotBefore > signingTime || certificate.NotAfter < signingTime)
         {
-            throw new CertificateValidationException(
-                $"Certificate '{certificate.Subject}' expired on {certificate.NotAfter:yyyy-MM-dd HH:mm:ss} UTC. Cannot sign with an expired certificate.",
-                certificate.Thumbprint,
-                certificate.Subject);
+            throw new SigningException(
+                $"Certificate '{certificate.Subject}' is not valid at {signingTime:yyyy-MM-dd HH:mm:ss} UTC.",
+                certificate.NotAfter < signingTime
+                    ? SigningErrorReason.CertificateExpired
+                    : SigningErrorReason.CertificateNotCurrentlyValid);
         }
     }
 
@@ -441,6 +589,7 @@ public sealed class CadesSignerBuilder
     private byte[] SignLocalCore(
         X509Certificate2 certificate,
         IReadOnlyList<X509Certificate2> chain,
+        HashAlgorithmName hashAlg,
         string sigAlgOid)
     {
         var signingTime = _options.SigningTime ?? DateTimeOffset.UtcNow;
@@ -448,7 +597,7 @@ public sealed class CadesSignerBuilder
         byte[]? eContent = _options.ContentType == CadesContentType.Enveloped ? _data : null;
 
         return CmsSignatureBuilder.Build(
-            _data, certificate, _options.HashAlgorithm, signingTime,
+            _data, certificate, hashAlg, signingTime,
             chain, extraAttributes,
             padesAttributes: false,
             signatureAlgorithmOid: sigAlgOid,
@@ -460,11 +609,12 @@ public sealed class CadesSignerBuilder
         CadesExternalCredential external,
         X509Certificate2 certificate,
         IReadOnlyList<X509Certificate2> chain,
+        HashAlgorithmName hashAlg,
         string sigAlgOid,
+        RsaPssParameters? rsaPssParameters,
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        var hashAlg = _options.HashAlgorithm;
         var signingTime = _options.SigningTime ?? DateTimeOffset.UtcNow;
         string digestOid = CmsSignatureBuilder.GetDigestOid(hashAlg);
 
@@ -480,13 +630,33 @@ public sealed class CadesSignerBuilder
             hashAlg,
             sigAlgOid,
             ExternalSigningPayloadKind.CmsSignedAttributes,
-            _options.OperationId);
-        ReadOnlyMemory<byte> signature = await external.Signer.SignAsync(request, cancellationToken).ConfigureAwait(false);
+            _options.OperationId,
+            rsaPssParameters);
+        ReadOnlyMemory<byte> signature;
+        try
+        {
+            signature = await external.Signer.SignAsync(request, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            throw new SigningException("External signer failed to produce a signature.",
+                SigningErrorReason.ExternalSignerFailure, ex);
+        }
         if (signature.Length == 0)
         {
             throw new SigningException(
                 "External signer returned an empty signature.",
                 SigningErrorReason.ExternalSignerReturnedEmpty);
+        }
+
+        if (!CmsSignatureBuilder.VerifyExternalSignature(signedAttrs, signature.Span, certificate, hashAlg, sigAlgOid))
+        {
+            throw new SigningException("External signer returned a signature that does not verify with the configured certificate.",
+                SigningErrorReason.AlgorithmIncompatible);
         }
 
         List<X509Certificate2> allCerts = [certificate, .. chain];
@@ -523,9 +693,10 @@ public sealed class CadesSignerBuilder
         CancellationToken cancellationToken)
     {
         var tsaClient = CreateTimestampClient(timestampOptions.Endpoint.ToString(), timestampOptions.HttpClientProvider);
-        byte[] tsToken = await tsaClient.GetTimestampAsync(
-            TimestampClient.ExtractSignatureValue(cms), hashAlg, cancellationToken).ConfigureAwait(false);
-        return TimestampClient.EmbedTimestampInCms(cms, tsToken);
+        byte[] signatureValue = TimestampClient.ExtractSignatureValue(cms);
+        byte[] tsToken = await tsaClient.GetTimestampAsync(signatureValue, hashAlg, cancellationToken).ConfigureAwait(false);
+        TimestampClient.ValidateTimestampToken(tsToken, signatureValue, hashAlg);
+        return tsToken;
     }
 
     private ITimestampClient CreateTimestampClient(string endpoint, IHttpClientProvider? scopedProvider)
@@ -539,7 +710,7 @@ public sealed class CadesSignerBuilder
         return new TimestampClient(provider.GetClient(), endpoint, _options.Dependencies.Logger);
     }
 
-    private async Task<byte[]?> ApplyLtvAsync(
+    private async Task<CadesLtvEmbeddingResult?> ApplyLtvAsync(
         byte[] cms,
         X509Certificate2 certificate,
         IReadOnlyList<X509Certificate2> chain,
@@ -577,8 +748,7 @@ public sealed class CadesSignerBuilder
         var ltvData = await LtvDataCollector.CollectAsync(
             ltvProvider.GetClient(), certificate, allKnownCerts, logger, cancellationToken: cancellationToken).ConfigureAwait(false);
 
-        bool hasLtvMaterial = ltvData.CertificateRawData.Count > 0
-            && (ltvData.OcspResponses.Count > 0 || ltvData.Crls.Count > 0);
+        bool hasLtvMaterial = ltvData.CertificateRawData.Count > 0 && ltvData.HasCompleteCoverage;
         if (!hasLtvMaterial)
         {
             if (profile.FailureBehavior == SigningLevelFailureBehavior.Throw)
@@ -605,34 +775,46 @@ public sealed class CadesSignerBuilder
                 ltvData.Crls.Count > 0 ? [.. ltvData.Crls] : null));
         }
 
-        return unsignedAttrs.Count > 0
+        byte[] embeddedCms = unsignedAttrs.Count > 0
             ? CmsSignatureBuilder.AddUnsignedAttributes(cms, unsignedAttrs)
             : cms;
+        return new CadesLtvEmbeddingResult(embeddedCms, ltvData);
     }
 
     private async Task<byte[]> ApplyArchiveTimestampAsync(
         byte[] cms,
-        HashAlgorithmName hashAlg,
-        AdesBaselineProfile profile,
+        HashAlgorithmName hashAlgorithm,
         CancellationToken cancellationToken)
     {
+        var profile = _options.Profile;
         var archiveOptions = profile.ArchiveTimestamp;
         var timestampOptions = profile.Timestamp!;
         var endpoint = archiveOptions?.Endpoint ?? timestampOptions.Endpoint;
         var scopedProvider = archiveOptions?.HttpClientProvider ?? timestampOptions.HttpClientProvider;
-
+        byte[] hashIndex = CadesArchiveTimestampV3.CreateHashIndex(cms, hashAlgorithm);
+        byte[] input = CadesArchiveTimestampV3.CreateMessageImprintInput(
+            cms, _data, hashAlgorithm, hashIndex);
         var tsaClient = CreateTimestampClient(endpoint.ToString(), scopedProvider);
-        byte[] cmsHash = CryptoUtility.ComputeHash(cms, hashAlg);
-        byte[] tsToken = await tsaClient.GetTimestampAsync(cmsHash, hashAlg, cancellationToken).ConfigureAwait(false);
+        byte[] archiveToken = await tsaClient.GetTimestampAsync(input, hashAlgorithm, cancellationToken).ConfigureAwait(false);
+        TimestampClient.ValidateTimestampToken(archiveToken, input, hashAlgorithm);
+        archiveToken = CadesArchiveTimestampV3.AddHashIndexToTimestampToken(archiveToken, hashIndex);
+        byte[] completedCms = CmsSignatureBuilder.AddUnsignedAttributes(
+            cms, [CmsAttribute.Raw(Oids.ArchiveTimeStampV3, archiveToken)]);
+        var warnings = new List<string>();
+        if (!CadesArchiveTimestampV3.Validate(completedCms, _data, warnings))
+        {
+            throw new SigningException(
+                $"The produced archiveTimestampV3 did not validate: {string.Join(" ", warnings)}",
+                SigningErrorReason.LevelNotAchievable);
+        }
 
-        return CmsSignatureBuilder.AddUnsignedAttributes(cms,
-        [
-            CmsAttribute.Create(Oids.ArchiveTimeStamp, tsToken)
-        ]);
+        return completedCms;
     }
 
     private CadesSignerBuilder WithCredential(CadesSigningCredential credential) =>
         With(_options with { Credential = credential });
+
+    private sealed record CadesLtvEmbeddingResult(byte[] SignedCms, LtvCollectionResult Evidence);
 
     private CadesSignerBuilder With(CadesSigningOptions options) =>
         new(_data, options);

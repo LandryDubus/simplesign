@@ -5,12 +5,13 @@ Step-by-step guide for releasing a new SimpleSign version.
 ## Pre-release Checklist
 
 - [ ] All changes committed on `main`
-- [ ] `dotnet build` passes with 0 warnings
-- [ ] `dotnet test tests/unit/` — all pass
-- [ ] `dotnet test tests/cli/` — all pass
-- [ ] `dotnet test tests/integration/` — all pass (requires network)
-- [ ] `dotnet test tests/interop/` — all pass (requires Docker)
-- [ ] No vulnerable packages: `dotnet list package --vulnerable`
+- [ ] `dotnet build SimpleSign.sln --no-restore` passes with 0 warnings
+- [ ] Focused projects beneath `tests/unit/` pass on net8.0 and net10.0
+- [ ] `SimpleSign.HostSigner.Tests` passes on a Windows runner (it requires the WindowsDesktop runtime)
+- [ ] `dotnet test tests/cli/SimpleSign.Cli.Tests` passes
+- [ ] `dotnet test tests/integration/SimpleSign.Integration.Tests` passes when network credentials are available
+- [ ] `dotnet test tests/interop/SimpleSign.Interop.Tests` passes when Docker is available
+- [ ] No vulnerable packages: `dotnet list SimpleSign.sln package --vulnerable --no-restore`
 
 ## Version Bump — Project Files
 
@@ -34,7 +35,7 @@ Update `<Version>` in all `.csproj` files:
 
 ```bash
 VERSION="X.Y.Z"
-OLD="0.7.0"
+OLD="0.9.0"
 sed -i '' "s/<Version>$OLD</<Version>$VERSION</g" \
   Directory.Build.props \
   src/SimpleSign/SimpleSign.csproj \
@@ -55,17 +56,30 @@ These files contain version strings that do NOT come from `<Version>` and must b
 
 | File | Location | What to update |
 |------|----------|----------------|
-| `src/SimpleSign.HostSigner/TrayContext.cs` | `Version = "0.7.0"` | Hardcoded version for health check API |
+| `src/SimpleSign.HostSigner/TrayContext.cs` | `Version = "0.9.0"` | Hardcoded version for health check API |
 | `src/SimpleSign.HostSigner/README.md` | Install examples, health check responses | All version strings |
-| `src/SimpleSign.HostSigner/webapp/src/pages/ApiPage.tsx` | Mock version strings in web UI | `"0.1.0-alpha"` → new version |
-| `.github/ISSUE_TEMPLATE/bug_report.md` | `- SimpleSign Version: [e.g. 0.7.0]` | Example version |
-| `RELEASING.md` | `OLD="0.7.0"` and `Current version: \`0.7.0\`` | Update both—this file |
+| `src/SimpleSign.HostSigner/webapp/src/pages/ApiPage.tsx` and `AboutPage.tsx` | Version strings in web UI | `"0.9.0"` → new version |
+| `.github/ISSUE_TEMPLATE/bug_report.md` | `- SimpleSign Version: [e.g. 0.9.0]` | Example version |
+| `RELEASING.md` | `OLD="0.9.0"` and `Current version: \`0.9.0\`` | Update both—this file |
 
 Run to find any missed occurrences:
 
 ```bash
 grep -r "$OLD" --include="*.md" --include="*.cs" --include="*.tsx" --include="*.yml" . \
   | grep -v node_modules | grep -v obj/ | grep -v bin/ | grep -v CHANGELOG.md
+```
+
+### HostSigner web bundle
+
+The HostSigner project packages the checked-in Vite bundle under `wwwroot`. After
+updating the version strings in the web UI, regenerate it and commit the resulting
+`wwwroot/index.html` and hashed assets; do not commit `node_modules` or TypeScript
+incremental-build files.
+
+```bash
+cd src/SimpleSign.HostSigner/webapp
+npm ci
+npm run build
 ```
 
 ## Documentation Updates
@@ -124,9 +138,20 @@ These files provide LLM/agent context following the [llmstxt.org](https://llmstx
 ## Build & Test
 
 ```bash
-dotnet build
-dotnet test tests/unit/                    # Must pass both net8.0 and net10.0
-dotnet test tests/cli/
+dotnet build SimpleSign.sln --no-restore
+dotnet test tests/unit/SimpleSign.Contracts.Tests --no-restore
+dotnet test tests/unit/SimpleSign.PAdES.Tests --no-restore
+dotnet test tests/unit/SimpleSign.CAdES.Tests --no-restore
+dotnet test tests/unit/SimpleSign.XAdES.Tests --no-restore
+dotnet test tests/cli/SimpleSign.Cli.Tests --no-restore
+```
+
+Run the AOT smoke publish on a Linux x64 runner (the release workflow is the
+authoritative environment), because NativeAOT's Linux linker and symbol-stripper
+are required. Do not add `--no-restore` for the first publish of a runtime ID:
+that RID needs its own restore assets.
+
+```bash
 dotnet publish tests/smoke/SimpleSign.AotSmokeTest -r linux-x64 -f net10.0
 ```
 
@@ -171,4 +196,4 @@ NOTES
 - **MINOR** (0.x.0): New public API surface, deprecations
 - **MAJOR** (x.0.0): Breaking changes to public API
 
-Current version: `0.7.0`
+Current version: `0.9.0`

@@ -320,24 +320,24 @@ public sealed class PdfADetectionAndRsaPssTests
         CryptoUtility.ParsePssHashAlgorithm(paramsBytes).ShouldBe(expectedHash);
     }
 
-    [Fact(DisplayName = "ParsePssHashAlgorithm with empty params returns SHA-256 (RFC default)")]
-    public void ParsePssHashAlgorithm_EmptyParams_ReturnsSha256()
+    [Fact(DisplayName = "ParsePssHashAlgorithm with empty params returns SHA-1 (RFC 4055 default)")]
+    public void ParsePssHashAlgorithm_EmptyParams_ReturnsSha1()
     {
         var result = CryptoUtility.ParsePssHashAlgorithm(default(ReadOnlySpan<byte>));
-        result.ShouldBe(HashAlgorithmName.SHA256);
+        result.ShouldBe(HashAlgorithmName.SHA1);
     }
 
-    [Fact(DisplayName = "ParsePssHashAlgorithm with empty SEQUENCE (no hashAlgorithm field) returns SHA-256")]
-    public void ParsePssHashAlgorithm_EmptySequence_ReturnsSha256()
+    [Fact(DisplayName = "ParsePssHashAlgorithm with empty SEQUENCE returns SHA-1")]
+    public void ParsePssHashAlgorithm_EmptySequence_ReturnsSha1()
     {
-        // RSASSA-PSS-params with no [0] element — all fields are RFC default (SHA-256)
+        // RSASSA-PSS-params with no [0] element — all fields use the RFC SHA-1 default.
         var writer = new AsnWriter(AsnEncodingRules.DER);
         using (writer.PushSequence())
         {
             // empty
         }
         byte[] paramsBytes = writer.Encode();
-        CryptoUtility.ParsePssHashAlgorithm(paramsBytes).ShouldBe(HashAlgorithmName.SHA256);
+        CryptoUtility.ParsePssHashAlgorithm(paramsBytes).ShouldBe(HashAlgorithmName.SHA1);
     }
 
     [Fact(DisplayName = "CmsParser round-trips PSS signatures across all hash variants")]

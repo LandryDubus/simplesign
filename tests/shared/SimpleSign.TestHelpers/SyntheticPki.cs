@@ -20,6 +20,7 @@ public sealed class SyntheticPki : IDisposable
     private readonly RSA _rootKey;
     private readonly RSA _intermediateKey;
     private readonly RSA _leafKey;
+    private readonly bool _distinctCrlUrls;
 
     /// <summary>Self-signed Root CA certificate (10y validity).</summary>
     public X509Certificate2 RootCa { get; }
@@ -36,10 +37,12 @@ public sealed class SyntheticPki : IDisposable
     /// <summary>Optional OCSP responder URL embedded in Intermediate and Leaf.</summary>
     public string? OcspResponder { get; }
 
-    public SyntheticPki(string? crlDistributionPoint = null, string? ocspResponder = null)
+    public SyntheticPki(string? crlDistributionPoint = null, string? ocspResponder = null,
+        bool distinctCrlUrls = false)
     {
         CrlDistributionPoint = crlDistributionPoint;
         OcspResponder = ocspResponder;
+        _distinctCrlUrls = distinctCrlUrls;
 
         _rootKey = RSA.Create(2048);
         _intermediateKey = RSA.Create(2048);
@@ -79,7 +82,7 @@ public sealed class SyntheticPki : IDisposable
         req.CertificateExtensions.Add(
             new X509SubjectKeyIdentifierExtension(req.PublicKey, critical: false));
         AddAuthorityKeyIdentifier(req, issuer);
-        AddCrlAndOcspExtensions(req);
+        AddCrlAndOcspExtensions(req, _distinctCrlUrls ? "root" : null);
 
         // Use a unique serial — required so revocation tests can distinguish certs.
         byte[] serial = RandomNumberGenerator.GetBytes(16);
@@ -106,7 +109,7 @@ public sealed class SyntheticPki : IDisposable
         req.CertificateExtensions.Add(
             new X509SubjectKeyIdentifierExtension(req.PublicKey, critical: false));
         AddAuthorityKeyIdentifier(req, issuer);
-        AddCrlAndOcspExtensions(req);
+        AddCrlAndOcspExtensions(req, _distinctCrlUrls ? "intermediate" : null);
 
         byte[] serial = RandomNumberGenerator.GetBytes(16);
         serial[0] &= 0x7F;
@@ -133,11 +136,12 @@ public sealed class SyntheticPki : IDisposable
         req.CertificateExtensions.Add(new X509Extension("2.5.29.35", writer.Encode(), critical: false));
     }
 
-    private void AddCrlAndOcspExtensions(CertificateRequest req)
+    private void AddCrlAndOcspExtensions(CertificateRequest req, string? crlIssuer)
     {
         if (CrlDistributionPoint is not null)
         {
-            req.CertificateExtensions.Add(BuildCrlDistributionPointExtension(CrlDistributionPoint));
+            string url = crlIssuer is null ? CrlDistributionPoint : CrlDistributionPoint + "?issuer=" + crlIssuer;
+            req.CertificateExtensions.Add(BuildCrlDistributionPointExtension(url));
         }
         if (OcspResponder is not null)
         {
@@ -209,6 +213,19 @@ public sealed class SyntheticPki : IDisposable
         return builder.Build(
             IntermediateCa,
             new System.Numerics.BigInteger(0x0C0D),
+            DateTimeOffset.UtcNow.AddDays(30),
+            HashAlgorithmName.SHA256,
+            RSASignaturePadding.Pkcs1,
+            DateTimeOffset.UtcNow.AddDays(-1));
+    }
+
+    /// <summary>Builds a current, signed CRL with no revoked entries for the selected CA.</summary>
+    public static byte[] BuildGoodCrl(X509Certificate2 issuer)
+    {
+        var builder = new CertificateRevocationListBuilder();
+        return builder.Build(
+            issuer,
+            new System.Numerics.BigInteger(0x0C0E),
             DateTimeOffset.UtcNow.AddDays(30),
             HashAlgorithmName.SHA256,
             RSASignaturePadding.Pkcs1,

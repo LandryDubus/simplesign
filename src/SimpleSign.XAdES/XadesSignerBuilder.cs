@@ -7,6 +7,7 @@ using SimpleSign.CAdES;
 using SimpleSign.Core.Crypto;
 using SimpleSign.Core.Http;
 using SimpleSign.Core.Signing;
+using SimpleSign.Core.Validation;
 
 namespace SimpleSign.XAdES;
 
@@ -384,16 +385,42 @@ public sealed class XadesSignerBuilder
             }
         }
 
-        var achieved = ComputeAchievedLevel(timestampTokenBytes, hasLtvMaterial, hasArchiveTimestamp);
+        var inspection = new XadesSignatureValidator(new ValidationOptions { CheckRevocation = false })
+            .Validate(signedXml, originalData: _xmlData);
+        if (!inspection.IsSignatureValid || !inspection.IsIntegrityValid)
+        {
+            throw new SigningException("The completed XML signature failed read-back verification.",
+                SigningErrorReason.Unspecified);
+        }
+
+        bool inspectedTimestamp = inspection.HasValidSignatureTimeStamp == true;
+        bool inspectedLtv = inspectedTimestamp && inspection.IsLtvDataValid == true;
+        bool inspectedArchive = inspectedLtv && inspection.HasValidArchiveTimeStamp == true;
+        if ((timestampTokenBytes is not null && !inspectedTimestamp)
+            || (hasLtvMaterial && !inspectedLtv)
+            || (hasArchiveTimestamp && !inspectedArchive))
+        {
+            if (profile.FailureBehavior == SigningLevelFailureBehavior.Throw)
+            {
+                throw new SigningException("The completed XML artifact does not verify at the requested baseline level.",
+                    SigningErrorReason.LevelNotAchievable);
+            }
+
+            AddDowngradeWarnings(warnings, SigningWarningCode.LevelDowngraded,
+                "Read-back verification found incomplete timestamp or revocation coverage.");
+        }
+
+        var achieved = ComputeAchievedLevel(
+            inspectedTimestamp ? timestampTokenBytes : null, inspectedLtv, inspectedArchive);
 
         return new XadesSigningResult
         {
             SignedArtifact = signedXml,
             RequestedLevel = profile.Level,
             AchievedLevel = achieved,
-            HasSignatureTimestamp = timestampTokenBytes is not null,
-            HasLongTermValidationMaterial = hasLtvMaterial,
-            HasArchiveTimestamp = hasArchiveTimestamp,
+            HasSignatureTimestamp = inspectedTimestamp,
+            HasLongTermValidationMaterial = inspectedLtv,
+            HasArchiveTimestamp = inspectedArchive,
             Warnings = warnings.AsReadOnly()
         };
     }

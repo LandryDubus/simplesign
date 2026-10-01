@@ -257,8 +257,9 @@ public sealed class DependencyAndLifecycleContractTests
     [Fact(DisplayName = "PAdES: strict B-LT embeds collectible revocation material (DSS inspection)")]
     public async Task Pades_LongTerm_WithCollectibleCrl_EmbedsValidationMaterial()
     {
-        using var pki = new SyntheticPki(crlDistributionPoint: "http://crl.example.com/test-ca.crl");
-        using var crlClient = TestRevocationClient.Build(pki.BuildLeafCrl());
+        using var pki = new SyntheticPki(crlDistributionPoint: "http://crl.example.com/test-ca.crl",
+            distinctCrlUrls: true);
+        using var crlClient = TestRevocationClient.BuildFor(pki);
         using var tsaClient = ContractFixtures.BuildMockTsaClient();
 
         var result = await PadesSigner.Document(TestPdfFactory.CreateMinimalPdf())
@@ -276,8 +277,9 @@ public sealed class DependencyAndLifecycleContractTests
     [Fact(DisplayName = "CAdES: strict B-LT embeds collectible revocation material")]
     public async Task Cades_LongTerm_WithCollectibleCrl_EmbedsValidationMaterial()
     {
-        using var pki = new SyntheticPki(crlDistributionPoint: "http://crl.example.com/test-ca.crl");
-        using var crlClient = TestRevocationClient.Build(pki.BuildLeafCrl());
+        using var pki = new SyntheticPki(crlDistributionPoint: "http://crl.example.com/test-ca.crl",
+            distinctCrlUrls: true);
+        using var crlClient = TestRevocationClient.BuildFor(pki);
         using var tsaClient = ContractFixtures.BuildMockTsaClient();
 
         var result = await CadesSigner.Document(ContractFixtures.BinaryContent)
@@ -294,8 +296,9 @@ public sealed class DependencyAndLifecycleContractTests
     [Fact(DisplayName = "XAdES: strict B-LT embeds collectible revocation material")]
     public async Task Xades_LongTerm_WithCollectibleCrl_EmbedsValidationMaterial()
     {
-        using var pki = new SyntheticPki(crlDistributionPoint: "http://crl.example.com/test-ca.crl");
-        using var crlClient = TestRevocationClient.Build(pki.BuildLeafCrl());
+        using var pki = new SyntheticPki(crlDistributionPoint: "http://crl.example.com/test-ca.crl",
+            distinctCrlUrls: true);
+        using var crlClient = TestRevocationClient.BuildFor(pki);
         using var tsaClient = ContractFixtures.BuildMockTsaClient();
 
         var result = await XadesSigner.Document(ContractFixtures.XmlDocument)
@@ -312,8 +315,9 @@ public sealed class DependencyAndLifecycleContractTests
     [Fact(DisplayName = "PAdES: strict B-LTA with local CRL embeds DocTimeStamp and DSS")]
     public async Task Pades_Archive_WithCollectibleCrl_EmbedsArchiveTimestamp()
     {
-        using var pki = new SyntheticPki(crlDistributionPoint: "http://crl.example.com/test-ca.crl");
-        using var crlClient = TestRevocationClient.Build(pki.BuildLeafCrl());
+        using var pki = new SyntheticPki(crlDistributionPoint: "http://crl.example.com/test-ca.crl",
+            distinctCrlUrls: true);
+        using var crlClient = TestRevocationClient.BuildFor(pki);
         using var tsaClient = ContractFixtures.BuildMockTsaClient();
         var timestampOptions = new TimestampOptions(
             new Uri("http://mock-tsa.example.com"), new SingleClientProvider(tsaClient));
@@ -635,17 +639,8 @@ public sealed class DependencyAndLifecycleContractTests
         {
             InvokedCount++;
             LastEndpoint = tsaUrl;
-            return new RecordingTimestampClient();
+            return new TimestampClient(ContractFixtures.BuildMockTsaClient(), tsaUrl);
         }
-    }
-
-    private sealed class RecordingTimestampClient : ITimestampClient
-    {
-        public Task<byte[]> GetTimestampAsync(
-            ReadOnlyMemory<byte> dataToTimestamp,
-            HashAlgorithmName hashAlgorithm,
-            CancellationToken cancellationToken = default) =>
-            Task.FromResult(ContractFixtures.BuildFakeTimestampToken());
     }
 
     private sealed class RecordingLtvEmbedder : ILtvEmbedder

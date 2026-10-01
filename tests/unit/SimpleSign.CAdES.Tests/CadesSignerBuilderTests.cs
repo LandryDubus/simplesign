@@ -79,11 +79,11 @@ public sealed class CadesSignerBuilderTests : IDisposable
     [Fact]
     public async Task SignAsync_WithLevelLongTerm_EmbedsLtvData()
     {
-        var mockTsa = BuildMockTsaHandler();
+        var mockTsa = BuildValidLtvHandler();
         using var tsaHttpClient = new HttpClient(mockTsa);
 
         var cms = await CadesSigner.Document(_data)
-            .WithCertificate(_cert, [_pki.IntermediateCa])
+            .WithCertificate(_pki.Leaf, [_pki.IntermediateCa, _pki.RootCa])
             .WithLevel(AdesBaselineProfile.LongTerm(
                 new TimestampOptions(new Uri("http://mock-tsa.example.com"), new SingleClientProvider(tsaHttpClient)),
                 new LongTermValidationOptions(new SingleClientProvider(tsaHttpClient))))
@@ -100,11 +100,11 @@ public sealed class CadesSignerBuilderTests : IDisposable
     [Fact]
     public async Task SignAsync_WithLevelArchive_AppliesArchiveTimestamp()
     {
-        var mockTsa = BuildMockTsaHandler();
+        var mockTsa = BuildValidLtvHandler();
         using var tsaHttpClient = new HttpClient(mockTsa);
 
         var cms = await CadesSigner.Document(_data)
-            .WithCertificate(_cert, [_pki.IntermediateCa])
+            .WithCertificate(_pki.Leaf, [_pki.IntermediateCa, _pki.RootCa])
             .WithLevel(AdesBaselineProfile.Archive(
                 new TimestampOptions(new Uri("http://mock-tsa.example.com"), new SingleClientProvider(tsaHttpClient)),
                 new LongTermValidationOptions(new SingleClientProvider(tsaHttpClient))))
@@ -298,11 +298,11 @@ public sealed class CadesSignerBuilderTests : IDisposable
     [Fact]
     public async Task SignAsync_WithExtraCertificatesAndLevelLongTerm_IncludesChainInCms()
     {
-        var mockTsa = BuildMockTsaHandler();
+        var mockTsa = BuildValidLtvHandler();
         using var tsaHttpClient = new HttpClient(mockTsa);
 
         var cms = await CadesSigner.Document(_data)
-            .WithCertificate(_cert, [_pki.IntermediateCa])
+            .WithCertificate(_pki.Leaf, [_pki.IntermediateCa, _pki.RootCa])
             .WithLevel(AdesBaselineProfile.LongTerm(
                 new TimestampOptions(new Uri("http://mock-tsa.example.com"), new SingleClientProvider(tsaHttpClient)),
                 new LongTermValidationOptions(new SingleClientProvider(tsaHttpClient))))
@@ -333,4 +333,6 @@ public sealed class CadesSignerBuilderTests : IDisposable
     }
 
     private static HttpMessageHandler BuildMockTsaHandler() => MockTimestampAuthority.CreateHandler();
+
+    private HttpMessageHandler BuildValidLtvHandler() => MockTimestampAuthority.CreateLtvHandler(_pki);
 }

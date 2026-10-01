@@ -5,6 +5,7 @@ using System.Security.Cryptography.Xml;
 using System.Xml;
 using SimpleSign.Core.Constants;
 using SimpleSign.Core.Crypto;
+using SimpleSign.Core.Revocation;
 using SimpleSign.Core.Validation;
 using SimpleSign.XAdES.Constants;
 
@@ -190,7 +191,7 @@ public sealed class XadesSignatureValidator : IXadesSignatureValidator
         bool? ltvValid = null;
         if (extraction.HasCertificateValues || extraction.HasRevocationValues)
         {
-            ltvValid = ValidateLtvData(sigElement, ns, signerCert, warnings);
+            ltvValid = ValidateLtvData(sigElement, ns, signerCert, extraction.SigningTime, warnings);
         }
 
         // Archive timestamp validation
@@ -1006,6 +1007,7 @@ public sealed class XadesSignatureValidator : IXadesSignatureValidator
         XmlElement sigElement,
         XmlNamespaceManager ns,
         X509Certificate2? signerCert,
+        DateTimeOffset? signingTime,
         List<string> warnings)
     {
         var certValues = SelectByNestedPath(sigElement, ns,
@@ -1139,7 +1141,102 @@ public sealed class XadesSignatureValidator : IXadesSignatureValidator
             return false;
         }
 
-        return true;
+        if (certValues is null || revValues is null || signerCert is null)
+        {
+            warnings.Add("XAdES-B-LT requires both CertificateValues and RevocationValues.");
+            return false;
+        }
+
+        var certificates = new List<X509Certificate2>();
+        try
+        {
+            var certNodes = certValues.SelectNodes("xades:EncapsulatedX509Certificate", ns);
+            if (certNodes is not null)
+            {
+                foreach (XmlElement certElement in certNodes)
+                {
+                    certificates.Add(CertificateLoader.LoadCertificate(DecodeBase64(certElement)));
+                }
+            }
+
+            if (!certificates.Any(cert => cert.RawData.AsSpan().SequenceEqual(signerCert.RawData)))
+            {
+                warnings.Add("CertificateValues does not include the signer certificate.");
+                return false;
+            }
+
+            var timestampNodes = sigElement.SelectNodes(
+                ".//xades:SignatureTimeStamp/xades:EncapsulatedTimeStamp | " +
+                ".//xades141:ArchiveTimeStamp/xades141:EncapsulatedTimeStamp | " +
+                ".//xades:ArchiveTimeStamp/xades:EncapsulatedTimeStamp", ns);
+            if (timestampNodes is not null)
+            {
+                foreach (XmlElement timestampElement in timestampNodes)
+                {
+                    var tsaCertificates = TsaCertificateExtractor.ExtractCertificates(DecodeBase64(timestampElement));
+                    try
+                    {
+                        if (!tsaCertificates.All(tsa => certificates.Any(cert =>
+                            cert.RawData.AsSpan().SequenceEqual(tsa.RawData))))
+                        {
+                            warnings.Add("CertificateValues does not include the timestamp certificates.");
+                            return false;
+                        }
+                    }
+                    finally
+                    {
+                        foreach (var tsaCertificate in tsaCertificates)
+                        {
+                            tsaCertificate.Dispose();
+                        }
+                    }
+                }
+            }
+
+            var ocsps = new List<byte[]>();
+            var crls = new List<byte[]>();
+            var ocspNodes = revValues.SelectNodes("xades:OCSPValues/xades:EncapsulatedOCSPValue", ns);
+            if (ocspNodes is not null)
+            {
+                foreach (XmlElement ocspElement in ocspNodes)
+                {
+                    ocsps.Add(DecodeBase64(ocspElement));
+                }
+            }
+
+            var crlNodes = revValues.SelectNodes("xades:CRLValues/xades:EncapsulatedCRLValue", ns);
+            if (crlNodes is not null)
+            {
+                foreach (XmlElement crlElement in crlNodes)
+                {
+                    crls.Add(DecodeBase64(crlElement));
+                }
+            }
+
+            using var httpClient = new HttpClient();
+            bool covered = EmbeddedRevocationEvidence.CoversAll(
+                certificates, ocsps, crls, signingTime ?? DateTimeOffset.UtcNow,
+                new OcspClient(httpClient));
+            if (!covered)
+            {
+                warnings.Add("XAdES-B-LT: Revocation evidence does not cover every non-root certificate.");
+            }
+
+            return covered;
+        }
+        catch (Exception ex) when (ex is CryptographicException or FormatException
+            or System.Formats.Asn1.AsnContentException)
+        {
+            warnings.Add($"XAdES-B-LT: Invalid certificate or evidence: {ex.Message}");
+            return false;
+        }
+        finally
+        {
+            foreach (var certificate in certificates)
+            {
+                certificate.Dispose();
+            }
+        }
     }
 
     private static XmlElement? SelectByNestedPath(

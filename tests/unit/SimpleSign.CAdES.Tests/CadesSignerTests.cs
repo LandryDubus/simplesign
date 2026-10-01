@@ -204,11 +204,11 @@ public sealed class CadesSignerTests : IDisposable
     [Fact]
     public async Task SignAsync_LongTerm_UsesRootValidationMaterial()
     {
-        var mockTsa = BuildMockTsaHandler();
+        var mockTsa = MockTimestampAuthority.CreateLtvHandler(_pki);
         using var tsaHttpClient = new HttpClient(mockTsa);
 
         var cms = await CadesSigner.Document(_data)
-            .WithCertificate(_cert, [_pki.IntermediateCa])
+            .WithCertificate(_pki.Leaf, [_pki.IntermediateCa, _pki.RootCa])
             .WithLevel(AdesBaselineProfile.LongTerm(
                 new TimestampOptions(new Uri("http://mock-tsa.example.com"), new SingleClientProvider(tsaHttpClient)),
                 new LongTermValidationOptions(new SingleClientProvider(tsaHttpClient))))
@@ -239,11 +239,11 @@ public sealed class CadesSignerTests : IDisposable
     [Fact]
     public async Task SignAsync_Archive_IncludesArchiveTimestamp()
     {
-        var mockTsa = BuildMockTsaHandler();
+        var mockTsa = MockTimestampAuthority.CreateLtvHandler(_pki);
         using var tsaHttpClient = new HttpClient(mockTsa);
 
         var cms = await CadesSigner.Document(_data)
-            .WithCertificate(_cert, [_pki.IntermediateCa])
+            .WithCertificate(_pki.Leaf, [_pki.IntermediateCa, _pki.RootCa])
             .WithLevel(AdesBaselineProfile.Archive(
                 new TimestampOptions(new Uri("http://mock-tsa.example.com"), new SingleClientProvider(tsaHttpClient)),
                 new LongTermValidationOptions(new SingleClientProvider(tsaHttpClient))))
@@ -282,9 +282,9 @@ public sealed class CadesSignerTests : IDisposable
     [Fact]
     public async Task ValidateArchiveTimestamp_ChangedContent_ReturnsFalse()
     {
-        using var tsaHttpClient = new HttpClient(BuildMockTsaHandler());
+        using var tsaHttpClient = new HttpClient(MockTimestampAuthority.CreateLtvHandler(_pki));
         byte[] cms = await CadesSigner.Document(_data)
-            .WithCertificate(_cert, [_pki.IntermediateCa])
+            .WithCertificate(_pki.Leaf, [_pki.IntermediateCa, _pki.RootCa])
             .WithLevel(AdesBaselineProfile.Archive(
                 new TimestampOptions(new Uri("http://mock-tsa.example.com"), new SingleClientProvider(tsaHttpClient)),
                 new LongTermValidationOptions(new SingleClientProvider(tsaHttpClient))))
@@ -300,11 +300,11 @@ public sealed class CadesSignerTests : IDisposable
     [Fact]
     public async Task SignAndValidate_LongTerm_Roundtrip_Succeeds()
     {
-        var mockTsa = BuildMockTsaHandler();
+        var mockTsa = MockTimestampAuthority.CreateLtvHandler(_pki);
         using var tsaHttpClient = new HttpClient(mockTsa);
 
         var cms = await CadesSigner.Document(_data)
-            .WithCertificate(_cert, [_pki.IntermediateCa])
+            .WithCertificate(_pki.Leaf, [_pki.IntermediateCa, _pki.RootCa])
             .WithLevel(AdesBaselineProfile.LongTerm(
                 new TimestampOptions(new Uri("http://mock-tsa.example.com"), new SingleClientProvider(tsaHttpClient)),
                 new LongTermValidationOptions(new SingleClientProvider(tsaHttpClient))))
@@ -316,7 +316,7 @@ public sealed class CadesSignerTests : IDisposable
 
         var validator = new CadesSignatureValidator(
             new ValidationOptions { CheckRevocation = false, TrustSystemRoots = false });
-        var result = validator.Validate(cms, _data, [_cert]);
+        var result = validator.Validate(cms, _data, [_pki.RootCa]);
 
         Assert.True(result.IsIntegrityValid);
         Assert.True(result.IsSignatureValid);

@@ -132,11 +132,11 @@ public sealed class LtvDataCollectorTests : IDisposable
             ocsp);
 
         result.OcspResponses.ShouldHaveSingleItem();
-        result.Crls.ShouldHaveSingleItem();
-        result.HasCompleteRevocationData.ShouldBeTrue();
+        result.Crls.ShouldBeEmpty();
+        result.HasCompleteRevocationData.ShouldBeFalse();
         result.CertificateStatuses.ShouldNotBeNull()
             .Where(status => status.RequiresRevocationData)
-            .ShouldAllBe(status => status.HasRevocationData);
+            .ShouldContain(status => !status.HasRevocationData);
     }
 
     [Fact]
@@ -185,7 +185,7 @@ public sealed class LtvDataCollectorTests : IDisposable
             X509Certificate2 cert,
             X509Certificate2? issuerCert,
             byte[] ocspResponseBytes,
-            DateTimeOffset? signingTime) => throw new NotSupportedException();
+            DateTimeOffset? signingTime) => true;
     }
 
     private sealed class CancellingOcspClient : IOcspClient

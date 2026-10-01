@@ -5,6 +5,7 @@ using Microsoft.Extensions.Logging;
 using SimpleSign.Core.Constants;
 using SimpleSign.Core.Crypto;
 using SimpleSign.Core.Extensions;
+using SimpleSign.Core.Revocation;
 using SimpleSign.Core.Validation;
 
 namespace SimpleSign.CAdES;
@@ -24,7 +25,7 @@ public sealed class CadesValidationResult
     /// <summary>The timestamp (if present) is valid.</summary>
     public bool? HasValidTimestamp { get; init; }
 
-    /// <summary>The LTV data (CertificateValues + RevocationValues) is present and valid.</summary>
+    /// <summary>Root SignedData evidence covers the embedded non-root certificate paths.</summary>
     public bool? IsLtvDataValid { get; init; }
 
     /// <summary>The archive timestamp (if present) is valid.</summary>
@@ -139,7 +140,8 @@ public sealed class CadesSignatureValidator : ICadesSignatureValidator
         }
 
         // 5. Certificate chain validation
-        bool chainValid = ValidateChain(cmsData.SignerCertificate!, errors, warnings, trustAnchors);
+        bool chainValid = ValidateChain(cmsData.SignerCertificate!, cmsData.Certificates,
+            errors, warnings, trustAnchors);
 
         // 6. Timestamp validation
         bool? tsValid = null;
@@ -148,7 +150,7 @@ public sealed class CadesSignatureValidator : ICadesSignatureValidator
             tsValid = _timestampValidator.Validate(cmsData, warnings, logger: _logger);
         }
 
-        // 7. LTV data validation (CertificateValues + RevocationValues)
+        // 7. LTV data validation from root SignedData
         bool? ltvValid = ValidateLtvData(cmsBytes, cmsData, warnings);
 
         // 8. Archive timestamp validation
@@ -197,6 +199,7 @@ public sealed class CadesSignatureValidator : ICadesSignatureValidator
 
     private bool ValidateChain(
         X509Certificate2 signerCert,
+        IReadOnlyList<X509Certificate2> embeddedCertificates,
         List<string> errors,
         List<string> warnings,
         IEnumerable<X509Certificate2>? trustAnchors)
@@ -209,6 +212,13 @@ public sealed class CadesSignatureValidator : ICadesSignatureValidator
 
             using var chain = new X509Chain();
             CryptoUtility.ConfigureChainPolicy(chain, _options.CheckRevocation);
+            foreach (var embedded in embeddedCertificates)
+            {
+                if (!embedded.RawData.AsSpan().SequenceEqual(signerCert.RawData))
+                {
+                    chain.ChainPolicy.ExtraStore.Add(embedded);
+                }
+            }
 
             if (hasCustomRoots)
             {
@@ -306,7 +316,69 @@ public sealed class CadesSignatureValidator : ICadesSignatureValidator
                 warnings.Add("CAdES-B-LT: Root SignedData lacks certificates or revocation values.");
                 return false;
             }
-            return true;
+            if (cmsData.SignerCertificate is null
+                || !cmsData.Certificates.Any(cert =>
+                    cert.RawData.AsSpan().SequenceEqual(cmsData.SignerCertificate.RawData)))
+            {
+                warnings.Add("CAdES-B-LT: Root SignedData does not include the signer certificate.");
+                return false;
+            }
+
+            foreach (var token in new[] { cmsData.SignatureTimestampToken, cmsData.ArchiveTimestampToken })
+            {
+                if (token is null)
+                {
+                    continue;
+                }
+
+                var tsaCertificates = TsaCertificateExtractor.ExtractCertificates(token);
+                try
+                {
+                    if (!tsaCertificates.All(tsa => cmsData.Certificates.Any(cert =>
+                        cert.RawData.AsSpan().SequenceEqual(tsa.RawData))))
+                    {
+                        warnings.Add("CAdES-B-LT: Root SignedData does not include the timestamp certificates.");
+                        return false;
+                    }
+                }
+                finally
+                {
+                    foreach (var tsaCertificate in tsaCertificates)
+                    {
+                        tsaCertificate.Dispose();
+                    }
+                }
+            }
+            var crls = new List<byte[]>();
+            var ocsps = new List<byte[]>();
+            while (revocations.HasData)
+            {
+                if (revocations.PeekTag() == new Asn1Tag(TagClass.ContextSpecific, 1, true))
+                {
+                    var other = revocations.ReadSequence(new Asn1Tag(TagClass.ContextSpecific, 1, true));
+                    string oid = other.ReadObjectIdentifier();
+                    if (oid == "1.3.6.1.5.5.7.16.2")
+                    {
+                        ocsps.Add(other.ReadEncodedValue().ToArray());
+                    }
+                }
+                else
+                {
+                    crls.Add(revocations.ReadEncodedValue().ToArray());
+                }
+            }
+
+            using var httpClient = new HttpClient();
+            bool covered = EmbeddedRevocationEvidence.CoversAll(
+                cmsData.Certificates, ocsps, crls,
+                cmsData.SigningTime ?? DateTimeOffset.UtcNow,
+                new OcspClient(httpClient));
+            if (!covered)
+            {
+                warnings.Add("CAdES-B-LT: Revocation evidence does not cover every non-root certificate.");
+            }
+
+            return covered;
         }
         // S2221: intentional -- validation pipeline converts exceptions to error messages
         catch (Exception ex)

@@ -2,6 +2,7 @@ using Shouldly;
 using SimpleSign.Core.Crypto;
 using SimpleSign.Core.Revocation;
 using SimpleSign.TestFixtures;
+using SimpleSign.TestHelpers;
 using Xunit;
 
 namespace SimpleSign.Core.Tests.Revocation;
@@ -15,22 +16,32 @@ namespace SimpleSign.Core.Tests.Revocation;
 [Trait("Category", "Unit")]
 public sealed class OcspClientRealFixtureTests
 {
-    [Fact(DisplayName = "ParseOcspResponse returns true for real DigiCert 'good' response")]
-    public void ParseOcspResponse_RealDigiCertGood_ReturnsTrue()
+    [Fact(DisplayName = "ParseOcspResponse verifies real DigiCert response with its issuer")]
+    public void ParseOcspResponse_RealDigiCertGood_WithIssuerReturnsTrue()
     {
         using var cert = CertificateLoader.LoadCertificate(RecordedFixtures.DigiCertPublicCertDer);
-        var result = OcspClient.ParseOcspResponse(RecordedFixtures.DigiCertOcspGood, cert);
+        using var issuer = CertificateLoader.LoadCertificate(RecordedFixtures.DigiCertIssuerCertDer);
+        var (result, _) = OcspClient.ParseOcspResponseWithCerts(
+            RecordedFixtures.DigiCertOcspGood, cert, issuerCert: issuer);
         result.ShouldBeTrue("DigiCert reported the cert as not revoked when the fixture was captured");
     }
 
-    [Fact(DisplayName = "ParseOcspResponse handles real responder cert embedded in [0] OPTIONAL")]
-    public void ParseOcspResponse_RealDigiCertResponse_DoesNotThrow()
+    [Fact(DisplayName = "ParseOcspResponse without a responder or issuer certificate is rejected")]
+    public void ParseOcspResponse_RealDigiCertResponse_WithoutIssuerIsRejected()
     {
         using var cert = CertificateLoader.LoadCertificate(RecordedFixtures.DigiCertPublicCertDer);
-        // Just exercising: the responder embeds its cert; parse() must verify the signature
-        // and not throw. If the parser had a bug here, it would surface immediately.
         Action act = () => OcspClient.ParseOcspResponse(RecordedFixtures.DigiCertOcspGood, cert);
-        Should.NotThrow(act);
+        Should.Throw<InvalidOperationException>(act);
+    }
+
+    [Fact]
+    public void ParseOcspResponse_DifferentCertificateStatus_IsRejected()
+    {
+        using var unrelated = TestCertificateFactory.CreateSelfSignedCert();
+        using var issuer = CertificateLoader.LoadCertificate(RecordedFixtures.DigiCertIssuerCertDer);
+
+        Should.Throw<InvalidDataException>(() => OcspClient.ParseOcspResponseWithCerts(
+            RecordedFixtures.DigiCertOcspGood, unrelated, issuerCert: issuer));
     }
 
     [Fact(DisplayName = "Real DigiCert public cert has the expected issuer subject")]

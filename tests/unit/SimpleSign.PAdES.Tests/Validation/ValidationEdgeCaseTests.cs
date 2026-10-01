@@ -392,8 +392,9 @@ public sealed class ValidationEdgeCaseTests
         X509Certificate2 cert = TestCertificateFactory.CreateSelfSignedCert();
         try
         {
-            Func<Task<bool>> action = () => client.CheckOcspAsync(cert, "http://ocsp.test/", CancellationToken.None);
-            await Should.ThrowAsync<TaskCanceledException>(async () => await action());
+            Func<Task> action = async () => await client.FetchOcspResponseAsync(
+                cert, cert, "http://ocsp.test/", CancellationToken.None);
+            await Should.ThrowAsync<TaskCanceledException>(action);
         }
         finally
         {
@@ -413,8 +414,9 @@ public sealed class ValidationEdgeCaseTests
         X509Certificate2 cert = TestCertificateFactory.CreateSelfSignedCert();
         try
         {
-            Func<Task<bool>> action = () => client.CheckOcspAsync(cert, "http://ocsp.test/", CancellationToken.None);
-            await Should.ThrowAsync<Exception>(async () => await action());
+            Func<Task> action = async () => await client.FetchOcspResponseAsync(
+                cert, cert, "http://ocsp.test/", CancellationToken.None);
+            await Should.ThrowAsync<Exception>(action);
         }
         finally
         {

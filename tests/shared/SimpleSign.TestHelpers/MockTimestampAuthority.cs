@@ -27,6 +27,33 @@ public static class MockTimestampAuthority
     /// <summary>Creates an HTTP client whose timestamp responses echo each request's imprint and nonce.</summary>
     public static HttpClient CreateClient(Action<byte[]>? tokenObserver = null) => new(CreateHandler(tokenObserver));
 
+    /// <summary>Serves timestamp responses and signed CRLs for the synthetic three-tier PKI.</summary>
+    public static HttpMessageHandler CreateLtvHandler(SyntheticPki pki)
+    {
+        ArgumentNullException.ThrowIfNull(pki);
+        int crlRequests = 0;
+        return new MockHttpHandler(async request =>
+        {
+            if (request.Method == HttpMethod.Get)
+            {
+                var issuer = Interlocked.Increment(ref crlRequests) == 1
+                    ? pki.IntermediateCa : pki.RootCa;
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new ByteArrayContent(SyntheticPki.BuildGoodCrl(issuer))
+                };
+            }
+
+            byte[] requestBytes = await request.Content!.ReadAsByteArrayAsync().ConfigureAwait(false);
+            var response = new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new ByteArrayContent(CreateResponse(requestBytes))
+            };
+            response.Content.Headers.ContentType = new MediaTypeHeaderValue("application/timestamp-reply");
+            return response;
+        });
+    }
+
     /// <summary>Creates a handler whose timestamp responses echo each request's imprint and nonce.</summary>
     public static HttpMessageHandler CreateHandler(Action<byte[]>? tokenObserver = null) => new MockHttpHandler(async request =>
     {

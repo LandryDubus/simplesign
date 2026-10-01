@@ -5,6 +5,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using SimpleSign.Core.Crypto;
 using SimpleSign.Core.Extensions;
 using SimpleSign.Core.Http;
+using SimpleSign.Core.Revocation;
 using SimpleSign.Core.Signing;
 using SimpleSign.Core.Validation;
 using SimpleSign.PAdES.Signing;
@@ -281,7 +282,8 @@ public sealed class PadesSignerBuilder
             signerName: metadata.SignerName,
             reason: reason,
             location: location,
-            contactInfo: contactInfo);
+            contactInfo: contactInfo,
+            replaceMetadata: true);
 
         return With(_options with { Field = updatedField, Metadata = SnapshotMetadata(metadata) });
     }
@@ -654,7 +656,44 @@ public sealed class PadesSignerBuilder
                 outputStream, effectiveHash, pdfALevel, profile, opId, warnings, cancellationToken).ConfigureAwait(false);
         }
 
-        var achieved = ComputeAchievedLevel(timestampTokenBytes, hasLtvMaterial, hasArchiveTimestamp);
+        var inspectionOptions = new ValidationOptions { CheckRevocation = false };
+        var inspectedSignatures = await new PdfSignatureValidator(inspectionOptions)
+            .ValidateAsync(outputStream, cancellationToken: cancellationToken).ConfigureAwait(false);
+        var inspectedSigner = inspectedSignatures.LastOrDefault(result => !result.IsDocumentTimestamp);
+        if (inspectedSigner is null || !inspectedSigner.IsSignatureValid || !inspectedSigner.IsIntegrityValid)
+        {
+            throw new SigningException("The completed PDF signature failed read-back verification.",
+                SigningErrorReason.Unspecified);
+        }
+
+        var signedFields = await PdfStructureReader.ReadSignatureFieldsAsync(
+            outputStream, cancellationToken: cancellationToken).ConfigureAwait(false);
+        var signedField = signedFields.Last(field => field.IsSigned && !field.IsDocumentTimestamp);
+        var inspectedCms = CmsParser.Parse(signedField.ContentsBytes);
+        bool inspectedTimestamp = TimestampValidator.Validate(inspectedCms, [], logger: logger) == true;
+        bool inspectedLtv = inspectedTimestamp && hasLtvMaterial
+            && await HasCompleteDssEvidenceAsync(outputStream, timestampTokenBytes, cancellationToken)
+                .ConfigureAwait(false);
+        bool inspectedArchive = inspectedLtv && inspectedSignatures.LastOrDefault()?.IsDocumentTimestamp == true
+            && inspectedSignatures[^1].IsSignatureValid && inspectedSignatures[^1].IsIntegrityValid
+            && await HasCompleteDssEvidenceAsync(
+                outputStream, signedFields[^1].ContentsBytes, cancellationToken).ConfigureAwait(false);
+        if ((timestampTokenBytes is not null && !inspectedTimestamp)
+            || (hasLtvMaterial && !inspectedLtv)
+            || (hasArchiveTimestamp && !inspectedArchive))
+        {
+            if (profile.FailureBehavior == SigningLevelFailureBehavior.Throw)
+            {
+                throw new SigningException("The completed PDF artifact does not verify at the requested baseline level.",
+                    SigningErrorReason.LevelNotAchievable);
+            }
+
+            warnings.Add(new SigningWarning(SigningWarningCode.LevelDowngraded,
+                "Read-back verification found incomplete timestamp or archive coverage."));
+        }
+
+        var achieved = ComputeAchievedLevel(
+            inspectedTimestamp ? timestampTokenBytes : null, inspectedLtv, inspectedArchive);
 
         logger.SigningCompleted(opId, sw.ElapsedMilliseconds, outputStream.Length);
 
@@ -663,9 +702,9 @@ public sealed class PadesSignerBuilder
             SignedArtifact = [],
             RequestedLevel = profile.Level,
             AchievedLevel = achieved,
-            HasSignatureTimestamp = timestampTokenBytes is not null,
-            HasLongTermValidationMaterial = hasLtvMaterial,
-            HasArchiveTimestamp = hasArchiveTimestamp,
+            HasSignatureTimestamp = inspectedTimestamp,
+            HasLongTermValidationMaterial = inspectedLtv,
+            HasArchiveTimestamp = inspectedArchive,
             Warnings = warnings.AsReadOnly()
         };
     }
@@ -910,28 +949,77 @@ public sealed class PadesSignerBuilder
         // The LTV embedder always appends certificates, so reference inequality is not proof of
         // B-LT material. Inspect the produced DSS: B-LT requires certificate values AND
         // revocation values (OCSP or CRL).
-        var dss = await DssExtractor.TryReadFullDssDataAsync(outputStream, cancellationToken, logger).ConfigureAwait(false);
-        bool dssEmbedded = dss.GlobalCerts.Count > 0 && (dss.GlobalCrls.Count > 0 || dss.GlobalOcsps.Count > 0);
+        bool dssEmbedded = await HasCompleteDssEvidenceAsync(
+            outputStream, timestampTokenBytes, cancellationToken).ConfigureAwait(false);
         if (!dssEmbedded)
         {
             logger.LtvEmbeddingFailed(opId);
             if (profile.FailureBehavior == SigningLevelFailureBehavior.Throw)
             {
                 throw new SigningException(
-                    "LTV was requested but no revocation data could be collected — DSS was not embedded. " +
+                    "LTV was requested but complete revocation evidence was not embedded. " +
                     "The requested B-LT/B-LTA level cannot be produced.",
                     SigningErrorReason.LevelNotAchievable);
             }
 
             warnings.Add(new SigningWarning(
                 SigningWarningCode.LongTermValidationMaterialUnavailable,
-                "LTV was requested but no revocation data could be collected — DSS not embedded."));
+                "LTV was requested but complete revocation evidence was not embedded."));
             warnings.Add(new SigningWarning(
                 SigningWarningCode.LevelDowngraded,
                 "The requested baseline level could not be achieved; the artifact was downgraded."));
         }
 
         return (dssEmbedded, outputStream);
+    }
+
+    private async Task<bool> HasCompleteDssEvidenceAsync(
+        Stream outputStream,
+        byte[]? timestampTokenBytes,
+        CancellationToken cancellationToken)
+    {
+        var logger = _options.Dependencies.Logger;
+        var dss = await DssExtractor.TryReadFullDssDataAsync(outputStream, cancellationToken, logger).ConfigureAwait(false);
+        bool dssEmbedded = false;
+        var embeddedCertificates = new List<X509Certificate2>();
+        var tsaCertificates = timestampTokenBytes is not null
+            ? TsaCertificateExtractor.ExtractCertificates(timestampTokenBytes)
+            : [];
+        try
+        {
+            foreach (var certificateBytes in dss.GlobalCerts)
+            {
+                embeddedCertificates.Add(CertificateLoader.LoadCertificate(certificateBytes));
+            }
+
+            bool requiredCertificatesPresent = BuildChainWithSigner().Concat(tsaCertificates)
+                .All(required => embeddedCertificates.Any(embedded =>
+                    embedded.RawData.AsSpan().SequenceEqual(required.RawData)));
+            var ltvProvider = _options.Profile.LongTermValidation!.HttpClientProvider
+                ?? _options.Dependencies.HttpClientProvider;
+            dssEmbedded = requiredCertificatesPresent && EmbeddedRevocationEvidence.CoversAll(
+                embeddedCertificates,
+                dss.GlobalOcsps,
+                dss.GlobalCrls,
+                DateTimeOffset.UtcNow,
+                new OcspClient(ltvProvider.GetClient(), logger));
+        }
+        catch (System.Security.Cryptography.CryptographicException)
+        {
+            dssEmbedded = false;
+        }
+        finally
+        {
+            foreach (var embeddedCertificate in embeddedCertificates)
+            {
+                embeddedCertificate.Dispose();
+            }
+            foreach (var tsaCertificate in tsaCertificates)
+            {
+                tsaCertificate.Dispose();
+            }
+        }
+        return dssEmbedded;
     }
 
     private async Task<bool> ApplyArchiveTimestampAsync(
@@ -1060,16 +1148,17 @@ public sealed class PadesSignerBuilder
         string? contactInfo = null,
         SignatureAppearance? appearance = null,
         CertificationLevel? certificationLevel = null,
-        string? existingFieldName = null)
+        string? existingFieldName = null,
+        bool replaceMetadata = false)
     {
         var current = _options.Field;
         return new SignatureFieldOptions
         {
             FieldName = fieldName ?? current.FieldName,
-            SignerName = signerName ?? current.SignerName,
-            Reason = reason ?? current.Reason,
-            Location = location ?? current.Location,
-            ContactInfo = contactInfo ?? current.ContactInfo,
+            SignerName = replaceMetadata ? signerName : signerName ?? current.SignerName,
+            Reason = replaceMetadata ? reason : reason ?? current.Reason,
+            Location = replaceMetadata ? location : location ?? current.Location,
+            ContactInfo = replaceMetadata ? contactInfo : contactInfo ?? current.ContactInfo,
             ContentsReservedBytes = current.ContentsReservedBytes,
             SubFilter = current.SubFilter,
             Appearance = appearance ?? current.Appearance,

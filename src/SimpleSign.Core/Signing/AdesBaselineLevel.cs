@@ -6,14 +6,14 @@ namespace SimpleSign.Core.Signing;
 /// </summary>
 /// <remarks>
 /// The levels are cumulative target outcomes:
-/// <see cref="Timestamped"/> (B-T) adds trusted signing time to
+/// <see cref="Timestamped"/> (B-T) adds a cryptographically bound signature timestamp to
 /// <see cref="Basic"/> (B-B), <see cref="LongTerm"/> (B-LT) adds
 /// long-term validation material, and <see cref="Archive"/> (B-LTA)
 /// adds long-term availability and integrity protection for that material.
 /// </remarks>
 public enum AdesBaselineLevel
 {
-    /// <summary>B-B — basic signature with no trusted time or validation material.</summary>
+    /// <summary>B-B — basic signature without a signature timestamp or validation material.</summary>
     Basic = 0,
 
     /// <summary>B-T — signature with an embedded signature timestamp.</summary>

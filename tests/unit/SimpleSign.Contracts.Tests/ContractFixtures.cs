@@ -5,8 +5,7 @@ using SimpleSign.TestHelpers;
 namespace SimpleSign.Contracts.Tests;
 
 /// <summary>
-/// Shared cross-format helpers for the signing contract tests: a mock TSA serving a
-/// canned RFC 3161 response and signing certificates.
+/// Shared cross-format helpers for the signing contract tests.
 /// </summary>
 internal static class ContractFixtures
 {
@@ -26,31 +25,20 @@ internal static class ContractFixtures
 
     internal static HttpClient BuildFailingClient() => MockHttpHandler.Failing();
 
-    /// <summary>Returns a valid DER-encoded fake CMS token suitable for embedding.</summary>
-    internal static byte[] BuildFakeTimestampToken() => BuildFakeCmsToken();
-
-    private static byte[] BuildFakeCmsToken()
-    {
-        var writer = new System.Formats.Asn1.AsnWriter(System.Formats.Asn1.AsnEncodingRules.DER);
-        using (writer.PushSequence())
-        {
-            writer.WriteObjectIdentifier("1.2.840.113549.1.7.2");
-            using (writer.PushSequence(new System.Formats.Asn1.Asn1Tag(
-                System.Formats.Asn1.TagClass.ContextSpecific, 0, true)))
-            {
-                writer.WriteOctetString([0x01, 0x02, 0x03]);
-            }
-        }
-        return writer.Encode();
-    }
 }
 
-/// <summary>Builds an <see cref="HttpClient"/> that serves the provided bytes for any request.</summary>
+/// <summary>Builds an <see cref="HttpClient"/> that serves signed CRLs for the synthetic PKI.</summary>
 internal static class TestRevocationClient
 {
-    internal static HttpClient Build(byte[] responseBytes) =>
-        new(new MockHttpHandler(_ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+    internal static HttpClient BuildFor(SyntheticPki pki) =>
+        new(new MockHttpHandler(request =>
         {
-            Content = new ByteArrayContent(responseBytes)
-        })));
+            byte[] crl = request.RequestUri?.Query.Contains("issuer=root", StringComparison.Ordinal) == true
+                ? SyntheticPki.BuildGoodCrl(pki.RootCa)
+                : SyntheticPki.BuildGoodCrl(pki.IntermediateCa);
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new ByteArrayContent(crl)
+            });
+        }));
 }

@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging;
 using SimpleSign.Core.Extensions;
 using SimpleSign.Core.Http;
 using SimpleSign.Core.Revocation;
+using SimpleSign.Core.Validation;
 
 namespace SimpleSign.CAdES;
 
@@ -14,8 +15,10 @@ public sealed record LtvCollectionResult(
     IReadOnlyList<LtvCertificateStatus>? CertificateStatuses = null)
 {
     /// <summary>
-    /// Whether every non-self-signed certificate for which revocation data is required has its own
-    /// OCSP response or CRL. At least one certificate must require revocation data.
+    /// Whether every supplied non-self-signed certificate for which revocation data is required has
+    /// applicable, authenticated and current OCSP or CRL evidence. At least one certificate
+    /// must require revocation data. Newly discovered responder certificates are checked by
+    /// completed-artifact validation after embedding.
     /// </summary>
     public bool HasCompleteRevocationData => CertificateStatuses is { Count: > 0 }
         && CertificateStatuses.Any(status => status.RequiresRevocationData)
@@ -90,7 +93,10 @@ public static class LtvDataCollector
                 {
                     var result = await ocsp.FetchOcspResponseAsync(cert, issuer, ocspUrl, cancellationToken)
                         .ConfigureAwait(false);
-                    if (!result.IsValid || result.ResponseBytes.Length == 0)
+                    if (!result.IsValid || result.ResponseBytes.Length == 0
+                        || issuer is null
+                        || !EmbeddedRevocationEvidence.CoversCertificate(
+                            cert, issuer, [result.ResponseBytes], [], DateTimeOffset.UtcNow, ocsp))
                     {
                         throw new InvalidOperationException("OCSP response was not valid.");
                     }
@@ -125,7 +131,9 @@ public static class LtvDataCollector
                     {
                         var crlBytes = await ResilientHttp.GetBytesAsync(httpClient, crlUrl, logger: logger, ct: cancellationToken)
                             .ConfigureAwait(false);
-                        if (crlBytes is not null)
+                        if (crlBytes is not null && issuer is not null
+                            && EmbeddedRevocationEvidence.CoversCertificate(
+                                cert, issuer, [], [crlBytes], DateTimeOffset.UtcNow, ocsp))
                         {
                             crls.Add(crlBytes);
                             hasRevocationData = true;

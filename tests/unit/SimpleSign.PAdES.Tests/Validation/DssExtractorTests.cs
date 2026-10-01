@@ -13,6 +13,14 @@ namespace SimpleSign.PAdES.Tests.Validation;
 [Trait("Category", "Unit")]
 public sealed class DssExtractorTests
 {
+    [Fact]
+    public void LastIndexOfBytes_ObjectNumberSuffix_IsIgnored()
+    {
+        ReadOnlySpan<byte> pdf = "6 0 obj\n<< /Type /DSS >>\nendobj\n16 0 obj\n<< /Type /Annot >>\nendobj"u8;
+
+        DssExtractor.LastIndexOfBytes(pdf, "6 0 obj"u8).ShouldBe(0);
+    }
+
     // ── IndexOfBytes / IndexOfBytesFrom ─────────────────────────────────────
 
     [Fact(DisplayName = "IndexOfBytes finds first occurrence")]

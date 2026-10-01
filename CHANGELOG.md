@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Improved
 
+- **PAdES metadata replacement** — replacing a `SignatureMetadata` object now clears optional values omitted by the replacement instead of retaining them from an earlier builder.
+- **Baseline level read-back and LTV evidence** — PAdES, CAdES, and XAdES signing results now verify the completed artifact before reporting timestamp, long-term, or archive levels. Embedded CRLs must be signed by the matching issuer and current; OCSP responses must have a verified and issuer-authorized responder, a matching certificate ID, and a usable validity interval. B-LT checks require coverage for each embedded non-root certificate and timestamp certificate. Trust of certificate paths remains a separate validation decision.
+- **DSS lookup across PDF revisions** — object lookup now distinguishes object `6` from `16` when an archive timestamp appends new PDF objects. Issuer-free OCSP calls now fail closed; use `CheckOcspWithChainAsync` or supply an issuer to `FetchOcspResponseAsync`.
 - **PAdES validation network timeout** — `ValidationOptions.NetworkTimeout` now bounds AIA, OCSP, CRL, and platform certificate-chain URL retrieval, preventing unreachable endpoints from stalling validation and CI runs.
 - **Indeterminate revocation status** — incomplete revocation checks no longer allow `SignatureValidationResult.IsValid` to be true; CLI validation reports unknown status explicitly, and JSON uses `revoked: null` when status was not established.
 - **Deterministic timestamp interoperability tests** — PAdES, XAdES, LTA, and document-timestamp interop tests now use the in-process RFC 3161 test authority instead of a public TSA endpoint in the regular CI matrix; a live TSA check remains opt-in through `TEST_TSA_URL`.

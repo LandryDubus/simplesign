@@ -313,7 +313,7 @@ public sealed class XadesSignerTests
     }
 
     [Fact]
-    public async Task Validate_LtvDataPresent_ReturnsValid()
+    public async Task Validate_DummyLtvData_IsNotValid()
     {
         string xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?><doc>ltv test</doc>";
         byte[] xmlBytes = System.Text.Encoding.UTF8.GetBytes(xml);
@@ -374,7 +374,7 @@ public sealed class XadesSignerTests
 
         string diag = "Errors: " + string.Join("; ", result.Errors) +
                        " | Warnings: " + string.Join("; ", result.Warnings);
-        result.IsLtvDataValid.ShouldBe(true, diag);
+        result.IsLtvDataValid.ShouldBe(false, diag);
         result.DetectedLevel.ShouldBe(XadesLevel.LongTerm);
     }
 
@@ -603,7 +603,7 @@ public sealed class XadesSignerTests
     }
 
     [Fact]
-    public async Task SignThenValidate_LongTerm_ReturnsLtvValid()
+    public async Task SignThenValidate_DummyLtvData_IsNotValid()
     {
         string xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?><doc>b-lt test</doc>";
         byte[] xmlBytes = System.Text.Encoding.UTF8.GetBytes(xml);
@@ -661,7 +661,7 @@ public sealed class XadesSignerTests
 
         string diag = "Errors: " + string.Join("; ", result.Errors) +
                        " | Warnings: " + string.Join("; ", result.Warnings);
-        result.IsLtvDataValid.ShouldBe(true, diag);
+        result.IsLtvDataValid.ShouldBe(false, diag);
         result.DetectedLevel.ShouldBe(XadesLevel.LongTerm);
     }
 

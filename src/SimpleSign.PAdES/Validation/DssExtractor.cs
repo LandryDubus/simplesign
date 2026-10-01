@@ -255,7 +255,8 @@ internal static partial class DssExtractor
     {
         for (int i = haystack.Length - needle.Length; i >= 0; i--)
         {
-            if (haystack[i..].StartsWith(needle))
+            if (haystack[i..].StartsWith(needle)
+                && (i == 0 || haystack[i - 1] is < (byte)'0' or > (byte)'9'))
             {
                 return i;
             }

@@ -3,6 +3,7 @@ using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using Shouldly;
 using SimpleSign.Core.Crypto;
+using SimpleSign.Core.Extensions;
 using SimpleSign.Core.Signing;
 using SimpleSign.Core.Validation;
 using SimpleSign.PAdES.Validation;
@@ -128,6 +129,23 @@ public sealed class SignerBuilderEdgeCaseTests
         string actualValue = Encoding.Latin1.GetString(array);
         actualValue.ShouldContain("/Reason");
         actualValue.ShouldContain("/Location");
+    }
+
+    [Fact]
+    public async Task WithMetadata_ReplacingObject_ClearsPreviousOptionalFields()
+    {
+        using X509Certificate2 cert = CreateRsaCert();
+        byte[] pdfBytes = TestPdfFactory.CreateMinimalPdf();
+        byte[] signed = await PadesSigner.Document(pdfBytes)
+            .WithCertificate(cert)
+            .WithMetadata(new SignatureMetadata { SignerName = "Previous signer", Reason = "Previous reason" })
+            .WithMetadata(new SignatureMetadata { SignerName = "Updated signer" })
+            .SignAsync();
+
+        string pdf = Encoding.Latin1.GetString(signed);
+        pdf.ShouldContain("Updated signer");
+        pdf.ShouldNotContain("Previous signer");
+        pdf.ShouldNotContain("Previous reason");
     }
 
     [Fact(DisplayName = "WithExternalSigner with delegate that throws exception propagates the error")]

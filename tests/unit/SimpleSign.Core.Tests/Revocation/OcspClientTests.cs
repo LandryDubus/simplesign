@@ -160,24 +160,22 @@ public sealed class OcspClientTests
         result.ShouldBeNull();
     }
 
-    [Fact(DisplayName = "OCSP response with 'good' status returns true")]
-    public void ParseOcspResponse_GoodStatus_ReturnsTrue()
+    [Fact(DisplayName = "Unsigned OCSP response with 'good' status is rejected")]
+    public void ParseOcspResponse_UnsignedGoodStatus_IsRejected()
     {
         byte[] response = BuildMinimalOcspResponse(responseStatus: 0, certStatusTag: 0);
 
-        bool result = OcspClient.ParseOcspResponse(response, SelfSignedCert);
-
-        result.ShouldBeTrue();
+        Should.Throw<InvalidOperationException>(() => OcspClient.ParseOcspResponse(response, SelfSignedCert))
+            .Message.ShouldContain("responder certificate");
     }
 
-    [Fact(DisplayName = "OCSP response with 'revoked' status returns false")]
-    public void ParseOcspResponse_RevokedStatus_ReturnsFalse()
+    [Fact(DisplayName = "Unsigned OCSP response with 'revoked' status is rejected")]
+    public void ParseOcspResponse_UnsignedRevokedStatus_IsRejected()
     {
         byte[] response = BuildMinimalOcspResponse(responseStatus: 0, certStatusTag: 1);
 
-        bool result = OcspClient.ParseOcspResponse(response, SelfSignedCert);
-
-        result.ShouldBeFalse();
+        Should.Throw<InvalidOperationException>(() => OcspClient.ParseOcspResponse(response, SelfSignedCert))
+            .Message.ShouldContain("responder certificate");
     }
 
     [Fact(DisplayName = "Non-successful OCSP response throws InvalidOperationException")]
@@ -313,16 +311,16 @@ public sealed class OcspClientTests
 
     #region Instance method tests
 
-    [Fact(DisplayName = "OCSP server returns 'good' via HTTP returns true")]
-    public async Task CheckOcspAsync_ServerReturnsGood_ReturnsTrue()
+    [Fact(DisplayName = "OCSP without an issuer certificate is rejected")]
+    public async Task CheckOcspAsync_WithoutIssuer_Throws()
     {
         byte[] goodResponse = BuildMinimalOcspResponse(responseStatus: 0, certStatusTag: 0);
         using var httpClient = MockHttpHandler.ForPostBytes(goodResponse);
         var client = new OcspClient(httpClient);
 
-        bool result = await client.CheckOcspAsync(SelfSignedCert, "http://ocsp.test/", CancellationToken.None);
-
-        result.ShouldBeTrue();
+        var error = await Should.ThrowAsync<InvalidOperationException>(() =>
+            client.CheckOcspAsync(SelfSignedCert, "http://ocsp.test/", CancellationToken.None));
+        error.Message.ShouldContain("issuer");
     }
 
     [Fact(DisplayName = "OCSP server returns 500 throws HttpRequestException")]
@@ -332,7 +330,8 @@ public sealed class OcspClientTests
         using var httpClient = MockHttpHandler.ForPostBytes(empty, System.Net.HttpStatusCode.InternalServerError);
         var client = new OcspClient(httpClient);
 
-        Func<Task> act = () => client.CheckOcspAsync(SelfSignedCert, "http://ocsp.test/", CancellationToken.None);
+        Func<Task> act = async () => await client.FetchOcspResponseAsync(
+            SelfSignedCert, SelfSignedCert, "http://ocsp.test/", CancellationToken.None);
 
         await Should.ThrowAsync<HttpRequestException>(act);
     }

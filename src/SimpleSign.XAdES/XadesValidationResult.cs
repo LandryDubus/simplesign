@@ -17,7 +17,7 @@ public sealed class XadesValidationResult
     /// <summary>The SignatureTimeStamp (if present) is valid.</summary>
     public bool? HasValidSignatureTimeStamp { get; init; }
 
-    /// <summary>The LTV data (CertificateValues + RevocationValues) is valid.</summary>
+    /// <summary>Embedded revocation evidence covers the non-root certificates; this does not establish path trust.</summary>
     public bool? IsLtvDataValid { get; init; }
 
     /// <summary>The ArchiveTimeStamp (if present) is valid.</summary>
@@ -29,7 +29,7 @@ public sealed class XadesValidationResult
     /// <summary>Signing time from SignedProperties.</summary>
     public DateTimeOffset? SigningTime { get; init; }
 
-    /// <summary>Detected XAdES conformance level.</summary>
+    /// <summary>Level detected from XML elements, regardless of whether their validation checks pass.</summary>
     public XadesLevel DetectedLevel { get; init; }
 
     /// <summary>Errors found during validation.</summary>

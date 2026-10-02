@@ -11,6 +11,8 @@ using SimpleSign.CAdES;
 using SimpleSign.Core.Constants;
 using SimpleSign.Core.Crypto;
 using SimpleSign.Core.Signing;
+using SimpleSign.Core.Revocation;
+using SimpleSign.Core.Validation;
 using SimpleSign.XAdES.Constants;
 
 namespace SimpleSign.XAdES;
@@ -440,11 +442,43 @@ internal static class XadesSignatureBuilder
             return ContainsAll(certificates, expectedEvidence.CertificateRawData) &&
                 ContainsAll(ocspResponses, expectedEvidence.OcspResponses) &&
                 ContainsAll(crls, expectedEvidence.Crls) &&
-                (expectedEvidence.OcspResponses.Count > 0 || expectedEvidence.Crls.Count > 0);
+                (expectedEvidence.OcspResponses.Count > 0 || expectedEvidence.Crls.Count > 0) &&
+                HasAuthenticatedEvidence(certificates, ocspResponses, crls);
         }
-        catch (Exception ex) when (ex is FormatException or XmlException)
+        catch (Exception ex) when (ex is FormatException or XmlException or CryptographicException
+            or AsnContentException or InvalidDataException)
         {
             return false;
+        }
+    }
+
+    private static bool HasAuthenticatedEvidence(
+        IReadOnlyList<byte[]> certificateBytes,
+        IReadOnlyList<byte[]> ocspResponses,
+        IReadOnlyList<byte[]> crls)
+    {
+        var certificates = new List<X509Certificate2>();
+        try
+        {
+            foreach (byte[] raw in certificateBytes)
+            {
+#if NET10_0_OR_GREATER
+                certificates.Add(X509CertificateLoader.LoadCertificate(raw));
+#else
+                certificates.Add(new X509Certificate2(raw));
+#endif
+            }
+
+            using var httpClient = new HttpClient();
+            return EmbeddedRevocationEvidence.CoversAll(
+                certificates, ocspResponses, crls, DateTimeOffset.UtcNow, new OcspClient(httpClient));
+        }
+        finally
+        {
+            foreach (var certificate in certificates)
+            {
+                certificate.Dispose();
+            }
         }
     }
 

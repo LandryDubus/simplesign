@@ -217,7 +217,7 @@ public sealed class CadesSignerBuilderTests : IDisposable
         byte[] leafCrl = _pki.BuildLeafCrl();
         byte[] intermediateCrl = _pki.BuildIntermediateCrl();
         var evidence = new LtvCollectionResult(
-            CertificateRawData: [_cert.RawData, _pki.Leaf.RawData, _pki.IntermediateCa.RawData],
+            CertificateRawData: [_cert.RawData, _pki.Leaf.RawData, _pki.IntermediateCa.RawData, _pki.RootCa.RawData],
             OcspResponses: [],
             Crls: [leafCrl, intermediateCrl],
             CertificateEvidence:

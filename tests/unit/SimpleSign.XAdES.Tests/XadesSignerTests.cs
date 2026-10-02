@@ -332,7 +332,7 @@ public sealed class XadesSignerTests
     }
 
     [Fact]
-    public async Task Validate_LtvDataPresent_ReturnsValid()
+    public async Task Validate_MalformedLtvData_ReturnsInvalid()
     {
         string xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?><doc>ltv test</doc>";
         byte[] xmlBytes = System.Text.Encoding.UTF8.GetBytes(xml);
@@ -393,7 +393,7 @@ public sealed class XadesSignerTests
 
         string diag = "Errors: " + string.Join("; ", result.Errors) +
                        " | Warnings: " + string.Join("; ", result.Warnings);
-        result.IsLtvDataValid.ShouldBe(true, diag);
+        result.IsLtvDataValid.ShouldBe(false, diag);
         result.DetectedLevel.ShouldBe(AdesBaselineLevel.LongTerm);
     }
 
@@ -613,7 +613,7 @@ public sealed class XadesSignerTests
     }
 
     [Fact]
-    public async Task SignThenValidate_LongTerm_ReturnsLtvValid()
+    public async Task SignThenValidate_MalformedLongTermEvidence_ReturnsLtvInvalid()
     {
         string xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?><doc>b-lt test</doc>";
         byte[] xmlBytes = System.Text.Encoding.UTF8.GetBytes(xml);
@@ -671,7 +671,7 @@ public sealed class XadesSignerTests
 
         string diag = "Errors: " + string.Join("; ", result.Errors) +
                        " | Warnings: " + string.Join("; ", result.Warnings);
-        result.IsLtvDataValid.ShouldBe(true, diag);
+        result.IsLtvDataValid.ShouldBe(false, diag);
         result.DetectedLevel.ShouldBe(AdesBaselineLevel.LongTerm);
     }
 
@@ -905,17 +905,19 @@ public sealed class XadesSignerTests
     [Fact]
     public async Task HasLtvData_RequiresEveryCollectedCertificateAndRevocationObject()
     {
+        using var pki = new SyntheticPki();
         byte[] signed = await XadesSigner.Document(System.Text.Encoding.UTF8.GetBytes("<doc>ltv inspection</doc>"))
             .WithCertificate(s_cert)
             .SignAsync();
         var evidence = new LtvCollectionResult(
-            CertificateRawData: [[0x30, 0x01, 0x01], [0x30, 0x01, 0x02]],
-            OcspResponses: [[0x30, 0x01, 0x03]],
-            Crls: [[0x30, 0x01, 0x04]],
+            CertificateRawData: [s_cert.RawData, pki.Leaf.RawData, pki.IntermediateCa.RawData, pki.RootCa.RawData],
+            OcspResponses: [],
+            Crls: [pki.BuildLeafCrl(), pki.BuildIntermediateCrl()],
             CertificateEvidence:
             [
-                new LtvCertificateEvidence("signer", true) { RevocationEvidenceKind = LtvRevocationEvidenceKind.Ocsp },
-                new LtvCertificateEvidence("tsa", true) { RevocationEvidenceKind = LtvRevocationEvidenceKind.Crl },
+                new LtvCertificateEvidence("signer", true) { RevocationEvidenceKind = LtvRevocationEvidenceKind.NotRequired },
+                new LtvCertificateEvidence("leaf", true) { RevocationEvidenceKind = LtvRevocationEvidenceKind.Crl },
+                new LtvCertificateEvidence("intermediate", true) { RevocationEvidenceKind = LtvRevocationEvidenceKind.Crl },
             ]);
         byte[] withLtv = XadesSignatureBuilder.EmbedLtvData(signed, evidence);
 

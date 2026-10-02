@@ -4,6 +4,7 @@ using Microsoft.Extensions.Logging;
 using SimpleSign.Core.Constants;
 using SimpleSign.Core.Crypto;
 using SimpleSign.Core.Extensions;
+using SimpleSign.Core.Revocation;
 using SimpleSign.Core.Validation;
 
 namespace SimpleSign.CAdES;
@@ -306,6 +307,35 @@ public sealed class CadesSignatureValidator : ICadesSignatureValidator
                 foreach (var tsaCertificate in tsaCertificates)
                 {
                     tsaCertificate.Dispose();
+                }
+            }
+
+            var certificates = new List<X509Certificate2>();
+            try
+            {
+                foreach (byte[] raw in material.Certificates)
+                {
+#if NET10_0_OR_GREATER
+                    certificates.Add(X509CertificateLoader.LoadCertificate(raw));
+#else
+                    certificates.Add(new X509Certificate2(raw));
+#endif
+                }
+
+                using var httpClient = new HttpClient();
+                if (!EmbeddedRevocationEvidence.CoversAll(
+                    certificates, material.OcspResponses, material.Crls,
+                    cmsData.SigningTime ?? DateTimeOffset.UtcNow, new OcspClient(httpClient)))
+                {
+                    warnings.Add("CAdES-B-LT: Embedded revocation evidence is not authenticated or does not cover the certificate paths.");
+                    return false;
+                }
+            }
+            finally
+            {
+                foreach (var certificate in certificates)
+                {
+                    certificate.Dispose();
                 }
             }
 

@@ -6,6 +6,8 @@ using SimpleSign.Core.Constants;
 using SimpleSign.Core.Crypto;
 using SimpleSign.Core.Http;
 using SimpleSign.Core.Signing;
+using SimpleSign.Core.Revocation;
+using SimpleSign.Core.Validation;
 
 namespace SimpleSign.CAdES;
 
@@ -464,7 +466,36 @@ public sealed class CadesSignerBuilder
         return embedded.HasRevocationSet &&
             ContainsAll(embedded.Certificates, expectedEvidence.CertificateRawData) &&
             ContainsAll(embedded.OcspResponses, expectedEvidence.OcspResponses) &&
-            ContainsAll(embedded.Crls, expectedEvidence.Crls);
+            ContainsAll(embedded.Crls, expectedEvidence.Crls) &&
+            HasAuthenticatedRevocationEvidence(embedded);
+    }
+
+    private static bool HasAuthenticatedRevocationEvidence(CadesValidationMaterial embedded)
+    {
+        var certificates = new List<X509Certificate2>();
+        try
+        {
+            foreach (byte[] raw in embedded.Certificates)
+            {
+#if NET10_0_OR_GREATER
+                certificates.Add(X509CertificateLoader.LoadCertificate(raw));
+#else
+                certificates.Add(new X509Certificate2(raw));
+#endif
+            }
+
+            using var httpClient = new HttpClient();
+            return EmbeddedRevocationEvidence.CoversAll(
+                certificates, embedded.OcspResponses, embedded.Crls,
+                DateTimeOffset.UtcNow, new OcspClient(httpClient));
+        }
+        finally
+        {
+            foreach (var certificate in certificates)
+            {
+                certificate.Dispose();
+            }
+        }
     }
 
     private static bool ContainsAll(IReadOnlyList<byte[]> embeddedValues, IReadOnlyList<byte[]> expectedValues)

@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- PAdES, CAdES, and XAdES B-LT evidence checks now require an embedded issuer and
+  applicable, signed OCSP or CRL evidence for required non-root certificates before
+  reporting long-term validation material. Revoked, expired, or mismatched evidence
+  cannot satisfy signing read-back; certificate-path trust remains a separate check.
 - CAdES-B-LT and B-LTA now embed collected certificates and CRLs in the root CMS
   `SignedData` sets and encode OCSP responses as RFC 5940 revocation choices. The
   final-artifact check reads those sets before reporting LTV coverage.

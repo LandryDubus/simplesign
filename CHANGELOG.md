@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Improved
+
+- XAdES documentation distinguishes structural `DetectedLevel` from checked
+  timestamp, LTV, and archive outcomes. Negative artifact tests cover properties
+  that are present but invalid without weakening base-signature checks.
+- Routine timestamped interop tests now share a signed offline TSA fixture using
+  CMS version 3 for TSTInfo, as required for independent parser compatibility; live
+  RFC 3161 checking is opt-in through `SIMPLESIGN_LIVE_TSA_URL` and `Category=LiveTsa`.
+- Validation timeout fixtures use a literal test IP so DNS resolution cannot
+  consume the timeout budget before requests reach the mock HTTP handler.
+
 ### Fixed
 
 - PAdES validation now applies `NetworkTimeout` to AIA, OCSP, CRL, and chain URL

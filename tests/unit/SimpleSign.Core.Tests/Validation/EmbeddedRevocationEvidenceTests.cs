@@ -8,6 +8,36 @@ namespace SimpleSign.Core.Tests.Validation;
 public sealed class EmbeddedRevocationEvidenceTests
 {
     [Fact]
+    public void CoversCertificate_RevokedCertificate_ReturnsFalse()
+    {
+        using var pki = new SyntheticPki();
+        using var httpClient = MockHttpHandler.Failing();
+
+        Assert.False(EmbeddedRevocationEvidence.CoversCertificate(
+            pki.Leaf, pki.IntermediateCa, [], [pki.BuildRevokedLeafCrl()],
+            DateTimeOffset.UtcNow, new OcspClient(httpClient)));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void CoversCertificate_GoodAndRevokedCrlInEitherOrder_ReturnsFalse(bool revokedFirst)
+    {
+        using var pki = new SyntheticPki();
+        using var httpClient = MockHttpHandler.Failing();
+        byte[] good = pki.BuildLeafCrl();
+        byte[] revoked = pki.BuildRevokedLeafCrl();
+        byte[][] crls = revokedFirst ? [revoked, good] : [good, revoked];
+        DateTimeOffset validationTime = DateTimeOffset.UtcNow;
+        Assert.True(CrlClient.IsSerialInCrl(pki.Leaf, revoked, pki.IntermediateCa, signingTime: validationTime));
+        Assert.False(CrlClient.IsSerialInCrl(pki.Leaf, good, pki.IntermediateCa, signingTime: validationTime));
+
+        Assert.False(EmbeddedRevocationEvidence.CoversCertificate(
+            pki.Leaf, pki.IntermediateCa, [], crls,
+            validationTime, new OcspClient(httpClient)));
+    }
+
+    [Fact]
     public void CoversAll_ValidCrlForEveryCertificate_ReturnsTrue()
     {
         using var pki = new SyntheticPki();

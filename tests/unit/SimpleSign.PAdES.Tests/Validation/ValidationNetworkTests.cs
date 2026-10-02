@@ -107,7 +107,9 @@ public sealed class ValidationNetworkTests
 
     private static X509Certificate2 CreateCertificate(string endpoint)
     {
-        const string url = "http://validation.test/evidence";
+        // A literal test IP keeps DNS resolution outside the timeout assertion.
+        // BlockingHandler intercepts the HTTP request; no connection is made.
+        const string url = "http://198.51.100.1/evidence";
         using var key = RSA.Create(2048);
         var request = new CertificateRequest("CN=Validation network test", key, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
         request.CertificateExtensions.Add(new X509KeyUsageExtension(X509KeyUsageFlags.DigitalSignature, false));

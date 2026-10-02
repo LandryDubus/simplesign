@@ -191,6 +191,11 @@ public sealed class TimestampClientTests
         byte[] data = [0x01, 0x02, 0x03];
         byte[] token = TimestampTestResponseBuilder.CreateTokenForData(data, HashAlgorithmName.SHA256);
 
+        var contentInfo = new AsnReader(token, AsnEncodingRules.DER).ReadSequence();
+        contentInfo.ReadObjectIdentifier().ShouldBe("1.2.840.113549.1.7.2");
+        var signedData = contentInfo.ReadSequence(new Asn1Tag(TagClass.ContextSpecific, 0, true)).ReadSequence();
+        signedData.ReadInteger().ShouldBe(new System.Numerics.BigInteger(3), "TSTInfo content requires CMS SignedData version 3");
+
         TimestampClient.ValidateTimestampToken(token, data, HashAlgorithmName.SHA256);
     }
 

@@ -176,7 +176,8 @@ public static class TimestampTestResponseBuilder
             using (writer.PushSequence(new Asn1Tag(TagClass.ContextSpecific, 0, true)))
             using (writer.PushSequence())
             {
-                writer.WriteInteger(1);
+                // RFC 5652 requires version 3 when eContentType is not id-data.
+                writer.WriteInteger(3);
                 using (writer.PushSetOf())
                 {
                     WriteAlgorithm(writer, hashOid);

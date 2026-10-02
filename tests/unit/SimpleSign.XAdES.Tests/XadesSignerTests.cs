@@ -293,6 +293,10 @@ public sealed class XadesSignerTests
         string diag = "Errors: " + string.Join("; ", result.Errors) +
                        " | Warnings: " + string.Join("; ", result.Warnings);
         result.HasValidSignatureTimeStamp.ShouldBe(false, diag);
+        result.DetectedLevel.ShouldBe(AdesBaselineLevel.Timestamped);
+        result.IsSignatureValid.ShouldBeTrue(diag);
+        result.IsIntegrityValid.ShouldBeTrue(diag);
+        result.IsTsaTrusted.ShouldBeNull(diag);
     }
 
     [Fact]
@@ -331,6 +335,10 @@ public sealed class XadesSignerTests
 
         string diag = "Warnings: " + string.Join("; ", result.Warnings);
         result.HasValidSignatureTimeStamp.ShouldBe(false, diag);
+        result.DetectedLevel.ShouldBe(AdesBaselineLevel.Timestamped);
+        result.IsSignatureValid.ShouldBeTrue(diag);
+        result.IsIntegrityValid.ShouldBeTrue(diag);
+        result.IsTsaTrusted.ShouldBeNull(diag);
     }
 
     [Fact]
@@ -397,6 +405,8 @@ public sealed class XadesSignerTests
                        " | Warnings: " + string.Join("; ", result.Warnings);
         result.IsLtvDataValid.ShouldBe(false, diag);
         result.DetectedLevel.ShouldBe(AdesBaselineLevel.LongTerm);
+        result.IsSignatureValid.ShouldBeTrue(diag);
+        result.IsIntegrityValid.ShouldBeTrue(diag);
     }
 
     private static byte[] EmbedMalformedTimestamp(byte[] signedXml)
@@ -794,6 +804,8 @@ public sealed class XadesSignerTests
                        " | Warnings: " + string.Join("; ", result.Warnings);
         result.HasValidArchiveTimeStamp.ShouldBe(false, diag);
         result.DetectedLevel.ShouldBe(AdesBaselineLevel.Archive);
+        result.IsSignatureValid.ShouldBeTrue(diag);
+        result.IsIntegrityValid.ShouldBeTrue(diag);
     }
 
     [Fact]

@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- PAdES validation now applies `NetworkTimeout` to AIA, OCSP, CRL, and chain URL
+  retrieval, and propagates caller cancellation through validation and batches.
+  Indeterminate revocation prevents overall validity; CLI output distinguishes
+  unknown and unchecked status, with `revoked: null` in JSON for both.
 - RFC 3161 tokens now require a matching TSA signer certificate, authenticated
   TSTInfo signed attributes, signing-certificate binding, and valid CMS signature
   before receipt or artifact validation accepts them. Timestamp integrity and TSA

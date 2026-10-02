@@ -252,6 +252,7 @@ public sealed class PadesSignerBuilder
 
     /// <summary>
     /// Configures generic signer metadata for the signature.
+    /// Replaces signer, reason, location, and contact field values; omitted values clear earlier metadata.
     /// Use this for country-agnostic signing with structured metadata.
     /// For Brazil-specific signing, use <c>WithAdvancedSignature</c> from SimpleSign.Brasil.
     /// </summary>

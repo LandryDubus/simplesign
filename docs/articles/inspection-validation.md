@@ -87,7 +87,7 @@ foreach (var r in results)
     Console.WriteLine($"  Integrity:  {r.IsIntegrityValid}");
     Console.WriteLine($"  Signature:  {r.IsSignatureValid}");
     Console.WriteLine($"  Chain:      {r.IsCertificateChainValid}");
-    Console.WriteLine($"  Revoked:    {!r.IsNotRevoked}");
+    Console.WriteLine($"  Revocation: {r.RevocationSource} (no revocation established: {r.IsNotRevoked})");
 
     if (r.HasValidTimestamp == true)
         Console.WriteLine($"  Timestamp:  {r.SigningTime}");
@@ -105,15 +105,28 @@ foreach (var r in results)
 | `IsIntegrityValid` | `bool` | Byte-range hash matches (no tampering) |
 | `IsSignatureValid` | `bool` | Cryptographic signature verifies |
 | `IsCertificateChainValid` | `bool` | Chain builds to a trusted root |
-| `IsNotRevoked` | `bool` | Certificate is not revoked |
+| `IsNotRevoked` | `bool` | No revocation established; consult `RevocationSource` for unknown or unchecked status |
 | `HasValidTimestamp` | `bool?` | RFC 3161 token signature, signed content, and imprint verify (null if no TS) |
 | `IsTsaTrusted` | `bool?` | TSA chain and timestamping-purpose policy pass (null if token absent, invalid, or unchecked) |
 | `IsDocumentTimestamp` | `bool` | True for archive/document timestamps |
 | `SignerName` | `string?` | Signer common name |
 | `SigningTime` | `DateTimeOffset?` | Signing time from timestamp or CMS |
-| `RevocationSource` | `enum` | CRL, OCSP, or None |
+| `RevocationSource` | `enum` | Embedded/online CRL or OCSP, `None` (unchecked), or `Indeterminate` (unknown) |
 | `Errors` | `IReadOnlyList<string>` | Validation errors |
-| `Warnings` | `IReadOnlyList<string>` | Non-blocking warnings |
+| `Warnings` | `IReadOnlyList<string>` | Diagnostic warnings; unknown revocation prevents overall validity |
+
+### Revocation and Network Policy
+
+When revocation is enabled, `Indeterminate` prevents `IsValid` from becoming true,
+even if integrity, signature, and chain checks pass. Disabling revocation keeps
+`RevocationSource.None` and permits validity under that configured policy. The CLI
+shows unknown and unchecked states explicitly; its JSON uses `revoked: null` for
+both, and a boolean only for a determined status.
+
+`ValidationOptions.NetworkTimeout` bounds each AIA download phase and each
+revocation check (OCSP and CRL together), and sets the chain URL retrieval timeout.
+Timeouts produce structured validation failures; caller cancellation propagates
+as `OperationCanceledException`, including during batch validation.
 
 ### Custom Trust Anchors
 

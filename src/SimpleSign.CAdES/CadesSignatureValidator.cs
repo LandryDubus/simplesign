@@ -23,7 +23,7 @@ public sealed class CadesValidationResult
     /// <summary>The timestamp (if present) is valid.</summary>
     public bool? HasValidTimestamp { get; init; }
 
-    /// <summary>The LTV data (CertificateValues + RevocationValues) is present and valid.</summary>
+    /// <summary>Root SignedData or legacy CAdES-XL certificate and revocation material is present.</summary>
     public bool? IsLtvDataValid { get; init; }
 
     /// <summary>The archive timestamp (if present) is valid.</summary>
@@ -147,7 +147,7 @@ public sealed class CadesSignatureValidator : ICadesSignatureValidator
             tsValid = _timestampValidator.Validate(cmsData, warnings, logger: _logger);
         }
 
-        // 7. LTV data validation (CertificateValues + RevocationValues)
+        // 7. LTV data validation (root SignedData certificate and revocation sets)
         bool? ltvValid = ValidateLtvData(cmsBytes, cmsData, warnings);
 
         // 8. Archive timestamp validation
@@ -271,64 +271,77 @@ public sealed class CadesSignatureValidator : ICadesSignatureValidator
 
     private static bool? ValidateLtvData(byte[] cmsBytes, CmsSignedData cmsData, List<string> warnings)
     {
-        if (cmsData.UnsignedAttributes is null || cmsData.UnsignedAttributes.Count == 0)
-        {
-            return null;
-        }
-
-        bool hasCertValues = cmsData.UnsignedAttributes.ContainsKey(Oids.CertValues);
-        bool hasRevocationValues = cmsData.UnsignedAttributes.ContainsKey(Oids.RevocationValues);
-
-        if (!hasCertValues && !hasRevocationValues)
-        {
-            return null;
-        }
-
-        if (!hasCertValues)
-        {
-            warnings.Add("CAdES-B-LT: Missing CertificateValues unsigned attribute.");
-            return false;
-        }
-
-        if (!hasRevocationValues)
-        {
-            warnings.Add("CAdES-B-LT: Missing RevocationValues — some revocation sources may be unavailable.");
-        }
-
-        // Validate that CertificateValues is structurally valid
         try
         {
-            var certValuesBytes = cmsData.UnsignedAttributes[Oids.CertValues];
-            if (certValuesBytes is null || certValuesBytes.Length == 0)
+            CadesValidationMaterial material = CadesValidationMaterial.Read(cmsBytes);
+            if (!material.HasRevocationSet)
             {
-                warnings.Add("CAdES-B-LT: CertificateValues attribute is empty.");
+                return ValidateLegacyLtvData(cmsData, warnings);
+            }
+            if (material.Certificates.Count == 0 ||
+                material.Crls.Count == 0 && material.OcspResponses.Count == 0)
+            {
+                warnings.Add("CAdES-B-LT: Root SignedData lacks certificates or revocation information.");
+                return false;
+            }
+            if (cmsData.SignerCertificate is null ||
+                !material.Certificates.Any(cert => cert.AsSpan().SequenceEqual(cmsData.SignerCertificate.RawData)))
+            {
+                warnings.Add("CAdES-B-LT: Root SignedData does not include the signer certificate.");
                 return false;
             }
 
-            bool hasSigner = false;
-            foreach (var certAttr in certValuesBytes)
+            var tsaCertificates = TsaCertificateExtractor.ExtractCertificates(cmsData.SignatureTimestampToken);
+            try
             {
-                if (certAttr is null || certAttr.Length == 0)
+                if (!tsaCertificates.All(tsa => material.Certificates.Any(cert =>
+                    cert.AsSpan().SequenceEqual(tsa.RawData))))
                 {
-                    continue;
+                    warnings.Add("CAdES-B-LT: Root SignedData does not include the signature timestamp certificates.");
+                    return false;
                 }
-                if (cmsData.SignerCertificate is not null &&
-                    certAttr.AsSpan().SequenceEqual(cmsData.SignerCertificate.RawData))
+            }
+            finally
+            {
+                foreach (var tsaCertificate in tsaCertificates)
                 {
-                    hasSigner = true;
+                    tsaCertificate.Dispose();
                 }
             }
 
-            if (!hasSigner && cmsData.SignerCertificate is not null)
-            {
-                warnings.Add("CAdES-B-LT: CertificateValues does not include signer certificate.");
-            }
+            return true;
         }
-        // S2221: intentional -- validation pipeline converts exceptions to error messages
+        // S2221: validation converts malformed external CMS into a structured result.
         catch (Exception ex)
         {
-            warnings.Add($"CAdES-B-LT: Failed to validate CertificateValues: {ex.Message}");
+            warnings.Add($"CAdES-B-LT: Failed to inspect root validation material: {ex.Message}");
             return false;
+        }
+    }
+
+    private static bool? ValidateLegacyLtvData(CmsSignedData cmsData, List<string> warnings)
+    {
+        if (cmsData.UnsignedAttributes is null ||
+            !cmsData.UnsignedAttributes.ContainsKey(Oids.CertValues) &&
+            !cmsData.UnsignedAttributes.ContainsKey(Oids.RevocationValues))
+        {
+            return null;
+        }
+
+        if (!cmsData.UnsignedAttributes.TryGetValue(Oids.CertValues, out byte[][]? certificateValues) ||
+            !cmsData.UnsignedAttributes.TryGetValue(Oids.RevocationValues, out byte[][]? revocationValues) ||
+            certificateValues.Length == 0 || revocationValues.Length == 0)
+        {
+            warnings.Add("CAdES-XL: CertificateValues or RevocationValues is missing.");
+            return false;
+        }
+
+        bool hasSigner = certificateValues.Any(value =>
+            cmsData.SignerCertificate is not null &&
+            value.AsSpan().SequenceEqual(cmsData.SignerCertificate.RawData));
+        if (!hasSigner)
+        {
+            warnings.Add("CAdES-XL: CertificateValues does not include the signer certificate.");
         }
 
         return true;

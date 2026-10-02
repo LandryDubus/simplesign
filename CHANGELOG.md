@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- CAdES-B-LT and B-LTA now embed collected certificates and CRLs in the root CMS
+  `SignedData` sets and encode OCSP responses as RFC 5940 revocation choices. The
+  final-artifact check reads those sets before reporting LTV coverage.
+- CMS encapsulated content uses the required explicit wrapper, and added unsigned
+  attributes use DER `SET OF` ordering. Validation still recognizes legacy CAdES-XL
+  certificate and revocation attributes in existing signatures.
+
 ## [0.9.0] - 2026-09-30
 
 ### Security

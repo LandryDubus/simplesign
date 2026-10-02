@@ -1,4 +1,3 @@
-using System.Formats.Asn1;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using Microsoft.Extensions.Logging;
@@ -442,7 +441,7 @@ public sealed class CadesSignerBuilder
                 parsed.SignatureTimestampToken is not null &&
                 CryptographicOperations.FixedTimeEquals(parsed.SignatureTimestampToken, expectedTimestampToken);
             bool hasLtvMaterial = expectedLtvEvidence is not null &&
-                HasExpectedLtvEvidence(parsed, expectedLtvEvidence);
+                HasExpectedLtvEvidence(cms, expectedLtvEvidence);
             bool hasArchiveTimestamp = expectedArchiveTimestamp &&
                 CadesArchiveTimestampV3.Validate(cms, signedData, []);
             return (hasTimestamp, hasLtvMaterial, hasArchiveTimestamp);
@@ -453,85 +452,19 @@ public sealed class CadesSignerBuilder
         }
     }
 
-    internal static bool HasExpectedLtvEvidence(CmsSignedData cms, LtvCollectionResult expectedEvidence)
+    internal static bool HasExpectedLtvEvidence(byte[] cms, LtvCollectionResult expectedEvidence)
     {
-        if (!expectedEvidence.HasCompleteCoverage || cms.UnsignedAttributes is null ||
-            !cms.UnsignedAttributes.TryGetValue(Oids.CertValues, out byte[][]? certificateValues) ||
-            !cms.UnsignedAttributes.TryGetValue(Oids.RevocationValues, out byte[][]? revocationValues))
+        if (!expectedEvidence.HasCompleteCoverage ||
+            (expectedEvidence.OcspResponses.Count == 0 && expectedEvidence.Crls.Count == 0))
         {
             return false;
         }
 
-        var embeddedCertificates = new List<byte[]>();
-        try
-        {
-            foreach (byte[] certificateValue in certificateValues)
-            {
-                var reader = new AsnReader(certificateValue, AsnEncodingRules.BER);
-                var certificates = reader.ReadSequence();
-                while (certificates.HasData)
-                {
-                    embeddedCertificates.Add(certificates.ReadEncodedValue().ToArray());
-                }
-            }
-        }
-        catch (AsnContentException)
-        {
-            return false;
-        }
-
-        foreach (byte[] expectedCertificate in expectedEvidence.CertificateRawData)
-        {
-            if (!embeddedCertificates.Any(value => value.AsSpan().SequenceEqual(expectedCertificate)))
-            {
-                return false;
-            }
-        }
-
-        var embeddedOcspResponses = new List<byte[]>();
-        var embeddedCrls = new List<byte[]>();
-        try
-        {
-            foreach (byte[] revocationValue in revocationValues)
-            {
-                var reader = new AsnReader(revocationValue, AsnEncodingRules.BER);
-                var values = reader.ReadSequence();
-                while (values.HasData)
-                {
-                    Asn1Tag tag = values.PeekTag();
-                    if (tag == new Asn1Tag(TagClass.ContextSpecific, 0, isConstructed: true))
-                    {
-                        ReadEncodedValues(values.ReadSequence(tag), embeddedCrls);
-                    }
-                    else if (tag == new Asn1Tag(TagClass.ContextSpecific, 1, isConstructed: true))
-                    {
-                        ReadEncodedValues(values.ReadSequence(tag), embeddedOcspResponses);
-                    }
-                    else
-                    {
-                        return false;
-                    }
-                }
-
-                reader.ThrowIfNotEmpty();
-            }
-        }
-        catch (AsnContentException)
-        {
-            return false;
-        }
-
-        return ContainsAll(embeddedOcspResponses, expectedEvidence.OcspResponses) &&
-            ContainsAll(embeddedCrls, expectedEvidence.Crls) &&
-            (expectedEvidence.OcspResponses.Count > 0 || expectedEvidence.Crls.Count > 0);
-    }
-
-    private static void ReadEncodedValues(AsnReader reader, ICollection<byte[]> destination)
-    {
-        while (reader.HasData)
-        {
-            destination.Add(reader.ReadEncodedValue().ToArray());
-        }
+        CadesValidationMaterial embedded = CadesValidationMaterial.Read(cms);
+        return embedded.HasRevocationSet &&
+            ContainsAll(embedded.Certificates, expectedEvidence.CertificateRawData) &&
+            ContainsAll(embedded.OcspResponses, expectedEvidence.OcspResponses) &&
+            ContainsAll(embedded.Crls, expectedEvidence.Crls);
     }
 
     private static bool ContainsAll(IReadOnlyList<byte[]> embeddedValues, IReadOnlyList<byte[]> expectedValues)
@@ -762,22 +695,8 @@ public sealed class CadesSignerBuilder
             return null;
         }
 
-        var unsignedAttrs = new List<CmsAttribute>();
-        if (ltvData.CertificateRawData.Count > 0)
-        {
-            unsignedAttrs.Add(CmsAttribute.CertValues([.. ltvData.CertificateRawData]));
-        }
-
-        if (ltvData.OcspResponses.Count > 0 || ltvData.Crls.Count > 0)
-        {
-            unsignedAttrs.Add(CmsAttribute.RevocationValues(
-                ltvData.OcspResponses.Count > 0 ? [.. ltvData.OcspResponses] : null,
-                ltvData.Crls.Count > 0 ? [.. ltvData.Crls] : null));
-        }
-
-        byte[] embeddedCms = unsignedAttrs.Count > 0
-            ? CmsSignatureBuilder.AddUnsignedAttributes(cms, unsignedAttrs)
-            : cms;
+        byte[] embeddedCms = CmsSignatureBuilder.AddValidationMaterial(
+            cms, ltvData.CertificateRawData, ltvData.Crls, ltvData.OcspResponses);
         return new CadesLtvEmbeddingResult(embeddedCms, ltvData);
     }
 

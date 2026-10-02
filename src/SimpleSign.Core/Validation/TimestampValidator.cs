@@ -14,6 +14,27 @@ namespace SimpleSign.Core.Validation;
 public static class TimestampValidator
 {
 
+    /// <summary>Verifies the CMS signature on a RFC 3161 token, independently of its message imprint.</summary>
+    /// <param name="timestampToken">DER-encoded RFC 3161 timestamp token.</param>
+    /// <returns>Whether the token has a verifiable TSA signature.</returns>
+    public static bool VerifyTokenSignature(byte[] timestampToken)
+    {
+        ArgumentNullException.ThrowIfNull(timestampToken);
+        try
+        {
+            if (ExtractTstInfo(timestampToken) is null)
+            {
+                return false;
+            }
+
+            return VerifyTsaSignature(ExtractTsaCertificatesAndSigner(timestampToken), []);
+        }
+        catch (Exception ex) when (ex is AsnContentException or CryptographicException or InvalidOperationException)
+        {
+            return false;
+        }
+    }
+
     /// <summary>
     /// Delegate for certificate chain validation, allowing the caller to supply its own implementation.
     /// </summary>

@@ -352,8 +352,14 @@ public sealed class CadesSignerBuilder
             }
         }
 
-        (bool artifactHasTimestamp, bool artifactHasLtvMaterial, bool artifactHasArchiveTimestamp) = InspectProducedArtifact(
+        (bool baseSignatureValid, bool artifactHasTimestamp, bool artifactHasLtvMaterial, bool artifactHasArchiveTimestamp) = InspectProducedArtifact(
             cms, _data, timestampTokenBytes, ltvEmbedding?.Evidence, hasArchiveTimestamp);
+        if (!baseSignatureValid)
+        {
+            throw new SigningException(
+                "The completed CMS signature or signed content failed read-back verification.",
+                SigningErrorReason.Unspecified);
+        }
         if (timestampTokenBytes is not null && !artifactHasTimestamp)
         {
             HandleArtifactInspectionFailure(
@@ -429,7 +435,7 @@ public sealed class CadesSignerBuilder
         AddDowngradeWarnings(warnings, code, message);
     }
 
-    private static (bool HasTimestamp, bool HasLtvMaterial, bool HasArchiveTimestamp) InspectProducedArtifact(
+    private static (bool BaseSignatureValid, bool HasTimestamp, bool HasLtvMaterial, bool HasArchiveTimestamp) InspectProducedArtifact(
         byte[] cms,
         byte[] signedData,
         byte[]? expectedTimestampToken,
@@ -439,18 +445,25 @@ public sealed class CadesSignerBuilder
         try
         {
             CmsSignedData parsed = CmsParser.Parse(cms);
+            CadesValidationResult validation = new CadesSignatureValidator(
+                new ValidationOptions { CheckRevocation = false, TrustSystemRoots = false })
+                .Validate(cms, signedData);
+            bool baseValid = validation.IsSignatureValid && validation.IsIntegrityValid;
             bool hasTimestamp = expectedTimestampToken is not null &&
+                validation.HasValidTimestamp == true &&
                 parsed.SignatureTimestampToken is not null &&
                 CryptographicOperations.FixedTimeEquals(parsed.SignatureTimestampToken, expectedTimestampToken);
-            bool hasLtvMaterial = expectedLtvEvidence is not null &&
+            bool hasLtvMaterial = hasTimestamp && expectedLtvEvidence is not null &&
+                validation.IsLtvDataValid == true &&
                 HasExpectedLtvEvidence(cms, expectedLtvEvidence);
-            bool hasArchiveTimestamp = expectedArchiveTimestamp &&
+            bool hasArchiveTimestamp = hasLtvMaterial && expectedArchiveTimestamp &&
+                validation.HasValidArchiveTimestamp == true &&
                 CadesArchiveTimestampV3.Validate(cms, signedData, []);
-            return (hasTimestamp, hasLtvMaterial, hasArchiveTimestamp);
+            return (baseValid, hasTimestamp, hasLtvMaterial, hasArchiveTimestamp);
         }
         catch (Exception)
         {
-            return (false, false, false);
+            return (false, false, false, false);
         }
     }
 

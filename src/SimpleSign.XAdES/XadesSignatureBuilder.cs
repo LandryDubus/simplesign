@@ -341,6 +341,22 @@ internal static class XadesSignatureBuilder
     internal static byte[] CreateSignatureTimeStampInput(byte[] signedXml) =>
         CreateSignatureTimeStampInput(signedXml, signatureId: null);
 
+    internal static string GetLastSignatureId(byte[] signedXml)
+    {
+        var doc = new XmlDocument { PreserveWhitespace = true };
+        doc.Load(new MemoryStream(signedXml));
+        var ns = CreateNamespaceManager(doc);
+        var signatures = doc.SelectNodes("//ds:Signature", ns);
+        if (signatures is null || signatures.Count == 0 ||
+            signatures[signatures.Count - 1] is not XmlElement signature ||
+            string.IsNullOrEmpty(signature.GetAttribute("Id")))
+        {
+            throw new InvalidOperationException("The newly created signature has no XMLDSig Id.");
+        }
+
+        return signature.GetAttribute("Id");
+    }
+
     /// <summary>Builds the signature-timestamp input for the identified XMLDSig signature.</summary>
     internal static byte[] CreateSignatureTimeStampInput(byte[] signedXml, string? signatureId)
     {
@@ -514,7 +530,8 @@ internal static class XadesSignatureBuilder
         return true;
     }
 
-    internal static byte[] EmbedLtvData(byte[] signedXml, LtvCollectionResult ltvData)
+    internal static byte[] EmbedLtvData(byte[] signedXml, LtvCollectionResult ltvData,
+        string? signatureId = null)
     {
         var doc = new XmlDocument { PreserveWhitespace = true };
         doc.Load(new MemoryStream(signedXml));
@@ -522,10 +539,7 @@ internal static class XadesSignatureBuilder
         ns.AddNamespace("ds", XmlDSigUrls.DsNamespace);
         ns.AddNamespace("xades", XadesUris.XadesNamespace);
 
-        if (doc.SelectSingleNode("//ds:Signature", ns) is not XmlElement signature)
-        {
-            throw new InvalidOperationException("Signature element not found.");
-        }
+        XmlElement signature = ResolveSignature(doc, ns, signatureId);
 
         var unsignedProps = EnsureUnsignedSignatureProperties(doc, signature, ns);
         string idSuffix = Guid.NewGuid().ToString("N")[..8];
@@ -714,6 +728,12 @@ internal static class XadesSignatureBuilder
             if (token is null)
             {
                 warnings.Add("XAdES-B-LTA: ArchiveTimeStamp does not contain an EncapsulatedTimeStamp.");
+                return false;
+            }
+
+            if (!TimestampValidator.VerifyTokenSignature(token))
+            {
+                warnings.Add("XAdES-B-LTA: ArchiveTimeStamp token CMS signature is invalid.");
                 return false;
             }
 

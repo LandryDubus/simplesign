@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- PAdES, CAdES, and XAdES signing now revalidate the completed signature and
+  content integrity before returning a result. Reported timestamp, LTV, and
+  archive levels require checked evidence on the newly added signature, while
+  certificate trust remains independent of artifact integrity.
+- CAdES and XAdES archive timestamps now require a valid TSA CMS signature;
+  PAdES DSS lookup distinguishes complete object numbers across PDF revisions.
 - PAdES, CAdES, and XAdES B-LT evidence checks now require an embedded issuer and
   applicable, signed OCSP or CRL evidence for required non-root certificates before
   reporting long-term validation material. Revoked, expired, or mismatched evidence

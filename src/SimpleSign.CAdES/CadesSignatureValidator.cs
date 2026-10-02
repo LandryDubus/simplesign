@@ -21,8 +21,11 @@ public sealed class CadesValidationResult
     /// <summary>The certificate chain is valid and trusted.</summary>
     public bool IsCertificateChainValid { get; init; }
 
-    /// <summary>The timestamp (if present) is valid.</summary>
+    /// <summary>The timestamp token's cryptographic integrity and message imprint are valid; independent of TSA trust.</summary>
     public bool? HasValidTimestamp { get; init; }
+
+    /// <summary>Whether the TSA chain is trusted; null when the token is absent, invalid, or no trust policy was evaluated.</summary>
+    public bool? IsTsaTrusted { get; init; }
 
     /// <summary>Root SignedData or legacy CAdES-XL certificate and revocation material is present.</summary>
     public bool? IsLtvDataValid { get; init; }
@@ -143,9 +146,24 @@ public sealed class CadesSignatureValidator : ICadesSignatureValidator
 
         // 6. Timestamp validation
         bool? tsValid = null;
+        bool? tsaTrusted = null;
         if (cmsData.SignatureTimestampToken is not null)
         {
-            tsValid = _timestampValidator.Validate(cmsData, warnings, logger: _logger);
+            TimestampValidator.CertificateChainValidatorDelegate? tsaPolicy = trustAnchors is null ? null :
+                (certificate, certificates, tsaErrors, tsaWarnings) =>
+                {
+                    if (certificate is null)
+                    {
+                        tsaErrors.Add("TSA signer certificate is missing.");
+                        return false;
+                    }
+
+                    return ValidateChain(certificate, tsaErrors, tsaWarnings, trustAnchors, certificates);
+                };
+            TimestampTokenValidationResult timestamp = _timestampValidator.ValidateWithTrust(
+                cmsData, warnings, tsaPolicy, _logger);
+            tsValid = timestamp.IsIntegrityValid;
+            tsaTrusted = timestamp.IsTsaTrusted;
         }
 
         // 7. LTV data validation (root SignedData certificate and revocation sets)
@@ -164,6 +182,7 @@ public sealed class CadesSignatureValidator : ICadesSignatureValidator
             IsIntegrityValid = integrityValid,
             IsCertificateChainValid = chainValid,
             HasValidTimestamp = tsValid,
+            IsTsaTrusted = tsaTrusted,
             IsLtvDataValid = ltvValid,
             HasValidArchiveTimestamp = archiveTsValid,
             SignerCertificate = cmsData.SignerCertificate,
@@ -199,7 +218,8 @@ public sealed class CadesSignatureValidator : ICadesSignatureValidator
         X509Certificate2 signerCert,
         List<string> errors,
         List<string> warnings,
-        IEnumerable<X509Certificate2>? trustAnchors)
+        IEnumerable<X509Certificate2>? trustAnchors,
+        IReadOnlyList<X509Certificate2>? additionalCertificates = null)
     {
         try
         {
@@ -209,6 +229,13 @@ public sealed class CadesSignatureValidator : ICadesSignatureValidator
 
             using var chain = new X509Chain();
             CryptoUtility.ConfigureChainPolicy(chain, _options.CheckRevocation);
+            if (additionalCertificates is not null)
+            {
+                foreach (X509Certificate2 certificate in additionalCertificates)
+                {
+                    chain.ChainPolicy.ExtraStore.Add(certificate);
+                }
+            }
 
             if (hasCustomRoots)
             {

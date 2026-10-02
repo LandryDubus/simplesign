@@ -25,8 +25,11 @@ public sealed class SignatureValidationResult
     /// <summary>How the revocation status was determined.</summary>
     public RevocationSource RevocationSource { get; init; }
 
-    /// <summary>The timestamp (if present) is valid.</summary>
+    /// <summary>The signature timestamp's cryptographic integrity and message imprint are valid, independent of TSA trust.</summary>
     public bool? HasValidTimestamp { get; init; }
+
+    /// <summary>Whether the TSA chain is trusted; null when the token is absent, invalid, or no trust policy was evaluated.</summary>
+    public bool? IsTsaTrusted { get; init; }
 
     /// <summary>Signing date/time (from SigningTime or from the timestamp).</summary>
     public DateTimeOffset? SigningTime { get; init; }

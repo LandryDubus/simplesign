@@ -106,7 +106,8 @@ foreach (var r in results)
 | `IsSignatureValid` | `bool` | Cryptographic signature verifies |
 | `IsCertificateChainValid` | `bool` | Chain builds to a trusted root |
 | `IsNotRevoked` | `bool` | Certificate is not revoked |
-| `HasValidTimestamp` | `bool?` | RFC 3161 timestamp is valid (null if no TS) |
+| `HasValidTimestamp` | `bool?` | RFC 3161 token signature, signed content, and imprint verify (null if no TS) |
+| `IsTsaTrusted` | `bool?` | TSA chain and timestamping-purpose policy pass (null if token absent, invalid, or unchecked) |
 | `IsDocumentTimestamp` | `bool` | True for archive/document timestamps |
 | `SignerName` | `string?` | Signer common name |
 | `SigningTime` | `DateTimeOffset?` | Signing time from timestamp or CMS |

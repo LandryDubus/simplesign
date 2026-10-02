@@ -246,10 +246,13 @@ public sealed class XadesSignatureValidator : IXadesSignatureValidator
 
         // Timestamp validation
         bool? tsValid = null;
+        bool? tsaTrusted = null;
         if (extraction.HasSignatureTimeStamp)
         {
-            tsValid = ValidateSignatureTimeStamp(
+            TimestampTokenValidationResult timestamp = ValidateSignatureTimeStamp(
                 sigElement, ns, extraction.SigningTime, trustAnchors, warnings);
+            tsValid = timestamp.IsIntegrityValid;
+            tsaTrusted = timestamp.IsTsaTrusted;
         }
 
         // LTV data validation (CertificateValues + RevocationValues)
@@ -277,6 +280,7 @@ public sealed class XadesSignatureValidator : IXadesSignatureValidator
             IsIntegrityValid = sigValid,
             IsCertificateChainValid = chainValid,
             HasValidSignatureTimeStamp = tsValid,
+            IsTsaTrusted = tsaTrusted,
             IsLtvDataValid = ltvValid,
             HasValidArchiveTimeStamp = archiveTsValid,
             SignerCertificate = signerCert,
@@ -883,7 +887,7 @@ public sealed class XadesSignatureValidator : IXadesSignatureValidator
         }
     }
 
-    private bool? ValidateSignatureTimeStamp(
+    private TimestampTokenValidationResult ValidateSignatureTimeStamp(
         XmlElement sigElement,
         XmlNamespaceManager ns,
         DateTimeOffset? signingTime,
@@ -897,14 +901,14 @@ public sealed class XadesSignatureValidator : IXadesSignatureValidator
 
         if (tsEl is null)
         {
-            return null;
+            return new TimestampTokenValidationResult();
         }
 
         var encTs = tsEl.SelectSingleNode("xades:EncapsulatedTimeStamp", ns);
         if (encTs is null)
         {
             warnings.Add("SignatureTimeStamp element found but no EncapsulatedTimeStamp.");
-            return false;
+            return new TimestampTokenValidationResult { IsIntegrityValid = false };
         }
 
         byte[] timestampToken;
@@ -916,7 +920,7 @@ public sealed class XadesSignatureValidator : IXadesSignatureValidator
         catch (Exception ex)
         {
             warnings.Add($"EncapsulatedTimeStamp contains invalid base64: {ex.Message}");
-            return false;
+            return new TimestampTokenValidationResult { IsIntegrityValid = false };
         }
 
         TimestampValidator.CertificateChainValidatorDelegate? validateTsaChain = null;
@@ -942,6 +946,10 @@ public sealed class XadesSignatureValidator : IXadesSignatureValidator
                 {
                     chain.ChainPolicy.CustomTrustStore.Add(anchor);
                 }
+                foreach (var certificate in embeddedCerts)
+                {
+                    chain.ChainPolicy.ExtraStore.Add(certificate);
+                }
 
                 if (chain.Build(tsaCert))
                 {
@@ -966,11 +974,11 @@ public sealed class XadesSignatureValidator : IXadesSignatureValidator
         catch (Exception ex) when (ex is XmlException or InvalidOperationException or CryptographicException)
         {
             warnings.Add($"Could not canonicalize SignatureValue for SignatureTimeStamp: {ex.Message}");
-            return false;
+            return new TimestampTokenValidationResult { IsIntegrityValid = false };
         }
 
         var timestampWarnings = new List<string>();
-        bool? tsResult = _timestampValidator.Validate(
+        TimestampTokenValidationResult tsResult = _timestampValidator.ValidateWithTrust(
             timestampToken,
             canonicalizedSignatureValue,
             signingTime,
@@ -982,7 +990,11 @@ public sealed class XadesSignatureValidator : IXadesSignatureValidator
 
         // If TimestampValidator returns null (e.g. parsing failure), treat as invalid
         // since the timestamp element is present but unverifiable.
-        return tsResult ?? false;
+        return new TimestampTokenValidationResult
+        {
+            IsIntegrityValid = tsResult.IsIntegrityValid ?? false,
+            IsTsaTrusted = tsResult.IsTsaTrusted
+        };
     }
 
     private static bool? ValidateArchiveTimeStamp(

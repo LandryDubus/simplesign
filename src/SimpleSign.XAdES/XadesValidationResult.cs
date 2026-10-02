@@ -18,8 +18,11 @@ public sealed class XadesValidationResult
     /// <summary>The certificate chain is valid and trusted.</summary>
     public bool IsCertificateChainValid { get; init; }
 
-    /// <summary>The SignatureTimeStamp (if present) is valid.</summary>
+    /// <summary>The SignatureTimeStamp's cryptographic integrity and message imprint are valid, independent of TSA trust.</summary>
     public bool? HasValidSignatureTimeStamp { get; init; }
+
+    /// <summary>Whether the TSA chain is trusted; null when the token is absent, invalid, or no trust policy was evaluated.</summary>
+    public bool? IsTsaTrusted { get; init; }
 
     /// <summary>The LTV data (CertificateValues + RevocationValues) is valid.</summary>
     public bool? IsLtvDataValid { get; init; }

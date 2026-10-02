@@ -412,6 +412,9 @@ public sealed class PdfSignatureValidator : IPdfSignatureValidator
         var (notRevoked, revocationSource) = await ValidateRevocationIfEnabled(
             field, cmsData, embeddedCrls, embeddedOcsps, errors, warnings, cancellationToken).ConfigureAwait(false);
 
+        TimestampTokenValidationResult timestamp = _timestampValidator.ValidateWithTrust(
+            cmsData, warnings, ValidateCertificateChain, _logger);
+
         return new SignatureValidationResult
         {
             FieldName = field.FieldName,
@@ -426,7 +429,8 @@ public sealed class PdfSignatureValidator : IPdfSignatureValidator
             ChainValidationMetadata = chainValidationResult?.Metadata,
             IsNotRevoked = notRevoked,
             RevocationSource = revocationSource,
-            HasValidTimestamp = _timestampValidator.Validate(cmsData, warnings, ValidateCertificateChain, _logger),
+            HasValidTimestamp = timestamp.IsIntegrityValid,
+            IsTsaTrusted = timestamp.IsTsaTrusted,
             SigningTime = cmsData.SigningTime ?? field.PdfSigningTime,
             SignerCertificate = cmsData.SignerCertificate,
             EmbeddedCertificates = cmsData.Certificates,

@@ -376,7 +376,8 @@ Each result includes:
 - `IsIntegrityValid` — byte-range hash matches (no tampering)
 - `IsSignatureValid` — cryptographic signature verifies against public key
 - `IsCertificateChainValid` — chain builds to a trusted root
-- `HasValidTimestamp` — RFC 3161 token is valid (bool?)
+- `HasValidTimestamp` — RFC 3161 token signature, signed content, and imprint verify (bool?)
+- `IsTsaTrusted` — TSA certificate passes the evaluated chain and timestamping-purpose policy (bool?; null when the token is absent, invalid, or unchecked)
 - `IsValid` — all checks pass
 - `SignerName`, `SigningTime`, `DigestAlgorithmOid`, `SubFilter`, `Warnings`
 

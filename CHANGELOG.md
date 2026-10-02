@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- RFC 3161 tokens now require a matching TSA signer certificate, authenticated
+  TSTInfo signed attributes, signing-certificate binding, and valid CMS signature
+  before receipt or artifact validation accepts them. Timestamp integrity and TSA
+  chain trust are reported separately; SHA-3 token digests are supported.
 - SHA-3 digest identifiers in CMS and timestamp requests now omit ASN.1 parameters
   as required by RFC 9688. ECDSA with SHA-3 also omits signature parameters, while
   RSA with SHA-3 retains `NULL`.

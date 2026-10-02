@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- SHA-3 digest identifiers in CMS and timestamp requests now omit ASN.1 parameters
+  as required by RFC 9688. ECDSA with SHA-3 also omits signature parameters, while
+  RSA with SHA-3 retains `NULL`.
 - PAdES, CAdES, and XAdES signing now revalidate the completed signature and
   content integrity before returning a result. Reported timestamp, LTV, and
   archive levels require checked evidence on the newly added signature, while

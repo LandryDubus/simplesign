@@ -242,7 +242,10 @@ public sealed class CmsSignatureBuilder
                         using (writer.PushSequence())
                         {
                             writer.WriteObjectIdentifier(digestOid);
-                            writer.WriteNull();
+                            if (DigestAlgorithmUsesNullParameter(digestOid))
+                            {
+                                writer.WriteNull();
+                            }
                         }
                     }
 
@@ -310,7 +313,10 @@ public sealed class CmsSignatureBuilder
             using (writer.PushSequence())
             {
                 writer.WriteObjectIdentifier(digestOid);
-                writer.WriteNull();
+                if (DigestAlgorithmUsesNullParameter(digestOid))
+                {
+                    writer.WriteNull();
+                }
             }
 
             // signedAttrs [0] IMPLICIT SET OF Attribute
@@ -705,10 +711,15 @@ public sealed class CmsSignatureBuilder
         }
     }
 
+    /// <summary>Returns true when the digest algorithm OID expects an explicit NULL parameter in the AlgorithmIdentifier.</summary>
+    internal static bool DigestAlgorithmUsesNullParameter(string digestOid) => digestOid is not
+        (Oids.Sha3_256 or Oids.Sha3_384 or Oids.Sha3_512);
+
     /// <summary>Returns true when the signature algorithm OID expects an explicit NULL parameter in the AlgorithmIdentifier.</summary>
     public static bool SignatureAlgorithmUsesNullParameter(string signatureOid) => signatureOid switch
     {
-        Oids.EcdsaSha256 or Oids.EcdsaSha384 or Oids.EcdsaSha512 => false,
+        Oids.EcdsaSha256 or Oids.EcdsaSha384 or Oids.EcdsaSha512
+            or Oids.EcdsaSha3_256 or Oids.EcdsaSha3_384 or Oids.EcdsaSha3_512 => false,
         Oids.Ed25519 or Oids.Ed448 => false,
         Oids.RsaPss => false,
         _ => true

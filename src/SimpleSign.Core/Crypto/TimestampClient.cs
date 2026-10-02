@@ -150,7 +150,10 @@ public sealed class TimestampClient : ITimestampClient
                 using (writer.PushSequence()) // AlgorithmIdentifier
                 {
                     writer.WriteObjectIdentifier(hashOid);
-                    writer.WriteNull();
+                    if (CmsSignatureBuilder.DigestAlgorithmUsesNullParameter(hashOid))
+                    {
+                        writer.WriteNull();
+                    }
                 }
                 writer.WriteOctetString(hash);
             }

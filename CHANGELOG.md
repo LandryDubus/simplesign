@@ -5,6 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.2] - 2026-10-14
+
+### Fixed
+
+- PDF dictionary scanning is string- and comment-aware: `<<`, `>>`, and `%`
+  sequences inside literal strings, hexadecimal strings, or comments no longer
+  break dictionary boundary detection, key location, or key extraction.
+- `RemoveKeyFromDict` removes the complete value using PDF token rules, so
+  multi-line values (e.g. a multi-line inline `/AcroForm` or `/Perms <<…>>`)
+  no longer leave orphaned content behind in rewritten Catalogs.
+- Appending a document timestamp (B-LTA) now preserves an inline Catalog
+  `/AcroForm` dictionary exactly like regular signing, keeping earlier
+  signatures valid under Acrobat's modification analysis.
+- `/Fields` parsing only accepts arrays that directly follow the key; indirect
+  field arrays are resolved instead of picking up a later key's array.
+- Pages whose `/Annots` is a compressed indirect array keep their existing
+  annotations when a new signature is added.
+- Signing into an existing field replaces `/V` values token-aware (newlines,
+  names, `null`, and empty strings) without inserting duplicate keys; empty
+  `/V ()` fields are correctly recognised as unsigned.
+- `/M` signing dates stored as hexadecimal or UTF-16 text strings are decoded.
+- Visible signature widget counting no longer depends on a fixed 256-byte
+  window, so automatic positioning sees distant `/Rect` entries.
+- Numeric parsing accepts ASCII digits only and requires complete
+  `objNum genNum R` references; `/Contents` extraction skips comments.
+
 ## [0.9.1] - 2026-10-13
 
 ### Improved

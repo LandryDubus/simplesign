@@ -43,6 +43,18 @@ changes and work under `Unreleased`.
 
 ---
 
+## What's New in v0.9.2
+
+**Acrobat-safe structure preservation** — dictionary scanners now treat literal strings, hexadecimal strings, and comments correctly, so content such as `(merged >> streams)` in a `/Reason` no longer confuses parsing. Key removal is token-aware, and document timestamps (B-LTA) preserve an inline `/AcroForm` dictionary just like regular signing.
+
+**Robust incremental signing on external PDFs** — `/Fields` and `/Annots` entries are resolved without mistaking other keys' arrays (including compressed indirect arrays), signing into existing fields handles every `/V` form without duplicate keys, and empty `/V ()` fields are recognised as unsigned.
+
+**Accurate metadata and positioning** — hexadecimal and UTF-16 `/M` dates decode correctly, visible-widget counting no longer depends on a fixed window, and numeric parsing accepts only ASCII digits with complete `objNum genNum R` references.
+
+See the [full changelog](CHANGELOG.md).
+
+---
+
 ## What's New in v0.9.1
 
 **Adobe Acrobat compatibility fixes** — the embedded LiberationSans `/FontFile2` stream now carries the required `/Length1` metadata, and signing a PDF whose Catalog contains an inline `/AcroForm` dictionary preserves that dictionary (including `/DA` and `/DR`) instead of replacing it, so Acrobat no longer invalidates earlier signatures.

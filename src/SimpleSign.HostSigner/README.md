@@ -26,7 +26,7 @@ irm https://raw.githubusercontent.com/eupassarin/SimpleSign/main/scripts/install
 Or install a specific version:
 
 ```powershell
-.\install-hostsigner.ps1 -Version 0.9.1
+.\install-hostsigner.ps1 -Version 0.9.2
 ```
 
 ### Install from Source
@@ -57,7 +57,7 @@ Health check — used to detect if HostSigner is running.
 **Response:**
 
 ```json
-{ "status": "ok", "version": "0.9.1" }
+{ "status": "ok", "version": "0.9.2" }
 ```
 
 ### GET /api/certificates
@@ -137,10 +137,10 @@ Checks for updates against GitHub Releases.
 
 ```json
 {
-  "current": "0.9.1",
-  "latest": "0.9.1",
+  "current": "0.9.2",
+  "latest": "0.9.2",
   "updateAvailable": false,
-  "downloadUrl": "https://github.com/eupassarin/SimpleSign/releases/tag/v0.9.1"
+  "downloadUrl": "https://github.com/eupassarin/SimpleSign/releases/tag/v0.9.2"
 }
 ```
 

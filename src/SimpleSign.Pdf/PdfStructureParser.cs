@@ -1263,23 +1263,194 @@ internal static class PdfStructureParser
     }
 
     /// <summary>
-    /// Removes a key-value line from a PDF dictionary string. Normalises CRLF to LF
-    /// so the key search and line terminator work uniformly across source PDFs
-    /// produced on Windows / by iText / Adobe (CRLF) and macOS / Linux (LF).
+    /// Removes a key-value entry from a PDF dictionary string, honouring PDF token rules:
+    /// the whole value is removed (dictionaries, arrays, literal strings, hexadecimal
+    /// strings, names, and indirect references may span multiple lines). Normalises CRLF
+    /// to LF so the search works uniformly across source PDFs produced on Windows / by
+    /// iText / Adobe (CRLF) and macOS / Linux (LF). Returns the input unchanged when the
+    /// key is not found.
     /// </summary>
     public static string RemoveKeyFromDict(string obj, string key)
     {
         string normalised = obj.Replace("\r\n", "\n", StringComparison.Ordinal);
-        int keyPos = normalised.IndexOf(key, StringComparison.Ordinal);
+        int keyPos = FindTopLevelKey(normalised, key);
         if (keyPos < 0)
         {
             return obj;
         }
 
-        int lineEnd = normalised.IndexOf('\n', keyPos);
-        lineEnd = (lineEnd >= 0) ? (lineEnd + 1) : normalised.Length;
-        return string.Concat(normalised.AsSpan(0, keyPos), normalised.AsSpan(lineEnd));
+        int cursor = keyPos + key.Length;
+        while (cursor < normalised.Length && IsPdfWhitespaceChar(normalised[cursor]))
+        {
+            cursor++;
+        }
+
+        int valueEnd;
+        if (cursor < normalised.Length)
+        {
+            char c = normalised[cursor];
+            if (c == '<' && cursor + 1 < normalised.Length && normalised[cursor + 1] == '<')
+            {
+                // Dictionary value.
+                int dictEnd = FindDictEnd(normalised, cursor);
+                valueEnd = dictEnd >= 0 ? dictEnd + 2 : normalised.Length;
+            }
+            else if (c == '<')
+            {
+                // Hexadecimal string value.
+                valueEnd = SkipHexString(normalised, cursor) + 1;
+            }
+            else if (c == '[')
+            {
+                // Array value.
+                int arrayEnd = FindArrayEnd(normalised, cursor);
+                valueEnd = arrayEnd >= 0 ? arrayEnd + 1 : normalised.Length;
+            }
+            else if (c == '(')
+            {
+                // Literal string value.
+                valueEnd = SkipLiteralString(normalised, cursor) + 1;
+            }
+            else if (IsAsciiDigit(c))
+            {
+                // Indirect reference: objNum genNum R (tokens may be separated by whitespace).
+                valueEnd = cursor;
+                while (valueEnd < normalised.Length && IsAsciiDigit(normalised[valueEnd]))
+                {
+                    valueEnd++;
+                }
+                while (valueEnd < normalised.Length && IsHorizontalSpace(normalised[valueEnd]))
+                {
+                    valueEnd++;
+                }
+                if (valueEnd < normalised.Length && IsAsciiDigit(normalised[valueEnd]))
+                {
+                    while (valueEnd < normalised.Length && IsAsciiDigit(normalised[valueEnd]))
+                    {
+                        valueEnd++;
+                    }
+                    while (valueEnd < normalised.Length && IsHorizontalSpace(normalised[valueEnd]))
+                    {
+                        valueEnd++;
+                    }
+                    if (valueEnd < normalised.Length && normalised[valueEnd] == 'R')
+                    {
+                        valueEnd++;
+                    }
+                }
+            }
+            else
+            {
+                // Name or other single token.
+                valueEnd = cursor;
+                while (valueEnd < normalised.Length && !IsPdfWhitespaceChar(normalised[valueEnd]))
+                {
+                    valueEnd++;
+                }
+            }
+        }
+        else
+        {
+            valueEnd = cursor;
+        }
+
+        // Also strip trailing horizontal whitespace after the value.
+        int removeEnd = valueEnd;
+        while (removeEnd < normalised.Length && IsHorizontalSpace(normalised[removeEnd]))
+        {
+            removeEnd++;
+        }
+
+        return string.Concat(normalised.AsSpan(0, keyPos), normalised.AsSpan(removeEnd));
     }
+
+    /// <summary>
+    /// Finds a top-level dictionary key (at depth 1, directly inside the outermost
+    /// dictionary) by token-aware scanning that skips literal strings, hexadecimal
+    /// strings, comments, and nested dictionaries/arrays. Returns -1 when not found.
+    /// </summary>
+    private static int FindTopLevelKey(string text, string key)
+    {
+        int depth = 0;
+        int i = 0;
+        while (i < text.Length)
+        {
+            char c = text[i];
+            if (c == '%')
+            {
+                i = SkipComment(text, i);
+                continue;
+            }
+
+            if (c == '(')
+            {
+                i = SkipLiteralString(text, i) + 1;
+                continue;
+            }
+
+            if (c == '<')
+            {
+                if (i + 1 < text.Length && text[i + 1] == '<')
+                {
+                    depth++;
+                    i += 2;
+                    continue;
+                }
+
+                i = SkipHexString(text, i) + 1;
+                continue;
+            }
+
+            if (c == '[')
+            {
+                depth++;
+                i++;
+                continue;
+            }
+
+            if (c == '>')
+            {
+                if (i + 1 < text.Length && text[i + 1] == '>')
+                {
+                    depth--;
+                    i += 2;
+                    continue;
+                }
+
+                i++;
+                continue;
+            }
+
+            if (c == ']')
+            {
+                depth--;
+                i++;
+                continue;
+            }
+
+            if (c == '/' && depth == 1 && text.AsSpan(i).StartsWith(key, StringComparison.Ordinal))
+            {
+                int after = i + key.Length;
+                if (after >= text.Length
+                    || IsPdfWhitespaceChar(text[after])
+                    || text[after] == '('
+                    || text[after] == '<'
+                    || text[after] == '[')
+                {
+                    return i;
+                }
+            }
+
+            i++;
+        }
+
+        return -1;
+    }
+
+    /// <summary>
+    /// Determines whether a character is horizontal whitespace (SP or TAB).
+    /// </summary>
+    private static bool IsHorizontalSpace(char c) => c is ' ' or '\t';
 
     /// <summary>
     /// Inserts a new key-value line into a PDF dictionary string, just before the closing

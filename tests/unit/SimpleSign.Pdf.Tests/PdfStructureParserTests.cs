@@ -617,6 +617,77 @@ public sealed class PdfStructureParserTests
         updated.ShouldContain("/DA (/Helv 0 Tf 0 g)");
     }
 
+    // ── RemoveKeyFromDict Token-Aware Tests ─────────────────────────────────
+
+    [Fact]
+    public void RemoveKeyFromDict_MultilineInlineDict_RemovesWholeEntry()
+    {
+        const string obj = "1 0 obj\n<< /Type /Catalog /Pages 2 0 R\n   /AcroForm <<\n      /SigFlags 3\n      /Fields [51 0 R]\n      /DA (/Helv 0 Tf 0 g)\n   >>\n>>\nendobj\n";
+
+        string result = PdfStructureParser.RemoveKeyFromDict(obj, "/AcroForm");
+
+        result.ShouldNotContain("/SigFlags 3");
+        result.ShouldNotContain("/Fields [51 0 R]");
+        result.ShouldNotContain("/DA (/Helv 0 Tf 0 g)");
+        result.ShouldContain("/Type /Catalog");
+        result.ShouldContain("/Pages 2 0 R");
+    }
+
+    [Fact]
+    public void RemoveKeyFromDict_MultilinePermsDict_RemovesWholeEntry()
+    {
+        const string obj = "1 0 obj\n<< /Type /Catalog\n   /Perms << /DocMDP 5 0 R\n             /UR3 6 0 R >>\n   /Pages 2 0 R\n>>\nendobj\n";
+
+        string result = PdfStructureParser.RemoveKeyFromDict(obj, "/Perms");
+
+        result.ShouldNotContain("/DocMDP 5 0 R");
+        result.ShouldNotContain("/UR3 6 0 R");
+        result.ShouldContain("/Pages 2 0 R");
+    }
+
+    [Fact]
+    public void RemoveKeyFromDict_IndirectReference_RemovesWholeRef()
+    {
+        const string obj = "1 0 obj\n<< /Type /Catalog /Pages 2 0 R /AcroForm 56 0 R >>\nendobj\n";
+
+        string result = PdfStructureParser.RemoveKeyFromDict(obj, "/AcroForm");
+
+        result.ShouldNotContain("56 0 R");
+        result.ShouldContain("/Pages 2 0 R");
+    }
+
+    [Fact]
+    public void RemoveKeyFromDict_NameValue_RemovesWholeEntry()
+    {
+        const string obj = "1 0 obj\n<< /Type /Catalog /Foo /Bar /Pages 2 0 R >>\nendobj\n";
+
+        string result = PdfStructureParser.RemoveKeyFromDict(obj, "/Foo");
+
+        result.ShouldNotContain("/Bar");
+        result.ShouldContain("/Pages 2 0 R");
+    }
+
+    [Fact]
+    public void RemoveKeyFromDict_KeyInsideLiteralString_IsNotRemoved()
+    {
+        const string obj = "1 0 obj\n<< /Type /Catalog /Pages 2 0 R /Note (see /AcroForm here) /AcroForm 5 0 R >>\nendobj\n";
+
+        string result = PdfStructureParser.RemoveKeyFromDict(obj, "/AcroForm");
+
+        // The key inside the literal string must stay; only the real entry is removed.
+        result.ShouldContain("(see /AcroForm here)");
+        result.ShouldNotContain("/AcroForm 5 0 R");
+        result.ShouldContain("/Pages 2 0 R");
+    }
+
+    [Fact]
+    public void RemoveKeyFromDict_MissingKey_ReturnsUnchanged()
+    {
+        const string obj = "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n";
+
+        PdfStructureParser.RemoveKeyFromDict(obj, "/AcroForm").ShouldBe(obj);
+    }
+
     // ── UsesXRefStreams Tests ───────────────────────────────────────────────
 
     [Fact]

@@ -30,6 +30,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   window, so automatic positioning sees distant `/Rect` entries.
 - Numeric parsing accepts ASCII digits only and requires complete
   `objNum genNum R` references; `/Contents` extraction skips comments.
+- `System.Security.Cryptography.Pkcs` and `System.Security.Cryptography.Xml`
+  bumped to 10.0.13 to address NuGet audit findings (CVEs 2026-84008,
+  2026-70162, 2026-96960, 2026-96959, 2026-96958).
 
 ## [0.9.1] - 2026-10-13
 

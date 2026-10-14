@@ -1057,11 +1057,11 @@ public sealed class PdfSignatureWriter
                 }
 
                 // Check if it's an indirect reference (digit starts object number)
-                if (cursor < pageText.Length && char.IsDigit(pageText[cursor]))
+                if (cursor < pageText.Length && IsAsciiDigit(pageText[cursor]))
                 {
                     // Parse the object number
                     int refObjNum = 0;
-                    while (cursor < pageText.Length && char.IsDigit(pageText[cursor]))
+                    while (cursor < pageText.Length && IsAsciiDigit(pageText[cursor]))
                     {
                         refObjNum = refObjNum * 10 + (pageText[cursor++] - '0');
                     }
@@ -1352,4 +1352,9 @@ public sealed class PdfSignatureWriter
     }
 
     private static string F(float value) => PdfFormatting.F(value);
+
+    /// <summary>
+    /// Determines whether a character is an ASCII decimal digit (PDF numbers are ASCII-only).
+    /// </summary>
+    private static bool IsAsciiDigit(char c) => c is >= '0' and <= '9';
 }

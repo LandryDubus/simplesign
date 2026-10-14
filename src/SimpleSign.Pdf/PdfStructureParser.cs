@@ -128,7 +128,7 @@ internal static class PdfStructureParser
         if (cursor < catalogText.Length && catalogText[cursor] != '<')
         {
             int acroFormObjNum = 0;
-            while (cursor < catalogText.Length && char.IsDigit(catalogText[cursor]))
+            while (cursor < catalogText.Length && IsAsciiDigit(catalogText[cursor]))
             {
                 if (acroFormObjNum > int.MaxValue / 10)
                 {
@@ -850,7 +850,10 @@ internal static class PdfStructureParser
     }
 
     /// <summary>
-    /// Extracts an indirect object reference number from a dictionary key (e.g., "/Pages 2 0 R" → 2).
+    /// Extracts an indirect object reference number from a dictionary key
+    /// (e.g., "/Pages 2 0 R" → 2), using PDF token rules (objNum genNum R with
+    /// any PDF whitespace between the tokens). Returns -1 when the value is not
+    /// a well-formed indirect reference.
     /// </summary>
     private static int ExtractObjReference(string dictText, string key)
     {
@@ -861,18 +864,14 @@ internal static class PdfStructureParser
         }
 
         int cursor = keyPos + key.Length;
-        while (cursor < dictText.Length && (dictText[cursor] == ' ' || dictText[cursor] == '\n' || dictText[cursor] == '\r'))
+        while (cursor < dictText.Length && IsPdfWhitespaceChar(dictText[cursor]))
         {
             cursor++;
         }
 
-        int numStart = cursor;
-        while (cursor < dictText.Length && char.IsDigit(dictText[cursor]))
-        {
-            cursor++;
-        }
-
-        if (numStart < cursor && int.TryParse(dictText.AsSpan(numStart, cursor - numStart), out int objNum))
+        if (cursor < dictText.Length
+            && IsAsciiDigit(dictText[cursor])
+            && TryParseIndirectReference(dictText, ref cursor, out int objNum))
         {
             return objNum;
         }
@@ -1284,7 +1283,7 @@ internal static class PdfStructureParser
         string[] tokens = arrayContent.Split([' ', '\n', '\r', '\t'], StringSplitOptions.RemoveEmptyEntries);
         for (int i = 0; i + 2 < tokens.Length; i++)
         {
-            if (int.TryParse(tokens[i], out _) && tokens[i + 1] == "0" && tokens[i + 2] == "R")
+            if (IsAsciiDigits(tokens[i]) && tokens[i + 1] == "0" && tokens[i + 2] == "R")
             {
                 references.Add(tokens[i] + " 0 R");
                 i += 2;
@@ -1293,6 +1292,11 @@ internal static class PdfStructureParser
 
         return references;
     }
+
+    /// <summary>
+    /// Determines whether a string consists solely of ASCII decimal digits.
+    /// </summary>
+    private static bool IsAsciiDigits(string s) => s.Length > 0 && s.All(IsAsciiDigit);
 
     /// <summary>
     /// Resolves an indirect <c>/Fields N 0 R</c> reference from an AcroForm dictionary.
@@ -1322,13 +1326,13 @@ internal static class PdfStructureParser
         }
 
         // Check for indirect reference (digit starts object number)
-        if (!char.IsDigit(acroFormText[cursor]))
+        if (!IsAsciiDigit(acroFormText[cursor]))
         {
             return [];
         }
 
         int fieldsObjNum = 0;
-        while (cursor < acroFormText.Length && char.IsDigit(acroFormText[cursor]))
+        while (cursor < acroFormText.Length && IsAsciiDigit(acroFormText[cursor]))
         {
             if (fieldsObjNum > int.MaxValue / 10)
             {
@@ -1383,7 +1387,7 @@ internal static class PdfStructureParser
         string[] tokens = arrayContent.Split([' ', '\n', '\r', '\t'], StringSplitOptions.RemoveEmptyEntries);
         for (int i = 0; i + 2 < tokens.Length; i++)
         {
-            if (int.TryParse(tokens[i], out _) && tokens[i + 1] == "0" && tokens[i + 2] == "R")
+            if (IsAsciiDigits(tokens[i]) && tokens[i + 1] == "0" && tokens[i + 2] == "R")
             {
                 references.Add(tokens[i] + " 0 R");
                 i += 2;
@@ -1780,7 +1784,7 @@ internal static class PdfStructureParser
             // Extract object number from "N 0 R"
             int refObjNum = 0;
             int pos = 0;
-            while (pos < afterV.Length && char.IsDigit(afterV[pos]))
+            while (pos < afterV.Length && IsAsciiDigit(afterV[pos]))
             {
                 refObjNum = refObjNum * 10 + (afterV[pos++] - '0');
             }
@@ -2161,7 +2165,7 @@ internal static class PdfStructureParser
             pos++;
         }
 
-        while (pos < text.Length && char.IsDigit(text[pos]))
+        while (pos < text.Length && IsAsciiDigit(text[pos]))
         {
             result = result * 10 + (text[pos] - '0');
             pos++;

@@ -455,6 +455,13 @@ public sealed class PdfStructureParserTests
         PdfStructureParser.FindFirstPageObjNumFromCatalog(pdf).ShouldBe(3);
     }
 
+    [Fact]
+    public void FindFirstPageObjNumFromCatalog_PagesValueWithoutRefSuffix_ReturnsNegativeOne()
+    {
+        byte[] pdf = BuildCatalogPdf("/Pages 2 0 S");
+        PdfStructureParser.FindFirstPageObjNumFromCatalog(pdf).ShouldBe(-1);
+    }
+
     // ── Inline AcroForm Preservation Tests ───────────────────────────────────
 
     private static byte[] BuildCatalogPdf(string catalogEntries) =>

@@ -2260,11 +2260,21 @@ public sealed class PdfStructureReader
 
         ReadOnlySpan<byte> gapRegion = fullData[(int)gapStart..(int)gapEnd];
 
-        // Find hex string delimiters: <hexdata>
+        // Find hex string delimiters: <hexdata>, skipping comments (% to end of line)
+        // that may appear between the ByteRange segments.
         int hexStart = -1;
         int hexEnd = -1;
         for (int i = 0; i < gapRegion.Length; i++)
         {
+            if (gapRegion[i] == (byte)'%')
+            {
+                while (i < gapRegion.Length && gapRegion[i] != (byte)'\n' && gapRegion[i] != (byte)'\r')
+                {
+                    i++;
+                }
+                continue;
+            }
+
             if (gapRegion[i] == '<' && hexStart < 0)
             {
                 hexStart = i;

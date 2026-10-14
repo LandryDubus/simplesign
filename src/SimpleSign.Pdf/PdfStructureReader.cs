@@ -1750,7 +1750,7 @@ public sealed class PdfStructureReader
     /// nested parentheses and octal escapes) and hexadecimal strings per
     /// ISO 32000-1 §7.3.4.
     /// </summary>
-    private static string? ExtractPdfString(ReadOnlySpan<byte> dictSpan, ReadOnlySpan<byte> key)
+    internal static string? ExtractPdfString(ReadOnlySpan<byte> dictSpan, ReadOnlySpan<byte> key)
     {
         int searchPos = 0;
         int keyPos;

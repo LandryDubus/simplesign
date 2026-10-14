@@ -712,6 +712,47 @@ public sealed class PdfStructureParserTests
         PdfStructureParser.RemoveKeyFromDict(obj, "/AcroForm").ShouldBe(obj);
     }
 
+    // ── FindEmptySignatureField Tests ────────────────────────────────────────
+
+    private static byte[] BuildFieldPdf(string tEntry, string vEntry) =>
+        System.Text.Encoding.Latin1.GetBytes(
+            "%PDF-1.7\n" +
+            "1 0 obj\n<< /Type /Catalog /Pages 2 0 R /AcroForm 4 0 R >>\nendobj\n" +
+            "2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n" +
+            "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Annots [5 0 R] >>\nendobj\n" +
+            "4 0 obj\n<< /Fields [5 0 R] /SigFlags 3 >>\nendobj\n" +
+            $"5 0 obj\n<< /Type /Annot /Subtype /Widget /FT /Sig {tEntry} {vEntry} /Rect [0 0 0 0] >>\nendobj\n" +
+            "xref\n0 6\n0000000000 65535 f \n0000000009 00000 n \n0000000058 00000 n \n0000000115 00000 n \n0000000172 00000 n \n0000000238 00000 n \ntrailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n300\n%%EOF\n");
+
+    [Fact]
+    public void FindEmptySignatureField_EmptyLiteralV_ReturnsField() =>
+        PdfStructureParser.FindEmptySignatureField(BuildFieldPdf("/T (Sig1)", "/V ()"), "Sig1").ShouldBe(5);
+
+    [Fact]
+    public void FindEmptySignatureField_NullV_ReturnsField() =>
+        PdfStructureParser.FindEmptySignatureField(BuildFieldPdf("/T (Sig1)", "/V null"), "Sig1").ShouldBe(5);
+
+    [Fact]
+    public void FindEmptySignatureField_NameV_ReturnsField() =>
+        PdfStructureParser.FindEmptySignatureField(BuildFieldPdf("/T (Sig1)", "/V /SigEmpty"), "Sig1").ShouldBe(5);
+
+    [Fact]
+    public void FindEmptySignatureField_ReferenceV_ThrowsAlreadySigned()
+    {
+        void Act() => PdfStructureParser.FindEmptySignatureField(BuildFieldPdf("/T (Sig1)", "/V 12 0 R"), "Sig1");
+
+        Should.Throw<InvalidOperationException>(Act);
+    }
+
+    [Fact]
+    public void FindEmptySignatureField_HexTName_FindsField() =>
+        // "/T <53696731>" is the hexadecimal form of "Sig1".
+        PdfStructureParser.FindEmptySignatureField(BuildFieldPdf("/T <53696731>", "/V null"), "Sig1").ShouldBe(5);
+
+    [Fact]
+    public void FindEmptySignatureField_MismatchedName_ReturnsNegative() =>
+        PdfStructureParser.FindEmptySignatureField(BuildFieldPdf("/T (Other)", "/V null"), "Sig1").ShouldBe(-1);
+
     // ── UsesXRefStreams Tests ───────────────────────────────────────────────
 
     [Fact]

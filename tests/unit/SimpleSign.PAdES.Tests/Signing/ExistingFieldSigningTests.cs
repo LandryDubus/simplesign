@@ -58,6 +58,23 @@ public sealed class ExistingFieldSigningTests
         return count;
     }
 
+    [Fact(DisplayName = "Signing a field with an empty literal /V replaces the value")]
+    public async Task PrepareAsync_ExistingFieldEmptyLiteralV_ReplacesValue()
+    {
+        byte[] pdf = BuildPdfWithEmptyField("/V ()");
+        using var input = new MemoryStream(pdf);
+        using var output = new MemoryStream();
+
+        await PdfSignatureWriter.PrepareAsync(input, output, ExistingFieldOptions());
+
+        string text = Encoding.Latin1.GetString(output.ToArray());
+        int lastFieldPos = text.LastIndexOf("/T (Sig1)", StringComparison.Ordinal);
+        string updatedField = text[lastFieldPos..];
+
+        CountOccurrences(updatedField, "/V 6 0 R").ShouldBe(1);
+        updatedField.ShouldNotContain("/V ()");
+    }
+
     [Fact(DisplayName = "Signing a field with /V null replaces the value with the new reference")]
     public async Task PrepareAsync_ExistingFieldVNull_ReplacesValue()
     {

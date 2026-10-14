@@ -1427,7 +1427,13 @@ internal static class PdfStructureParser
             {
                 if (i + 1 < text.Length && text[i + 1] == '>')
                 {
-                    depth--;
+                    // The text may start in the middle of a document (e.g. a sliced
+                    // object), so never let the depth go negative.
+                    if (depth > 0)
+                    {
+                        depth--;
+                    }
+
                     i += 2;
                     continue;
                 }
@@ -2067,8 +2073,6 @@ internal static class PdfStructureParser
     public static int FindEmptySignatureField(ReadOnlySpan<byte> data, string fieldName)
     {
         // Scan for /FT /Sig objects that match the field name
-        string searchToken = $"/T ({fieldName})";
-        string altSearchToken = $"/T({fieldName})";
         string text = Encoding.Latin1.GetString(data);
 
         int pos = 0;
@@ -2091,9 +2095,10 @@ internal static class PdfStructureParser
 
             string fullObj = text.Substring(Math.Max(0, objStart - 20), objEnd - Math.Max(0, objStart - 20) + 6);
 
-            // Check if this object contains the field name
-            if (!fullObj.Contains(searchToken, StringComparison.Ordinal) &&
-                !fullObj.Contains(altSearchToken, StringComparison.Ordinal))
+            // Compare /T with the requested name, decoding literal, hexadecimal,
+            // and UTF-16 forms with the shared text-string decoder.
+            string? tValue = PdfStructureReader.ExtractPdfString(Encoding.Latin1.GetBytes(fullObj), "/T"u8);
+            if (!string.Equals(tValue, fieldName, StringComparison.Ordinal))
             {
                 pos = ftPos + 8;
                 continue;
@@ -2105,28 +2110,26 @@ internal static class PdfStructureParser
             int spaceIdx = beforeObj.IndexOf(' ');
             if (spaceIdx > 0 && int.TryParse(beforeObj.AsSpan(0, spaceIdx), out int objNum))
             {
-                // Check if field already has a value
-                if (fullObj.Contains("/V ", StringComparison.Ordinal) || fullObj.Contains("/V<", StringComparison.Ordinal))
+                // Check if /V references an object (signed) — null, names, and
+                // literal/hexadecimal strings (including empty ones) are empty fields.
+                int vKeyPos = FindTopLevelKey(fullObj, "/V");
+                if (vKeyPos >= 0)
                 {
-                    // Check if /V is a reference to a real object (signed) vs null/empty
-                    int vIdx = fullObj.IndexOf("/V ", StringComparison.Ordinal);
-                    if (vIdx >= 0)
+                    int cursor = vKeyPos + 2;
+                    while (cursor < fullObj.Length && IsPdfWhitespaceChar(fullObj[cursor]))
                     {
-                        string afterV = fullObj.Substring(vIdx + 3).TrimStart();
-                        if (afterV.StartsWith("null", StringComparison.OrdinalIgnoreCase) ||
-                            afterV.StartsWith('/') ||
-                            afterV.StartsWith(">>", StringComparison.Ordinal))
-                        {
-                            return objNum; // Empty /V
-                        }
+                        cursor++;
+                    }
 
+                    if (cursor < fullObj.Length && IsAsciiDigit(fullObj[cursor]))
+                    {
                         // /V followed by an object reference means it's signed
                         throw new InvalidOperationException(
                             $"Signature field '{fieldName}' is already signed (has /V value).");
                     }
                 }
 
-                return objNum; // No /V at all — empty field
+                return objNum; // /V absent or empty value — empty field
             }
 
             pos = ftPos + 8;

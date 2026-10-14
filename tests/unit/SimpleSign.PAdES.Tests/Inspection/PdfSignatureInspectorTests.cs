@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
+using System.Text;
 using Shouldly;
 using SimpleSign.Core.Crypto;
 using SimpleSign.Core.Inspection;
@@ -244,6 +245,187 @@ public sealed class PdfSignatureInspectorTests
     }
 
 
+
+    // ── PDF text-string decoding in signature dictionaries ───────────────────
+
+    private const string SigDictPrefix = "/Type /Sig /Filter /Adobe.PPKLite /SubFilter /adbe.pkcs7.detached\n";
+
+    /// <summary>
+    /// Builds a PDF with one signature dictionary per body; each is referenced by a
+    /// widget annotation (/V). /Reason is placed before /Contents and /ByteRange after
+    /// /Contents, as in external signing tools that emit hexadecimal text strings.
+    /// Bodies must contain the literal "/ByteRange [0 100 200 300]" which is replaced
+    /// by a placeholder and back-filled with the real byte ranges around /Contents.
+    /// </summary>
+    private static byte[] BuildPdfWithSignatureDicts(params string[] sigDictBodies)
+    {
+        const string byteRangePlaceholder = "[0000000000 0000000000 0000000000 0000000000]";
+        int count = sigDictBodies.Length;
+
+        var annotRefs = new List<string>(count);
+        for (int i = 0; i < count; i++)
+        {
+            annotRefs.Add($"{4 + (i * 2)} 0 R");
+        }
+
+        var sb = new StringBuilder();
+        sb.Append("%PDF-1.7\n");
+
+        var offsets = new long[3 + (count * 2) + 1];
+        offsets[1] = sb.Length;
+        sb.Append("1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n");
+
+        offsets[2] = sb.Length;
+        sb.Append("2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n");
+
+        offsets[3] = sb.Length;
+        sb.Append($"3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Annots [{string.Join(' ', annotRefs)}] >>\nendobj\n");
+
+        var byteRangeValuePositions = new int[count];
+        var contentsHexStarts = new int[count];
+        for (int i = 0; i < count; i++)
+        {
+            offsets[4 + (i * 2)] = sb.Length;
+            sb.Append($"{4 + (i * 2)} 0 obj\n<< /Type /Annot /Subtype /Widget /FT /Sig /T (Sig{i + 1}) /V {5 + (i * 2)} 0 R >>\nendobj\n");
+
+            string body = sigDictBodies[i].Replace(
+                "/ByteRange [0 100 200 300]",
+                $"/ByteRange {byteRangePlaceholder}",
+                StringComparison.Ordinal);
+            int objStart = sb.Length;
+            sb.Append($"{5 + (i * 2)} 0 obj\n<< {body} >>\nendobj\n");
+            offsets[5 + (i * 2)] = objStart;
+
+            string textSoFar = sb.ToString();
+            int contentsKey = textSoFar.IndexOf("/Contents <", objStart, StringComparison.Ordinal);
+            contentsHexStarts[i] = contentsKey + "/Contents <".Length;
+            int byteRangeKey = textSoFar.IndexOf("/ByteRange ", objStart, StringComparison.Ordinal);
+            byteRangeValuePositions[i] = byteRangeKey + "/ByteRange ".Length;
+        }
+
+        long xrefOffset = sb.Length;
+        sb.Append("xref\n");
+        sb.Append($"0 {offsets.Length}\n");
+        sb.Append("0000000000 65535 f \n");
+        for (int num = 1; num < offsets.Length; num++)
+        {
+            sb.Append($"{offsets[num]:D10} 00000 n \n");
+        }
+
+        sb.Append($"trailer\n<< /Size {offsets.Length} /Root 1 0 R >>\n");
+        sb.Append($"startxref\n{xrefOffset}\n%%EOF\n");
+
+        byte[] pdf = Encoding.Latin1.GetBytes(sb.ToString());
+        for (int i = 0; i < count; i++)
+        {
+            int hexStart = contentsHexStarts[i];
+            int hexEnd = hexStart;
+            while (hexEnd < pdf.Length && pdf[hexEnd] != (byte)'>')
+            {
+                hexEnd++;
+            }
+
+            long length1 = hexStart - 1;
+            long offset2 = hexEnd + 1;
+            long length2 = pdf.Length - offset2;
+            string values = $"[{0:D10} {length1:D10} {offset2:D10} {length2:D10}]";
+            Encoding.Latin1.GetBytes(values).CopyTo(pdf, byteRangeValuePositions[i]);
+        }
+
+        return pdf;
+    }
+
+    [Fact(DisplayName = "InspectAsync decodes ASCII literal /Reason")]
+    public async Task InspectAsync_AsciiLiteralReason_ReturnsReason()
+    {
+        byte[] pdf = BuildPdfWithSignatureDicts(
+            SigDictPrefix + "/Reason (Document approved)\n/Contents <00>\n/ByteRange [0 100 200 300]");
+        using MemoryStream stream = new(pdf);
+
+        PdfInspectionResult inspection = await PdfSignatureInspector.InspectAsync(stream);
+
+        inspection.Signatures.Count().ShouldBe(1);
+        inspection.Signatures[0].Reason.ShouldBe("Document approved");
+    }
+
+    [Fact(DisplayName = "InspectAsync decodes UTF-16BE hexadecimal /Reason")]
+    public async Task InspectAsync_Utf16BeHexReason_ReturnsUnicodeReason()
+    {
+        byte[] pdf = BuildPdfWithSignatureDicts(
+            SigDictPrefix +
+            "/Name (Example signer)\n" +
+            "/Reason <FEFF005A0061017C00F301420107002000670119015B006C01050020006A0061017A0144>\n" +
+            "/Contents <00>\n" +
+            "/ByteRange [0 100 200 300]");
+        using MemoryStream stream = new(pdf);
+
+        PdfInspectionResult inspection = await PdfSignatureInspector.InspectAsync(stream);
+
+        inspection.Signatures.Count().ShouldBe(1);
+        inspection.Signatures[0].Reason.ShouldBe("Zażółć gęślą jaźń");
+        inspection.Signatures[0].DeclaredSignerName.ShouldBe("Example signer");
+    }
+
+    [Fact(DisplayName = "InspectAsync decodes PDFDocEncoding hexadecimal /Reason without BOM")]
+    public async Task InspectAsync_PdfDocHexReasonWithoutBom_ReturnsUnicodeReason()
+    {
+        // "Aprovação — 100%" in PDFDocEncoding: Latin-1 range (E7=ç, E3=ã)
+        // plus the Annex D em dash (0x84 = U+2014).
+        byte[] pdf = BuildPdfWithSignatureDicts(
+            SigDictPrefix +
+            "/Reason <4170726F7661E7E36F20842031303025>\n" +
+            "/Contents <00>\n" +
+            "/ByteRange [0 100 200 300]");
+        using MemoryStream stream = new(pdf);
+
+        PdfInspectionResult inspection = await PdfSignatureInspector.InspectAsync(stream);
+
+        inspection.Signatures.Count().ShouldBe(1);
+        inspection.Signatures[0].Reason.ShouldBe("Aprovação — 100%");
+    }
+
+    [Fact(DisplayName = "InspectAsync unescapes literal /Reason with parentheses and octal escapes")]
+    public async Task InspectAsync_LiteralReasonWithEscapes_Unescapes()
+    {
+        // \050 = '(', \051 = ')', \157 = 'o', \343 = 'ã' (Latin-1).
+        byte[] pdf = BuildPdfWithSignatureDicts(
+            SigDictPrefix +
+            "/Reason (Approved \\050by\\051 J\\157\\343o)\n" +
+            "/Contents <00>\n" +
+            "/ByteRange [0 100 200 300]");
+        using MemoryStream stream = new(pdf);
+
+        PdfInspectionResult inspection = await PdfSignatureInspector.InspectAsync(stream);
+
+        inspection.Signatures.Count().ShouldBe(1);
+        inspection.Signatures[0].Reason.ShouldBe("Approved (by) João");
+    }
+
+    [Fact(DisplayName = "InspectAsync associates different Unicode reasons with the correct signatures")]
+    public async Task InspectAsync_MultipleUnicodeReasons_AssociatedCorrectly()
+    {
+        byte[] pdf = BuildPdfWithSignatureDicts(
+            SigDictPrefix +
+            "/Reason <FEFF005A0061017C00F301420107002000670119015B006C01050020006A0061017A0144>\n" +
+            "/Contents <00>\n" +
+            "/ByteRange [0 100 200 300]",
+            SigDictPrefix +
+            "/Reason (Document approved)\n" +
+            "/Contents <00>\n" +
+            "/ByteRange [0 100 200 300]",
+            SigDictPrefix +
+            "/Reason <FEFF00520061007A00E3006F00200064006100200061007300730069006E00610074007500720061>\n" +
+            "/Contents <00>\n" +
+            "/ByteRange [0 100 200 300]");
+        using MemoryStream stream = new(pdf);
+
+        PdfInspectionResult inspection = await PdfSignatureInspector.InspectAsync(stream);
+
+        inspection.Signatures.Count().ShouldBe(3);
+        inspection.Signatures[0].Reason.ShouldBe("Zażółć gęślą jaźń");
+        inspection.Signatures[1].Reason.ShouldBe("Document approved");
+        inspection.Signatures[2].Reason.ShouldBe("Razão da assinatura");
+    }
 
     private static X509Certificate2 CreateRsaCert(string subject = "CN=Test Signer, O=Tests, C=BR")
     {

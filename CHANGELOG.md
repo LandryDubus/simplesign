@@ -59,6 +59,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   dictionary no longer converts it to an indirect object. The inline dictionary
   is preserved (including `/DA`, `/DR` and other entries) and only `/Fields`
   gains the new reference, so Acrobat no longer invalidates earlier signatures.
+- Signature metadata (`/Reason`, `/Location`, `/Name`, `/ContactInfo`) now
+  decodes hexadecimal text strings and honours UTF-16BE/UTF-16LE byte-order
+  marks, PDFDocEncoding (ISO 32000-1 Annex D), escape sequences, nested
+  parentheses and octal escapes. Inspection of PDFs produced by external
+  signing tools (e.g. Polish trusted-profile signatures) no longer returns
+  empty `/Reason` values.
 
 ## [0.9.0] - 2026-09-30
 

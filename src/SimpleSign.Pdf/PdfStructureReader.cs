@@ -1745,7 +1745,10 @@ public sealed class PdfStructureReader
     }
 
     /// <summary>
-    /// Extracts a parenthesized PDF string value for a given key (e.g., /Reason (text)).
+    /// Extracts a PDF text string value for a given key (e.g., /Reason (text) or
+    /// /Reason &lt;FEFF...&gt;). Supports literal strings (with escape sequences,
+    /// nested parentheses and octal escapes) and hexadecimal strings per
+    /// ISO 32000-1 §7.3.4.
     /// </summary>
     private static string? ExtractPdfString(ReadOnlySpan<byte> dictSpan, ReadOnlySpan<byte> key)
     {
@@ -1756,7 +1759,8 @@ public sealed class PdfStructureReader
             int afterKey = keyPos + key.Length;
             if (afterKey >= dictSpan.Length
                 || IsWhitespace(dictSpan[afterKey])
-                || dictSpan[afterKey] == '(')
+                || dictSpan[afterKey] == '('
+                || dictSpan[afterKey] == '<')
             {
                 break;
             }
@@ -1777,13 +1781,34 @@ public sealed class PdfStructureReader
             pos++;
         }
 
-        if (pos >= dictSpan.Length || dictSpan[pos] != '(')
+        if (pos >= dictSpan.Length)
         {
             return null;
         }
-        pos++; // skip '('
 
-        // Read until closing paren, handling escaped parens
+        if (dictSpan[pos] == '(')
+        {
+            return ExtractLiteralString(dictSpan, pos);
+        }
+
+        if (dictSpan[pos] == '<')
+        {
+            return ExtractHexString(dictSpan, pos);
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Extracts a literal string starting at the '(' at <paramref name="openParenPos"/>,
+    /// honouring escape sequences, nested parentheses and octal escapes
+    /// (ISO 32000-1 §7.3.4.2).
+    /// </summary>
+    private static string? ExtractLiteralString(ReadOnlySpan<byte> dictSpan, int openParenPos)
+    {
+        int pos = openParenPos + 1;
+
+        // Read until the closing parenthesis, handling escaped chars and nesting.
         int depth = 1;
         int valueStart = pos;
         while (pos < dictSpan.Length && depth > 0)
@@ -1814,25 +1839,285 @@ public sealed class PdfStructureReader
             return null;
         }
 
-        return DecodePdfTextString(dictSpan[valueStart..valueEnd]);
+        byte[] unescaped = UnescapePdfLiteralString(dictSpan[valueStart..valueEnd]);
+        return DecodePdfTextString(unescaped);
+    }
+
+    /// <summary>
+    /// Extracts a hexadecimal string starting at the '&lt;' at <paramref name="openAnglePos"/>
+    /// (ISO 32000-1 §7.3.4.3).
+    /// </summary>
+    private static string? ExtractHexString(ReadOnlySpan<byte> dictSpan, int openAnglePos)
+    {
+        int pos = openAnglePos + 1;
+        int hexStart = pos;
+        while (pos < dictSpan.Length && dictSpan[pos] != '>')
+        {
+            pos++;
+        }
+
+        if (pos >= dictSpan.Length)
+        {
+            return null;
+        }
+
+        return DecodePdfTextString(DecodePdfHexString(dictSpan[hexStart..pos]));
+    }
+
+    /// <summary>
+    /// Unescapes a PDF literal string body per ISO 32000-1 §7.3.4.2 Table 3,
+    /// including \n \r \t \b \f \( \) \\, octal escapes (\ddd) and line
+    /// continuations (\&lt;EOL&gt;). Unknown escapes drop the backslash.
+    /// </summary>
+    private static byte[] UnescapePdfLiteralString(ReadOnlySpan<byte> raw)
+    {
+        var output = new List<byte>(raw.Length);
+        for (int i = 0; i < raw.Length; i++)
+        {
+            byte b = raw[i];
+            if (b != (byte)'\\')
+            {
+                output.Add(b);
+                continue;
+            }
+
+            if (i + 1 >= raw.Length)
+            {
+                break; // trailing backslash — ignore
+            }
+
+            byte next = raw[i + 1];
+            switch (next)
+            {
+                case (byte)'n':
+                    output.Add((byte)'\n');
+                    i++;
+                    break;
+                case (byte)'r':
+                    output.Add((byte)'\r');
+                    i++;
+                    break;
+                case (byte)'t':
+                    output.Add((byte)'\t');
+                    i++;
+                    break;
+                case (byte)'b':
+                    output.Add((byte)'\b');
+                    i++;
+                    break;
+                case (byte)'f':
+                    output.Add((byte)'\f');
+                    i++;
+                    break;
+                case (byte)'(':
+                case (byte)')':
+                case (byte)'\\':
+                    output.Add(next);
+                    i++;
+                    break;
+                case (byte)'\r':
+                    // Line continuation: \r or \r\n.
+                    i++;
+                    if (i + 1 < raw.Length && raw[i + 1] == (byte)'\n')
+                    {
+                        i++;
+                    }
+                    break;
+                case (byte)'\n':
+                    // Line continuation: \<LF>.
+                    i++;
+                    break;
+                default:
+                    if (next is >= (byte)'0' and <= (byte)'7')
+                    {
+                        // Octal escape: one to three octal digits.
+                        int value = 0;
+                        int count = 0;
+                        while (count < 3 && i + 1 < raw.Length && raw[i + 1] is >= (byte)'0' and <= (byte)'7')
+                        {
+                            value = (value * 8) + (raw[i + 1] - (byte)'0');
+                            i++;
+                            count++;
+                        }
+                        output.Add((byte)value);
+                    }
+                    else
+                    {
+                        // Unknown escape: the backslash is ignored (ISO 32000-1 §7.3.4.2).
+                        output.Add(next);
+                        i++;
+                    }
+                    break;
+            }
+        }
+
+        return [.. output];
+    }
+
+    /// <summary>
+    /// Decodes the body of a hexadecimal PDF string (between '&lt;' and '&gt;').
+    /// Whitespace characters are ignored and an odd final nibble is padded
+    /// with a trailing zero nibble (ISO 32000-1 §7.3.4.3).
+    /// </summary>
+    internal static byte[] DecodePdfHexString(ReadOnlySpan<byte> hex)
+    {
+        var output = new List<byte>((hex.Length / 2) + 1);
+        int highNibble = -1;
+        foreach (byte b in hex)
+        {
+            if (IsHexWhitespace(b))
+            {
+                continue;
+            }
+
+            int nibble = HexNibble(b);
+            if (nibble < 0)
+            {
+                continue;
+            }
+
+            if (highNibble < 0)
+            {
+                highNibble = nibble;
+            }
+            else
+            {
+                output.Add((byte)((highNibble << 4) | nibble));
+                highNibble = -1;
+            }
+        }
+
+        if (highNibble >= 0)
+        {
+            output.Add((byte)(highNibble << 4));
+        }
+
+        return [.. output];
+    }
+
+    /// <summary>
+    /// Determines whether a byte is PDF whitespace inside a hexadecimal string
+    /// (NUL, TAB, LF, FF, CR, SP — ISO 32000-1 §7.2.2).
+    /// </summary>
+    private static bool IsHexWhitespace(byte b) => b is 0 or (byte)' ' or (byte)'\t' or (byte)'\n' or (byte)'\f' or (byte)'\r';
+
+    /// <summary>
+    /// Converts one hex digit to its numeric value, or -1 when not a hex digit.
+    /// </summary>
+    private static int HexNibble(byte b)
+    {
+        if (b is >= (byte)'0' and <= (byte)'9')
+        {
+            return b - (byte)'0';
+        }
+        if (b is >= (byte)'A' and <= (byte)'F')
+        {
+            return (b - (byte)'A') + 10;
+        }
+        if (b is >= (byte)'a' and <= (byte)'f')
+        {
+            return (b - (byte)'a') + 10;
+        }
+
+        return -1;
     }
 
     /// <summary>
     /// Decodes a PDF text string per ISO 32000-1 §7.9.2.2.
-    /// If the string starts with UTF-16BE BOM (0xFE 0xFF), decode as UTF-16BE.
-    /// Otherwise decode as PDFDocEncoding (Latin-1 superset).
+    /// UTF-16BE (FE FF) and UTF-16LE (FF FE) byte-order marks are honoured;
+    /// strings without a BOM are decoded as PDFDocEncoding (Annex D).
     /// </summary>
     internal static string DecodePdfTextString(ReadOnlySpan<byte> raw)
     {
         if (raw.Length >= 2 && raw[0] == 0xFE && raw[1] == 0xFF)
         {
-            // UTF-16BE: skip the 2-byte BOM
-            return Encoding.BigEndianUnicode.GetString(raw[2..]);
+            return DecodeUtf16(raw[2..], Encoding.BigEndianUnicode);
         }
 
-        // PDFDocEncoding — Latin-1 is a close-enough approximation for our signature use case
-        return Encoding.Latin1.GetString(raw);
+        if (raw.Length >= 2 && raw[0] == 0xFF && raw[1] == 0xFE)
+        {
+            return DecodeUtf16(raw[2..], Encoding.Unicode);
+        }
+
+        return DecodePdfDocEncoding(raw);
     }
+
+    /// <summary>
+    /// Decodes UTF-16 bytes, dropping a trailing odd byte when present.
+    /// </summary>
+    private static string DecodeUtf16(ReadOnlySpan<byte> payload, Encoding encoding)
+    {
+        if ((payload.Length & 1) == 1)
+        {
+            payload = payload[..^1];
+        }
+
+        return encoding.GetString(payload);
+    }
+
+    /// <summary>
+    /// Decodes bytes as PDFDocEncoding per ISO 32000-1 Annex D (Table D.2).
+    /// </summary>
+    private static string DecodePdfDocEncoding(ReadOnlySpan<byte> raw)
+    {
+        var sb = new StringBuilder(raw.Length);
+        foreach (byte b in raw)
+        {
+            sb.Append(MapPdfDocByte(b));
+        }
+
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// Maps one PDFDocEncoding byte to its Unicode code point (ISO 32000-1 Annex D).
+    /// </summary>
+    private static char MapPdfDocByte(byte b) => b switch
+    {
+        0x18 => '\u02D8', // breve
+        0x19 => '\u02C7', // caron
+        0x1A => '\u02C6', // modifier letter circumflex
+        0x1B => '\u02D9', // dot above
+        0x1C => '\u02DD', // double acute accent
+        0x1D => '\u02DB', // ogonek
+        0x1E => '\u02DA', // ring above
+        0x1F => '\u02DC', // small tilde
+        0x7F => '\uFFFD', // undefined in PDFDocEncoding
+        0x80 => '\u2022', // bullet
+        0x81 => '\u2020', // dagger
+        0x82 => '\u2021', // double dagger
+        0x83 => '\u2026', // ellipsis
+        0x84 => '\u2014', // em dash
+        0x85 => '\u2013', // en dash
+        0x86 => '\u0192', // florin
+        0x87 => '\u2044', // fraction slash
+        0x88 => '\u2039', // single left-pointing angle quote
+        0x89 => '\u203A', // single right-pointing angle quote
+        0x8A => '\u2212', // minus sign
+        0x8B => '\u2030', // per mille sign
+        0x8C => '\u201E', // double low-9 quotation mark
+        0x8D => '\u201C', // left double quotation mark
+        0x8E => '\u201D', // right double quotation mark
+        0x8F => '\u2018', // left single quotation mark
+        0x90 => '\u2019', // right single quotation mark
+        0x91 => '\u201A', // single low-9 quotation mark
+        0x92 => '\u2122', // trademark
+        0x93 => '\uFB01', // fi ligature
+        0x94 => '\uFB02', // fl ligature
+        0x95 => '\u0141', // L with stroke
+        0x96 => '\u0152', // OE ligature
+        0x97 => '\u0160', // S with caron
+        0x98 => '\u0178', // Y with diaeresis
+        0x99 => '\u017D', // Z with caron
+        0x9A => '\u0131', // dotless i
+        0x9B => '\u0142', // l with stroke
+        0x9C => '\u0153', // oe ligature
+        0x9D => '\u0161', // s with caron
+        0x9E => '\u017E', // z with caron
+        0x9F => '\uFFFD', // undefined in PDFDocEncoding
+        0xA0 => '\u20AC', // euro sign
+        _ => (char)b,
+    };
 
     /// <summary>
     /// Extracts the /M (modification date) from a signature dictionary.

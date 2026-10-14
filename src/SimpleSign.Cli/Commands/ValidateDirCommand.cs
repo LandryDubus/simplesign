@@ -96,7 +96,7 @@ internal sealed class ValidateDirCommand : AsyncCommand<ValidateDirCommand.Setti
         }
     }
 
-    protected override async Task<int> ExecuteAsync(CommandContext context, Settings settings, CancellationToken cancellationToken)
+    public override async Task<int> ExecuteAsync(CommandContext context, Settings settings, CancellationToken cancellationToken)
     {
         var searchOption = settings.Recurse ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly;
         var files = Directory.GetFiles(settings.DirectoryPath, settings.Pattern, searchOption);

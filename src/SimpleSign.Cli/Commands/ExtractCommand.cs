@@ -46,7 +46,7 @@ internal sealed class ExtractCommand : AsyncCommand<ExtractCommand.Settings>
         }
     }
 
-    protected override async Task<int> ExecuteAsync(CommandContext context, Settings settings, CancellationToken cancellationToken)
+    public override async Task<int> ExecuteAsync(CommandContext context, Settings settings, CancellationToken cancellationToken)
     {
         using var loggerFactory = settings.CreateLoggerFactory();
         var logger = loggerFactory?.CreateLogger("SimpleSign.Inspection");

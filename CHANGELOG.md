@@ -5,9 +5,8 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.9.1] - 2026-10-13
 
-<<<<<<< HEAD
 ### Improved
 
 - XAdES documentation distinguishes structural `DetectedLevel` from checked
@@ -65,6 +64,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   parentheses and octal escapes. Inspection of PDFs produced by external
   signing tools (e.g. Polish trusted-profile signatures) no longer returns
   empty `/Reason` values.
+- CLI command overrides use the `public` access modifier required by
+  Spectre.Console.Cli 0.57.2.
 
 ## [0.9.0] - 2026-09-30
 

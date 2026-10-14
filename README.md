@@ -43,6 +43,18 @@ changes and work under `Unreleased`.
 
 ---
 
+## What's New in v0.9.1
+
+**Adobe Acrobat compatibility fixes** — the embedded LiberationSans `/FontFile2` stream now carries the required `/Length1` metadata, and signing a PDF whose Catalog contains an inline `/AcroForm` dictionary preserves that dictionary (including `/DA` and `/DR`) instead of replacing it, so Acrobat no longer invalidates earlier signatures.
+
+**Robust PDF parsing for external documents** — compact `/Kids` page-tree arrays (`/Kids[2 0 R 3 0 R]`) are parsed with PDF token rules, and signature metadata such as `/Reason` now decodes hexadecimal and UTF-16 text strings used by external signing tools (e.g. Polish trusted-profile signatures).
+
+**Stronger timestamp and LTV verification** — RFC 3161 tokens require an authenticated TSA signature before acceptance, validation timeouts bound AIA/OCSP/CRL network calls, and B-LT/B-LTA evidence must include signed revocation material before levels are reported.
+
+See the [full changelog](CHANGELOG.md).
+
+---
+
 ## What's New in v0.9.0
 
 **Verifiable AdES level fulfillment** — a requested B-T/B-LT/B-LTA level now describes the artifact actually produced. Timestamp tokens are bound to their RFC 3161 request, LTV material is checked per certificate path, and result flags are derived from final-artifact inspection.

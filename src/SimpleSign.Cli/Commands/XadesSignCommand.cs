@@ -132,7 +132,7 @@ internal sealed class XadesSignCommand : AsyncCommand<XadesSignCommand.Settings>
         }
     }
 
-    protected override async Task<int> ExecuteAsync(
+    public override async Task<int> ExecuteAsync(
         CommandContext context, Settings settings, CancellationToken cancellationToken)
     {
         byte[] xmlData = await CommonSettings.ReadInputBytesAsync(settings.InputPath, cancellationToken);

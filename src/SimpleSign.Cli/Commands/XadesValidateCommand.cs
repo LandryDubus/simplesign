@@ -55,7 +55,7 @@ internal sealed class XadesValidateCommand : AsyncCommand<XadesValidateCommand.S
         }
     }
 
-    protected override async Task<int> ExecuteAsync(
+    public override async Task<int> ExecuteAsync(
         CommandContext context, Settings settings, CancellationToken cancellationToken)
     {
         byte[] signedXml = await CommonSettings.ReadInputBytesAsync(settings.SignaturePath, cancellationToken);

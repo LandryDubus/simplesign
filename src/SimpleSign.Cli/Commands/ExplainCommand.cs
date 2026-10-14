@@ -18,7 +18,7 @@ internal sealed class ExplainCommand : Command<ExplainCommand.Settings>
         public string? Term { get; init; }
     }
 
-    protected override int Execute(CommandContext context, Settings settings, CancellationToken cancellationToken)
+    public override int Execute(CommandContext context, Settings settings, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(settings.Term))
         {

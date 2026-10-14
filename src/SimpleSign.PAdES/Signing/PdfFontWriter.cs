@@ -11,7 +11,9 @@ internal static class PdfFontWriter
 {
     /// <summary>
     /// Builds a font file stream object (/FontFile2) containing the LiberationSans
-    /// TTF data compressed with FlateDecode.
+    /// TTF data compressed with FlateDecode. The dictionary includes /Length1
+    /// (decoded font program length), required by ISO 32000-1 §9.9 Table 126 so
+    /// that PDF processors (e.g. Adobe Acrobat) can extract the embedded font.
     /// </summary>
     internal static byte[] BuildFontFileObject(int objNum)
     {
@@ -20,6 +22,8 @@ internal static class PdfFontWriter
         sb.Append($"{objNum} 0 obj\n");
         sb.Append("<< /Length ");
         sb.Append(compressed.Length);
+        sb.Append("\n   /Length1 ");
+        sb.Append(FontResources.TtfData.Length);
         sb.Append("\n   /Filter /FlateDecode\n");
         sb.Append(">>\nstream\n");
 

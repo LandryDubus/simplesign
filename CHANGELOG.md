@@ -52,6 +52,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `/Kids` arrays. Compact, multiline, and mixed-whitespace arrays such as
   `/Kids[2 0 R 3 0 R]` are now parsed with PDF token rules (whitespace- and
   comment-aware indirect references), so widgets attach to the requested page.
+- Embedded LiberationSans `/FontFile2` streams now include `/Length1` (the
+  decoded TTF length), as required by ISO 32000-1 §9.9 Table 126. Adobe Acrobat
+  no longer reports that the embedded font cannot be extracted.
 
 ## [0.9.0] - 2026-09-30
 

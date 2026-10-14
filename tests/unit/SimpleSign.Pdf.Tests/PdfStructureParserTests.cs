@@ -617,6 +617,30 @@ public sealed class PdfStructureParserTests
         updated.ShouldContain("/DA (/Helv 0 Tf 0 g)");
     }
 
+    [Fact]
+    public void ParseFieldsArray_IndirectFieldsRef_ReturnsEmpty()
+    {
+        const string obj = "5 0 obj\n<< /Fields 50 0 R /DR << /Font [1 0 R] >> >>\nendobj\n";
+        var refs = PdfStructureParser.ParseFieldsArray(obj);
+        refs.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void ParseFieldsArray_CompactNoSpace_ReturnsRefs()
+    {
+        const string obj = "5 0 obj\n<< /Fields[51 0 R 52 0 R] >>\nendobj\n";
+        var refs = PdfStructureParser.ParseFieldsArray(obj);
+        refs.ShouldBe(["51 0 R", "52 0 R"]);
+    }
+
+    [Fact]
+    public void ParseFieldsArray_CommentInsideArray_SkipsComment()
+    {
+        const string obj = "5 0 obj\n<< /Fields [1 0 R % ]\n2 0 R] >>\nendobj\n";
+        var refs = PdfStructureParser.ParseFieldsArray(obj);
+        refs.ShouldBe(["1 0 R", "2 0 R"]);
+    }
+
     // ── RemoveKeyFromDict Token-Aware Tests ─────────────────────────────────
 
     [Fact]

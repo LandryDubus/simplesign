@@ -1126,6 +1126,10 @@ internal static class PdfStructureParser
     /// <summary>
     /// Parses the <c>/Fields [N 0 R ...]</c> array from a PDF object text,
     /// returning a list of indirect references like <c>"5 0 R"</c>.
+    /// The array must directly follow the <c>/Fields</c> key; when <c>/Fields</c>
+    /// holds an indirect reference (or anything else), an empty list is returned
+    /// so callers can fall back to <see cref="ResolveIndirectFields"/> instead of
+    /// mistaking a later key's array for the fields list.
     /// </summary>
     public static List<string> ParseFieldsArray(string objText)
     {
@@ -1136,9 +1140,20 @@ internal static class PdfStructureParser
             return references;
         }
 
-        int arrayOpenPos = objText.IndexOf('[', fieldsKeyPos);
-        int arrayClosePos = objText.IndexOf(']', fieldsKeyPos);
-        if (arrayOpenPos < 0 || arrayClosePos < 0 || arrayClosePos <= arrayOpenPos)
+        int cursor = fieldsKeyPos + PdfKeys.Fields.Length;
+        while (cursor < objText.Length && IsPdfWhitespaceChar(objText[cursor]))
+        {
+            cursor++;
+        }
+
+        if (cursor >= objText.Length || objText[cursor] != '[')
+        {
+            return references;
+        }
+
+        int arrayOpenPos = cursor;
+        int arrayClosePos = FindArrayEnd(objText, arrayOpenPos);
+        if (arrayClosePos <= arrayOpenPos)
         {
             return references;
         }

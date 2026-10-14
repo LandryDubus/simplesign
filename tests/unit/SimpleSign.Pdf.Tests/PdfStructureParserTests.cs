@@ -753,6 +753,53 @@ public sealed class PdfStructureParserTests
     public void FindEmptySignatureField_MismatchedName_ReturnsNegative() =>
         PdfStructureParser.FindEmptySignatureField(BuildFieldPdf("/T (Other)", "/V null"), "Sig1").ShouldBe(-1);
 
+    // ── CountVisibleSignatureAnnotations Tests ───────────────────────────────
+
+    private static byte[] BuildPdfWithSigWidgets(params string[] widgetBodies) =>
+        System.Text.Encoding.Latin1.GetBytes(
+            "%PDF-1.7\n" +
+            "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n" +
+            "2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n" +
+            $"3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Annots [{string.Join(' ', Enumerable.Range(0, widgetBodies.Length).Select(i => $"{4 + i} 0 R"))}] >>\nendobj\n" +
+            string.Concat(widgetBodies.Select((body, i) => $"{4 + i} 0 obj\n<< {body} >>\nendobj\n")) +
+            "xref\n0 4\ntrailer\n<< /Size 4 /Root 1 0 R >>\nstartxref\n0\n%%EOF\n");
+
+    [Fact]
+    public void CountVisibleSignatureAnnotations_LongDaBeforeRect_CountsWidget()
+    {
+        // /Rect lies more than 256 bytes after /FT /Sig (the old fixed-window limit).
+        string body = "/Type /Annot /Subtype /Widget /FT /Sig /T (Sig1) /DA (" +
+                      new string('x', 400) + ") /Rect [10 10 200 50]";
+
+        PdfStructureParser.CountVisibleSignatureAnnotations(BuildPdfWithSigWidgets(body)).ShouldBe(1);
+    }
+
+    [Fact]
+    public void CountVisibleSignatureAnnotations_ZeroRect_NotCounted()
+    {
+        string body = "/Type /Annot /Subtype /Widget /FT /Sig /T (Sig1) /Rect [0 0 0 0]";
+
+        PdfStructureParser.CountVisibleSignatureAnnotations(BuildPdfWithSigWidgets(body)).ShouldBe(0);
+    }
+
+    [Fact]
+    public void CountVisibleSignatureAnnotations_TwoVisibleWidgets_CountsBoth()
+    {
+        string body1 = "/Type /Annot /Subtype /Widget /FT /Sig /T (Sig1) /Rect [10 10 200 50]";
+        string body2 = "/Type /Annot /Subtype /Widget /FT /Sig /T (Sig2) /Rect [10 100 200 140]";
+
+        PdfStructureParser.CountVisibleSignatureAnnotations(BuildPdfWithSigWidgets(body1, body2)).ShouldBe(2);
+    }
+
+    [Fact]
+    public void CountVisibleSignatureAnnotations_RectOnlyInNestedDict_NotCounted()
+    {
+        // /Rect belongs to the nested /MK dictionary, not the widget itself.
+        string body = "/Type /Annot /Subtype /Widget /FT /Sig /T (Sig1) /MK << /Rect [10 10 200 50] >>";
+
+        PdfStructureParser.CountVisibleSignatureAnnotations(BuildPdfWithSigWidgets(body)).ShouldBe(0);
+    }
+
     // ── UsesXRefStreams Tests ───────────────────────────────────────────────
 
     [Fact]

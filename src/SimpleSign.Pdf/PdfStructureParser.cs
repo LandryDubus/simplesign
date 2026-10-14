@@ -991,47 +991,163 @@ internal static class PdfStructureParser
 
     /// <summary>
     /// Counts the number of existing visible signature annotations (with non-zero <c>/Rect</c>)
-    /// by scanning for <c>/FT /Sig</c> widget annotations in the PDF data.
+    /// by scanning for <c>/FT /Sig</c> widget annotations in the PDF data. Each widget's own
+    /// dictionary is located with the string-aware scanner and only a top-level /Rect entry is
+    /// considered, so nested dictionaries and long entries cannot skew the count.
     /// </summary>
     public static int CountVisibleSignatureAnnotations(ReadOnlySpan<byte> data)
     {
+        string text = Encoding.Latin1.GetString(data);
         int count = 0;
-        ReadOnlySpan<byte> token = "/FT /Sig"u8;
         int searchPos = 0;
 
-        while (searchPos < data.Length)
+        while (searchPos < text.Length)
         {
-            int matchPos = data.Slice(searchPos).IndexOf(token);
+            int matchPos = text.IndexOf(PdfKeys.FtSig, searchPos, StringComparison.Ordinal);
             if (matchPos < 0)
             {
                 break;
             }
 
-            matchPos += searchPos;
-
-            int windowStart = Math.Max(0, matchPos - 256);
-            int windowEnd = Math.Min(data.Length, matchPos + 256);
-            string window = Encoding.Latin1.GetString(data.Slice(windowStart, windowEnd - windowStart));
-
-            int rectIdx = window.IndexOf(PdfKeys.Rect, StringComparison.Ordinal);
-            if (rectIdx >= 0)
+            int dictStart = FindEnclosingDictStart(text, matchPos);
+            if (dictStart >= 0)
             {
-                int bracketOpen = window.IndexOf('[', rectIdx);
-                int bracketClose = window.IndexOf(']', rectIdx);
-                if (bracketOpen >= 0 && bracketClose > bracketOpen)
+                int dictEnd = FindDictEnd(text, dictStart);
+                if (dictEnd >= dictStart && HasNonZeroRect(text[dictStart..(dictEnd + 2)]))
                 {
-                    string rectContent = window.Substring(bracketOpen + 1, bracketClose - bracketOpen - 1).Trim();
-                    if (rectContent != "0 0 0 0")
-                    {
-                        count++;
-                    }
+                    count++;
                 }
             }
 
-            searchPos = matchPos + token.Length;
+            searchPos = matchPos + PdfKeys.FtSig.Length;
         }
 
         return count;
+    }
+
+    /// <summary>
+    /// Finds the start of the dictionary enclosing <paramref name="nearPos"/> by scanning
+    /// backwards, skipping literal strings and comments, and verifying the candidate
+    /// dictionary actually encloses the position.
+    /// </summary>
+    private static int FindEnclosingDictStart(string text, int nearPos)
+    {
+        for (int pos = nearPos; pos >= 1; pos--)
+        {
+            char c = text[pos];
+            if (c == ')')
+            {
+                pos = BacktrackLiteralString(text, pos);
+                continue;
+            }
+
+            if (c == '<' && text[pos - 1] == '<')
+            {
+                int candidate = pos - 1;
+                if (IsInsideComment(text, candidate))
+                {
+                    continue;
+                }
+
+                int end = FindDictEnd(text, candidate);
+                if (end >= nearPos)
+                {
+                    return candidate;
+                }
+            }
+        }
+
+        return -1;
+    }
+
+    /// <summary>
+    /// Determines whether a widget dictionary declares a visible rectangle
+    /// (a top-level /Rect array whose value is not [0 0 0 0]).
+    /// </summary>
+    private static bool HasNonZeroRect(string widgetDict)
+    {
+        int rectKeyPos = FindTopLevelKey(widgetDict, "/Rect");
+        if (rectKeyPos < 0)
+        {
+            return false;
+        }
+
+        int cursor = rectKeyPos + "/Rect".Length;
+        while (cursor < widgetDict.Length && IsPdfWhitespaceChar(widgetDict[cursor]))
+        {
+            cursor++;
+        }
+
+        if (cursor >= widgetDict.Length || widgetDict[cursor] != '[')
+        {
+            return false;
+        }
+
+        int closePos = FindArrayEnd(widgetDict, cursor);
+        if (closePos <= cursor)
+        {
+            return false;
+        }
+
+        string content = widgetDict.Substring(cursor + 1, closePos - cursor - 1);
+        string[] parts = content.Split([' ', '\n', '\r', '\t'], StringSplitOptions.RemoveEmptyEntries);
+        return string.Join(' ', parts) != "0 0 0 0";
+    }
+
+    /// <summary>
+    /// Backtracks from a closing ')' over the literal string it terminates, honouring
+    /// escape sequences and nested parentheses. Returns the index before the matching '(',
+    /// or -1 when no opening parenthesis is found.
+    /// </summary>
+    private static int BacktrackLiteralString(string text, int closePos)
+    {
+        int depth = 1;
+        int i = closePos - 1;
+        while (i >= 0 && depth > 0)
+        {
+            char c = text[i];
+            if (c == ')')
+            {
+                depth++;
+            }
+            else if (c == '(')
+            {
+                depth--;
+                if (depth == 0)
+                {
+                    return i - 1;
+                }
+            }
+            else if (c == '\\')
+            {
+                // Skip the escaped character immediately before the backslash.
+                i--;
+            }
+
+            i--;
+        }
+
+        return -1;
+    }
+
+    /// <summary>
+    /// Determines whether the given position is inside a comment (% to end of line),
+    /// by scanning backwards to the start of the line.
+    /// </summary>
+    private static bool IsInsideComment(string text, int pos)
+    {
+        int i = pos - 1;
+        while (i >= 0 && text[i] != '\n' && text[i] != '\r')
+        {
+            if (text[i] == '%')
+            {
+                return true;
+            }
+
+            i--;
+        }
+
+        return false;
     }
 
     /// <summary>

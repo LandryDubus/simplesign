@@ -157,28 +157,103 @@ internal static class PdfStructureParser
         }
 
         string catalogText = Encoding.Latin1.GetString(data.Slice(objStart, objEnd - objStart));
-        int acroFormKeyPos = catalogText.IndexOf(PdfKeys.AcroForm, StringComparison.Ordinal);
-        if (acroFormKeyPos < 0)
+        var (dictStart, dictEnd) = FindInlineAcroFormBounds(catalogText);
+        if (dictStart < 0)
         {
             return [];
         }
 
-        int cursor = acroFormKeyPos + PdfKeys.AcroForm.Length;
-        while (cursor < catalogText.Length && (catalogText[cursor] == ' ' || catalogText[cursor] == '\n' || catalogText[cursor] == '\r'))
+        return ParseFieldsArray(catalogText[dictStart..dictEnd]);
+    }
+
+    /// <summary>
+    /// Determines whether the Catalog contains an inline <c>/AcroForm</c> dictionary whose
+    /// <c>/Fields</c> entry is a direct array or absent — i.e. it can be updated in place
+    /// without converting the AcroForm to an indirect object.
+    /// </summary>
+    public static bool HasUpdatableInlineAcroForm(ReadOnlySpan<byte> data, int catalogObjNum)
+    {
+        var (objStart, objEnd) = FindObjectBytes(data, catalogObjNum);
+        if (objStart < 0)
+        {
+            return false;
+        }
+
+        string catalogText = Encoding.Latin1.GetString(data.Slice(objStart, objEnd - objStart));
+        var (dictStart, dictEnd) = FindInlineAcroFormBounds(catalogText);
+        if (dictStart < 0)
+        {
+            return false;
+        }
+
+        string inlineDict = catalogText[dictStart..dictEnd];
+        int fieldsKeyPos = inlineDict.IndexOf(PdfKeys.Fields, StringComparison.Ordinal);
+        if (fieldsKeyPos < 0)
+        {
+            return true;
+        }
+
+        int cursor = fieldsKeyPos + PdfKeys.Fields.Length;
+        while (cursor < inlineDict.Length && IsPdfWhitespaceChar(inlineDict[cursor]))
         {
             cursor++;
         }
 
-        // Only handle inline dict (starts with <<)
-        if (cursor >= catalogText.Length || catalogText[cursor] != '<')
+        return cursor < inlineDict.Length && inlineDict[cursor] == '[';
+    }
+
+    /// <summary>
+    /// Appends a field reference to the <c>/Fields</c> array of an inline <c>/AcroForm</c>
+    /// dictionary in a Catalog object text. When <c>/Fields</c> is a direct array, the
+    /// reference is appended before the closing bracket; when <c>/Fields</c> is absent, a
+    /// new array is inserted. All other inline dictionary entries are preserved unchanged.
+    /// Returns the input text unchanged when the Catalog has no inline AcroForm with an
+    /// updatable <c>/Fields</c> entry (e.g. <c>/Fields</c> is an indirect reference).
+    /// </summary>
+    public static string AppendFieldToInlineAcroForm(string catalogText, string fieldRef)
+    {
+        var (dictStart, dictEnd) = FindInlineAcroFormBounds(catalogText);
+        if (dictStart < 0)
         {
-            return [];
+            return catalogText;
         }
 
-        // Find matching >> for the inline dict
+        string inlineDict = catalogText[dictStart..dictEnd];
+        string updatedDict = AppendFieldRefToInlineDict(inlineDict, fieldRef);
+        if (ReferenceEquals(updatedDict, inlineDict))
+        {
+            return catalogText;
+        }
+
+        return string.Concat(catalogText.AsSpan(0, dictStart), updatedDict, catalogText.AsSpan(dictEnd));
+    }
+
+    /// <summary>
+    /// Locates the inline <c>/AcroForm &lt;&lt;…&gt;&gt;</c> dictionary in a Catalog object
+    /// text and returns its bounds (the dictionary delimiters inclusive), or (-1, -1) when
+    /// the Catalog has no inline AcroForm. Nested dictionaries (e.g. /DR) are depth-tracked.
+    /// </summary>
+    private static (int Start, int End) FindInlineAcroFormBounds(string catalogText)
+    {
+        int acroFormKeyPos = catalogText.IndexOf(PdfKeys.AcroForm, StringComparison.Ordinal);
+        if (acroFormKeyPos < 0)
+        {
+            return (-1, -1);
+        }
+
+        int cursor = acroFormKeyPos + PdfKeys.AcroForm.Length;
+        while (cursor < catalogText.Length && IsPdfWhitespaceChar(catalogText[cursor]))
+        {
+            cursor++;
+        }
+
+        if (cursor >= catalogText.Length || catalogText[cursor] != '<')
+        {
+            return (-1, -1);
+        }
+
         int depth = 0;
         int dictStart = cursor;
-        int dictEnd = -1;
         for (int i = dictStart; i < catalogText.Length - 1; i++)
         {
             if (catalogText[i] == '<' && catalogText[i + 1] == '<')
@@ -192,19 +267,87 @@ internal static class PdfStructureParser
                 i++;
                 if (depth == 0)
                 {
-                    dictEnd = i + 1;
-                    break;
+                    return (dictStart, i + 1);
                 }
             }
         }
 
-        if (dictEnd < 0)
+        return (-1, -1);
+    }
+
+    /// <summary>
+    /// Appends a field reference to the /Fields entry of an inline AcroForm dictionary.
+    /// Returns the input dictionary unchanged when /Fields is an indirect reference.
+    /// </summary>
+    private static string AppendFieldRefToInlineDict(string inlineDict, string fieldRef)
+    {
+        int fieldsKeyPos = inlineDict.IndexOf(PdfKeys.Fields, StringComparison.Ordinal);
+        if (fieldsKeyPos >= 0)
         {
-            return [];
+            int cursor = fieldsKeyPos + PdfKeys.Fields.Length;
+            while (cursor < inlineDict.Length && IsPdfWhitespaceChar(inlineDict[cursor]))
+            {
+                cursor++;
+            }
+
+            if (cursor < inlineDict.Length && inlineDict[cursor] == '[')
+            {
+                int closePos = FindClosingBracket(inlineDict, cursor);
+                if (closePos > cursor)
+                {
+                    bool isEmpty = true;
+                    for (int i = cursor + 1; i < closePos; i++)
+                    {
+                        if (!IsPdfWhitespaceChar(inlineDict[i]))
+                        {
+                            isEmpty = false;
+                            break;
+                        }
+                    }
+
+                    string insert = isEmpty ? fieldRef : $" {fieldRef}";
+                    return string.Concat(inlineDict.AsSpan(0, closePos), insert, inlineDict.AsSpan(closePos));
+                }
+            }
+
+            // /Fields is an indirect reference — cannot be updated in place.
+            return inlineDict;
         }
 
-        string inlineDict = catalogText[dictStart..dictEnd];
-        return ParseFieldsArray(inlineDict);
+        // No /Fields entry: insert a new array before the inline dictionary's closing >>.
+        int dictClosePos = inlineDict.LastIndexOf(">>", StringComparison.Ordinal);
+        if (dictClosePos < 0)
+        {
+            return inlineDict;
+        }
+
+        return string.Concat(inlineDict.AsSpan(0, dictClosePos), $" /Fields [{fieldRef}] ", inlineDict.AsSpan(dictClosePos));
+    }
+
+    /// <summary>
+    /// Finds the bracket that closes the array opened at the given position, tracking
+    /// nested arrays. Returns -1 when no closing bracket is found.
+    /// </summary>
+    private static int FindClosingBracket(string text, int openBracketPos)
+    {
+        int depth = 0;
+        for (int i = openBracketPos; i < text.Length; i++)
+        {
+            if (text[i] == '[')
+            {
+                depth++;
+            }
+            else if (text[i] == ']')
+            {
+                depth--;
+                if (depth == 0)
+                {
+                    return i;
+                }
+            }
+        }
+
+        return -1;
     }
 
     /// <summary>

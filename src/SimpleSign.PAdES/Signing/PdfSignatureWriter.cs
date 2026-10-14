@@ -160,8 +160,13 @@ public sealed class PdfSignatureWriter
         // Reuse existing AcroForm object number to avoid changing the Catalog reference
         // (changing it breaks EU DSS validation of the first signature in multi-sig PDFs).
         bool reuseAcroForm = existingAcroFormObjNum > 0;
+        // An inline /AcroForm dictionary in the Catalog must stay inline: converting it to an
+        // indirect object drops entries such as /DA and /DR, and Acrobat's modification analysis
+        // then invalidates earlier signatures.
+        bool preserveInlineAcroForm = !reuseAcroForm
+            && PdfStructureParser.HasUpdatableInlineAcroForm(inputMem.Span, catalogObjNum);
         int acroFormObjNum = reuseAcroForm ? existingAcroFormObjNum : (nextObjNum + 2);
-        int appObjNum = reuseAcroForm ? (nextObjNum + 2) : (nextObjNum + 3);
+        int appObjNum = (reuseAcroForm || preserveInlineAcroForm) ? (nextObjNum + 2) : (nextObjNum + 3);
         int imageObjNum = appObjNum + 1;
         int fontFileObjNum = appObjNum + 2;
         int fontDescriptorObjNum = appObjNum + 3;
@@ -206,14 +211,18 @@ public sealed class PdfSignatureWriter
         string fieldDictText = BuildFieldAnnotation(options, fieldAnnParams, pdfALevel);
         byte[] sigDictBytes = Encoding.Latin1.GetBytes(sigDictText);
         byte[] fieldDictBytes = Encoding.Latin1.GetBytes(fieldDictText);
-        byte[] acroFormBytes = BuildAcroFormDictionary(acroFormObjNum, inputMem.Span, existingAcroFormObjNum, fieldObjNum, catalogObjNum);
+        byte[]? acroFormBytes = preserveInlineAcroForm
+            ? null
+            : BuildAcroFormDictionary(acroFormObjNum, inputMem.Span, existingAcroFormObjNum, fieldObjNum, catalogObjNum);
 
         // Only rewrite the Catalog when the AcroForm reference changes or certification is needed.
         // Rewriting the Catalog in a 2nd incremental update (even with identical content) causes
         // EU DSS to flag the 1st signature as inconsistent.
         bool needCatalogUpdate = !reuseAcroForm || options.CertificationLevel is not null;
         byte[]? catalogBytes = needCatalogUpdate
-            ? BuildCatalogDictionary(catalogObjNum, inputMem.Span, acroFormObjNum, options.CertificationLevel)
+            ? preserveInlineAcroForm
+                ? BuildCatalogWithUpdatedInlineAcroForm(catalogObjNum, inputMem.Span, fieldObjNum, options.CertificationLevel)
+                : BuildCatalogDictionary(catalogObjNum, inputMem.Span, acroFormObjNum, options.CertificationLevel)
             : null;
 
         // Step 6: Write objects and compute byte offsets.
@@ -225,7 +234,10 @@ public sealed class PdfSignatureWriter
         int byteRangePos = sigDictText.IndexOf(PdfKeys.ByteRange, StringComparison.Ordinal);
         (logger ?? NullLogger.Instance).PdfSigDictWritten(sigObjOffset, sigObjOffset + byteRangePos);
         await outputStream.WriteAsync(fieldDictBytes, cancellationToken).ConfigureAwait(false);
-        await outputStream.WriteAsync(acroFormBytes, cancellationToken).ConfigureAwait(false);
+        if (acroFormBytes != null)
+        {
+            await outputStream.WriteAsync(acroFormBytes, cancellationToken).ConfigureAwait(false);
+        }
 
         long catalogObjOffset = 0L;
         if (catalogBytes != null)
@@ -308,9 +320,12 @@ public sealed class PdfSignatureWriter
         SortedDictionary<int, long> objectOffsets = new SortedDictionary<int, long>
         {
             [sigObjNum] = sigObjOffset,
-            [fieldObjNum] = fieldObjOffset,
-            [acroFormObjNum] = acroFormObjOffset
+            [fieldObjNum] = fieldObjOffset
         };
+        if (acroFormBytes != null)
+        {
+            objectOffsets[acroFormObjNum] = acroFormObjOffset;
+        }
         if (needCatalogUpdate)
         {
             objectOffsets[catalogObjNum] = catalogObjOffset;
@@ -682,6 +697,35 @@ public sealed class PdfSignatureWriter
         // ITI guide: do NOT add /Perms with /DocMDP to the catalog (Adobe compatibility issues).
         // The /Reference array in the signature object is sufficient for DocMDP.
         return Encoding.Latin1.GetBytes($"{catalogObjNum} 0 obj\n<< /Type /Catalog /AcroForm {acroFormObjNum} 0 R >>\nendobj\n");
+    }
+
+    /// <summary>
+    /// Rewrites the Catalog object preserving its inline /AcroForm dictionary: the new field
+    /// reference is appended to the /Fields array while every other inline entry (e.g. /DA,
+    /// /DR, /Q, /NeedAppearances, /XFA, /CO, /SigFlags) is kept unchanged. Keeping the inline
+    /// representation avoids the structural change that makes Acrobat's modification analysis
+    /// invalidate earlier signatures.
+    /// </summary>
+    private static byte[] BuildCatalogWithUpdatedInlineAcroForm(int catalogObjNum, ReadOnlySpan<byte> data, int fieldObjNum, CertificationLevel? certLevel = null)
+    {
+        // The caller pre-checked the Catalog via HasUpdatableInlineAcroForm, which found the
+        // object, so this lookup succeeds for the same input bytes.
+        var (objStart, objEnd) = PdfStructureParser.FindObjectBytes(data, catalogObjNum);
+        string catalogText = Encoding.Latin1.GetString(data.Slice(objStart, objEnd - objStart));
+
+        // Remove a stale /Perms entry when certifying (same behaviour as BuildCatalogDictionary).
+        string updatedCatalog = certLevel is not null
+            ? PdfStructureParser.RemoveKeyFromDict(catalogText, PdfKeys.Perms)
+            : catalogText;
+
+        updatedCatalog = PdfStructureParser.AppendFieldToInlineAcroForm(updatedCatalog, $"{fieldObjNum} 0 R");
+
+        if (!updatedCatalog.EndsWith('\n'))
+        {
+            updatedCatalog += "\n";
+        }
+
+        return Encoding.Latin1.GetBytes(updatedCatalog);
     }
 
     internal static byte[] BuildAcroFormDictionary(int acroFormObjNum, ReadOnlySpan<byte> data, int existingAcroFormObjNum, int fieldObjNum, int catalogObjNum = 0)

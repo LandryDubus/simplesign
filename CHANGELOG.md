@@ -55,6 +55,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Embedded LiberationSans `/FontFile2` streams now include `/Length1` (the
   decoded TTF length), as required by ISO 32000-1 §9.9 Table 126. Adobe Acrobat
   no longer reports that the embedded font cannot be extracted.
+- Adding a signature to a PDF whose Catalog contains an inline `/AcroForm`
+  dictionary no longer converts it to an indirect object. The inline dictionary
+  is preserved (including `/DA`, `/DR` and other entries) and only `/Fields`
+  gains the new reference, so Acrobat no longer invalidates earlier signatures.
 
 ## [0.9.0] - 2026-09-30
 

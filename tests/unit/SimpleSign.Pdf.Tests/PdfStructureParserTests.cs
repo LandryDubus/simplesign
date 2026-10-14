@@ -455,6 +455,124 @@ public sealed class PdfStructureParserTests
         PdfStructureParser.FindFirstPageObjNumFromCatalog(pdf).ShouldBe(3);
     }
 
+    // ── Inline AcroForm Preservation Tests ───────────────────────────────────
+
+    private static byte[] BuildCatalogPdf(string catalogEntries) =>
+        System.Text.Encoding.Latin1.GetBytes(
+            "%PDF-1.7\n" +
+            $"1 0 obj\n<< /Type /Catalog {catalogEntries} >>\nendobj\n");
+
+    [Fact]
+    public void AppendFieldToInlineAcroForm_DirectFieldsArray_AppendsRef()
+    {
+        const string catalog = "1 0 obj\n<< /Type /Catalog /AcroForm << /SigFlags 3 /Fields [51 0 R] /DA (/Helv 0 Tf 0 g) >> >>\nendobj\n";
+
+        string updated = PdfStructureParser.AppendFieldToInlineAcroForm(catalog, "62 0 R");
+
+        updated.ShouldContain("/Fields [51 0 R 62 0 R]");
+        updated.ShouldContain("/DA (/Helv 0 Tf 0 g)");
+        updated.ShouldContain("/SigFlags 3");
+    }
+
+    [Fact]
+    public void AppendFieldToInlineAcroForm_NoSpaceFieldsArray_AppendsRef()
+    {
+        const string catalog = "1 0 obj\n<< /Type /Catalog /AcroForm<< /Fields[51 0 R] /DA (/Helv 0 Tf 0 g) >> >>\nendobj\n";
+
+        string updated = PdfStructureParser.AppendFieldToInlineAcroForm(catalog, "62 0 R");
+
+        updated.ShouldContain("/Fields[51 0 R 62 0 R]");
+    }
+
+    [Fact]
+    public void AppendFieldToInlineAcroForm_MultilineFields_PreservesNestedResources()
+    {
+        const string catalog = "1 0 obj\n<<\n/Type /Catalog\n/AcroForm <<\n/SigFlags 3\n/Fields [\n51 0 R\n]\n/DA (/Helv 0 Tf 0 g)\n/DR <<\n/Font <<\n/Helv 52 0 R\n>>\n>>\n>>\n>>\nendobj\n";
+
+        string updated = PdfStructureParser.AppendFieldToInlineAcroForm(catalog, "62 0 R");
+
+        updated.ShouldContain("51 0 R\n 62 0 R]");
+        updated.ShouldContain("/DA (/Helv 0 Tf 0 g)");
+        updated.ShouldContain("/Helv 52 0 R");
+    }
+
+    [Fact]
+    public void AppendFieldToInlineAcroForm_EmptyFieldsArray_InsertsWithoutLeadingSpace()
+    {
+        const string catalog = "1 0 obj\n<< /Type /Catalog /AcroForm << /Fields [] >> >>\nendobj\n";
+
+        string updated = PdfStructureParser.AppendFieldToInlineAcroForm(catalog, "62 0 R");
+
+        updated.ShouldContain("/Fields [62 0 R]");
+    }
+
+    [Fact]
+    public void AppendFieldToInlineAcroForm_MissingFieldsKey_InsertsNewArray()
+    {
+        const string catalog = "1 0 obj\n<< /Type /Catalog /AcroForm << /SigFlags 3 /DA (/Helv 0 Tf 0 g) >> >>\nendobj\n";
+
+        string updated = PdfStructureParser.AppendFieldToInlineAcroForm(catalog, "62 0 R");
+
+        updated.ShouldContain("/Fields [62 0 R]");
+        updated.ShouldContain("/DA (/Helv 0 Tf 0 g)");
+    }
+
+    [Fact]
+    public void AppendFieldToInlineAcroForm_IndirectFieldsRef_ReturnsUnchanged()
+    {
+        const string catalog = "1 0 obj\n<< /Type /Catalog /AcroForm << /Fields 51 0 R /DA (/Helv 0 Tf 0 g) >> >>\nendobj\n";
+
+        PdfStructureParser.AppendFieldToInlineAcroForm(catalog, "62 0 R").ShouldBe(catalog);
+    }
+
+    [Fact]
+    public void AppendFieldToInlineAcroForm_NoInlineAcroForm_ReturnsUnchanged()
+    {
+        const string catalog = "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n";
+
+        PdfStructureParser.AppendFieldToInlineAcroForm(catalog, "62 0 R").ShouldBe(catalog);
+    }
+
+    [Fact]
+    public void HasUpdatableInlineAcroForm_DirectFieldsArray_ReturnsTrue()
+    {
+        byte[] pdf = BuildCatalogPdf("/AcroForm << /Fields [51 0 R] /DA (/Helv 0 Tf 0 g) >>");
+
+        PdfStructureParser.HasUpdatableInlineAcroForm(pdf, 1).ShouldBeTrue();
+    }
+
+    [Fact]
+    public void HasUpdatableInlineAcroForm_MissingFields_ReturnsTrue()
+    {
+        byte[] pdf = BuildCatalogPdf("/AcroForm << /SigFlags 3 >>");
+
+        PdfStructureParser.HasUpdatableInlineAcroForm(pdf, 1).ShouldBeTrue();
+    }
+
+    [Fact]
+    public void HasUpdatableInlineAcroForm_IndirectFieldsRef_ReturnsFalse()
+    {
+        byte[] pdf = BuildCatalogPdf("/AcroForm << /Fields 51 0 R >>");
+
+        PdfStructureParser.HasUpdatableInlineAcroForm(pdf, 1).ShouldBeFalse();
+    }
+
+    [Fact]
+    public void HasUpdatableInlineAcroForm_IndirectAcroForm_ReturnsFalse()
+    {
+        byte[] pdf = BuildCatalogPdf("/AcroForm 5 0 R");
+
+        PdfStructureParser.HasUpdatableInlineAcroForm(pdf, 1).ShouldBeFalse();
+    }
+
+    [Fact]
+    public void HasUpdatableInlineAcroForm_NoAcroForm_ReturnsFalse()
+    {
+        byte[] pdf = BuildCatalogPdf("/Pages 2 0 R");
+
+        PdfStructureParser.HasUpdatableInlineAcroForm(pdf, 1).ShouldBeFalse();
+    }
+
     // ── UsesXRefStreams Tests ───────────────────────────────────────────────
 
     [Fact]

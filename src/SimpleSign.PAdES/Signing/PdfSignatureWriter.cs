@@ -1073,17 +1073,22 @@ public sealed class PdfSignatureWriter
 
                     if (refObjNum > 0)
                     {
-                        // Resolve the indirect reference and get the array contents
+                        // Resolve the indirect reference and get the array contents.
+                        // The array object may live in a compressed Object Stream, in which
+                        // case FindObjectBytes cannot locate it.
                         var (refStart, refEnd) = PdfStructureParser.FindObjectBytes(data, refObjNum);
                         string existingRefs = "";
                         if (refStart >= 0)
                         {
                             string refObj = Encoding.Latin1.GetString(data.Slice(refStart, refEnd - refStart));
-                            int bracketOpen = refObj.IndexOf('[');
-                            int bracketClose = refObj.LastIndexOf(']');
-                            if (bracketOpen >= 0 && bracketClose > bracketOpen)
+                            existingRefs = ExtractArrayContent(refObj);
+                        }
+                        else
+                        {
+                            string? compressedAnnots = PdfStructureParser.ExtractObjectFromObjStm(data, refObjNum);
+                            if (compressedAnnots != null)
                             {
-                                existingRefs = refObj.Substring(bracketOpen + 1, bracketClose - bracketOpen - 1).Trim();
+                                existingRefs = ExtractArrayContent(compressedAnnots);
                             }
                         }
 
@@ -1192,6 +1197,27 @@ public sealed class PdfSignatureWriter
         }
 
         return Encoding.Latin1.GetBytes(updatedPage);
+    }
+
+    /// <summary>
+    /// Extracts the content between the first '[' and its matching ']' from an
+    /// array object text (e.g. an indirect /Annots array), returning it trimmed.
+    /// </summary>
+    private static string ExtractArrayContent(string arrayObjectText)
+    {
+        int bracketOpen = arrayObjectText.IndexOf('[');
+        if (bracketOpen < 0)
+        {
+            return "";
+        }
+
+        int bracketClose = PdfStructureParser.FindArrayEnd(arrayObjectText, bracketOpen);
+        if (bracketClose <= bracketOpen)
+        {
+            return "";
+        }
+
+        return arrayObjectText.Substring(bracketOpen + 1, bracketClose - bracketOpen - 1).Trim();
     }
 
     private static string AppendAnnots(string pageObj, string fieldRef)

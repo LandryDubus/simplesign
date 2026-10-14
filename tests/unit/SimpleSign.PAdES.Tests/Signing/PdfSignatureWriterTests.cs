@@ -406,6 +406,87 @@ public sealed class PdfSignatureWriterTests
         return Encoding.Latin1.GetBytes(sb.ToString());
     }
 
+    [Fact(DisplayName = "Page with compressed indirect /Annots keeps existing annotations")]
+    public async Task PrepareAsync_CompressedIndirectAnnots_PreservesExistingAnnotations()
+    {
+        byte[] pdfBytes = BuildPdfWithCompressedIndirectAnnots();
+        using var input = new MemoryStream(pdfBytes);
+        using var output = new MemoryStream();
+
+        await PdfSignatureWriter.PrepareAsync(input, output, DefaultOptions());
+
+        string outputText = Encoding.Latin1.GetString(output.ToArray());
+        outputText.ShouldContain("/Annots [11 0 R 6 0 R]");
+    }
+
+    /// <summary>
+    /// Builds a PDF whose page /Annots is an indirect reference to an array object
+    /// (object 10) stored inside a compressed Object Stream (object 4), reproducing
+    /// the structure used by iText/Adobe for compact PDFs.
+    /// </summary>
+    private static byte[] BuildPdfWithCompressedIndirectAnnots()
+    {
+        var sb = new StringBuilder();
+        sb.Append("%PDF-1.7\n");
+
+        int obj1Offset = sb.Length;
+        sb.Append("1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n");
+
+        int obj2Offset = sb.Length;
+        sb.Append("2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n");
+
+        int obj3Offset = sb.Length;
+        sb.Append("3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Annots 10 0 R >>\nendobj\n");
+
+        string annotsArray = "[11 0 R]";
+        string dummyData = "<< /Type /Annot >>";
+        string objStmHeader = $"10 0 11 {annotsArray.Length}\n";
+        string uncompressed = objStmHeader + annotsArray + dummyData;
+        byte[] uncompressedBytes = Encoding.Latin1.GetBytes(uncompressed);
+
+        byte[] compressed;
+        using (var ms = new MemoryStream())
+        {
+            ms.WriteByte(0x78);
+            ms.WriteByte(0x01);
+            using (var deflate = new System.IO.Compression.DeflateStream(ms, System.IO.Compression.CompressionLevel.Fastest, leaveOpen: true))
+            {
+                deflate.Write(uncompressedBytes);
+            }
+
+            compressed = ms.ToArray();
+        }
+
+        int obj4Offset = sb.Length;
+        sb.Append($"4 0 obj\n<< /Type /ObjStm /N 2 /First {objStmHeader.Length} /Filter /FlateDecode /Length {compressed.Length} >>\nstream\n");
+        int streamInsertPos = Encoding.Latin1.GetByteCount(sb.ToString());
+
+        string afterStream = "\nendstream\nendobj\n";
+        int xrefOffset = streamInsertPos + compressed.Length + Encoding.Latin1.GetByteCount(afterStream);
+
+        var xrefSb = new StringBuilder();
+        xrefSb.Append("xref\n0 5\n");
+        xrefSb.Append("0000000000 65535 f \n");
+        xrefSb.Append($"{obj1Offset:D10} 00000 n \n");
+        xrefSb.Append($"{obj2Offset:D10} 00000 n \n");
+        xrefSb.Append($"{obj3Offset:D10} 00000 n \n");
+        xrefSb.Append($"{obj4Offset:D10} 00000 n \n");
+        xrefSb.Append("trailer\n<< /Size 5 /Root 1 0 R >>\n");
+        xrefSb.Append($"startxref\n{xrefOffset}\n%%EOF\n");
+
+        byte[] beforeStream = Encoding.Latin1.GetBytes(sb.ToString());
+        byte[] afterStreamBytes = Encoding.Latin1.GetBytes(afterStream);
+        byte[] xrefBytes = Encoding.Latin1.GetBytes(xrefSb.ToString());
+
+        var result = new byte[beforeStream.Length + compressed.Length + afterStreamBytes.Length + xrefBytes.Length];
+        beforeStream.CopyTo(result, 0);
+        compressed.CopyTo(result, beforeStream.Length);
+        afterStreamBytes.CopyTo(result, beforeStream.Length + compressed.Length);
+        xrefBytes.CopyTo(result, beforeStream.Length + compressed.Length + afterStreamBytes.Length);
+
+        return result;
+    }
+
     // ── Helper: non-seekable stream ────────────────────────────────────────────
 
     private sealed class NonSeekableStream : MemoryStream

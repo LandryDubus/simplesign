@@ -312,6 +312,10 @@ public sealed class SignatureAppearanceEndToEndTests
         results.Count.ShouldBe(1);
         results[0].IsIntegrityValid.ShouldBeTrue();
         results[0].IsSignatureValid.ShouldBeTrue();
+
+        // Page 2 is object 4 in the three-page fixture; the widget field must
+        // reference it via /P (compact one-line /Kids array must traverse correctly).
+        Encoding.Latin1.GetString(signed).ShouldContain("/P 4 0 R");
     }
 
     [Fact]
@@ -328,5 +332,8 @@ public sealed class SignatureAppearanceEndToEndTests
         results.Count.ShouldBe(1);
         results[0].IsIntegrityValid.ShouldBeTrue();
         results[0].IsSignatureValid.ShouldBeTrue();
+
+        // Page 3 is object 5 in the three-page fixture.
+        Encoding.Latin1.GetString(signed).ShouldContain("/P 5 0 R");
     }
 }

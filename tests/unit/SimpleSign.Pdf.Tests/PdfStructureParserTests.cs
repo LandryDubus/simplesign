@@ -370,6 +370,91 @@ public sealed class PdfStructureParserTests
         refs.ShouldBe(["10 0 R", "20 0 R", "30 0 R", "40 0 R"]);
     }
 
+    // ── Page Tree (/Kids) Parsing Tests ─────────────────────────────────────
+
+    /// <summary>
+    /// Builds a 3-page PDF whose /Pages object embeds the given dictionary entries
+    /// (normally a /Kids array plus /Count), for page-tree traversal tests.
+    /// </summary>
+    private static byte[] BuildPdfWithPagesObject(string pagesEntries)
+    {
+        return System.Text.Encoding.Latin1.GetBytes(
+            "%PDF-1.7\n" +
+            "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n" +
+            $"2 0 obj\n<< /Type /Pages {pagesEntries} >>\nendobj\n" +
+            "3 0 obj\n<< /Type /Page /Parent 2 0 R >>\nendobj\n" +
+            "4 0 obj\n<< /Type /Page /Parent 2 0 R >>\nendobj\n" +
+            "5 0 obj\n<< /Type /Page /Parent 2 0 R >>\nendobj\n" +
+            "trailer\n<< /Root 1 0 R >>\n%%EOF\n");
+    }
+
+    private static void AssertPages(byte[] pdf, params (int Page, int ObjNum)[] expected)
+    {
+        foreach (var (page, objNum) in expected)
+        {
+            PdfStructureParser.FindNthPageObjNum(pdf, page).ShouldBe(objNum, $"page {page}");
+        }
+    }
+
+    [Fact]
+    public void FindNthPageObjNum_CompactKidsArray_ReturnsCorrectPages()
+    {
+        byte[] pdf = BuildPdfWithPagesObject("/Kids[3 0 R 4 0 R 5 0 R] /Count 3");
+        AssertPages(pdf, (1, 3), (2, 4), (3, 5));
+    }
+
+    [Fact]
+    public void FindNthPageObjNum_SpacedCompactKidsArray_ReturnsCorrectPages()
+    {
+        byte[] pdf = BuildPdfWithPagesObject("/Kids [ 3 0 R 4 0 R 5 0 R ] /Count 3");
+        AssertPages(pdf, (1, 3), (2, 4), (3, 5));
+    }
+
+    [Fact]
+    public void FindNthPageObjNum_MultilineKidsArray_ReturnsCorrectPages()
+    {
+        byte[] pdf = BuildPdfWithPagesObject("/Kids[\n3 0 R\n4 0 R\n5 0 R\n] /Count 3");
+        AssertPages(pdf, (1, 3), (2, 4), (3, 5));
+    }
+
+    [Fact]
+    public void FindNthPageObjNum_CommentSeparatedKidsArray_ReturnsCorrectPages()
+    {
+        byte[] pdf = BuildPdfWithPagesObject("/Kids[3 0 R% comment\n4 0 R 5 0 R] /Count 3");
+        AssertPages(pdf, (1, 3), (2, 4), (3, 5));
+    }
+
+    [Fact]
+    public void FindNthPageObjNum_MixedWhitespaceKidsArray_ReturnsCorrectPages()
+    {
+        byte[] pdf = BuildPdfWithPagesObject("/Kids[3 0 R\t4 0 R\r\n5 0 R] /Count 3");
+        AssertPages(pdf, (1, 3), (2, 4), (3, 5));
+    }
+
+    [Fact]
+    public void FindNthPageObjNum_GenerationOnSeparateLines_ReturnsCorrectPages()
+    {
+        // Valid PDF: whitespace (including line breaks) may appear between any tokens
+        // of an indirect reference.
+        byte[] pdf = BuildPdfWithPagesObject("/Kids[3\n0\nR\n4\n0\nR\n5\n0\nR] /Count 3");
+        AssertPages(pdf, (1, 3), (2, 4), (3, 5));
+    }
+
+    [Fact]
+    public void FindNthPageObjNum_CompactKidsArray_PageBeyondCountReturnsNegativeOne()
+    {
+        byte[] pdf = BuildPdfWithPagesObject("/Kids[3 0 R 4 0 R 5 0 R] /Count 3");
+        PdfStructureParser.FindNthPageObjNum(pdf, 4).ShouldBe(-1);
+        PdfStructureParser.FindNthPageObjNum(pdf, 0).ShouldBe(-1);
+    }
+
+    [Fact]
+    public void FindFirstPageObjNumFromCatalog_CompactKidsArray_ReturnsFirstPage()
+    {
+        byte[] pdf = BuildPdfWithPagesObject("/Kids[3 0 R 4 0 R 5 0 R] /Count 3");
+        PdfStructureParser.FindFirstPageObjNumFromCatalog(pdf).ShouldBe(3);
+    }
+
     // ── UsesXRefStreams Tests ───────────────────────────────────────────────
 
     [Fact]

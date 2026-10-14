@@ -7,6 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+<<<<<<< HEAD
 ### Improved
 
 - XAdES documentation distinguishes structural `DetectedLevel` from checked
@@ -47,6 +48,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CMS encapsulated content uses the required explicit wrapper, and added unsigned
   attributes use DER `SET OF` ordering. Validation still recognizes legacy CAdES-XL
   certificate and revocation attributes in existing signatures.
+- Page lookup for visible signatures no longer depends on line breaks inside
+  `/Kids` arrays. Compact, multiline, and mixed-whitespace arrays such as
+  `/Kids[2 0 R 3 0 R]` are now parsed with PDF token rules (whitespace- and
+  comment-aware indirect references), so widgets attach to the requested page.
 
 ## [0.9.0] - 2026-09-30
 

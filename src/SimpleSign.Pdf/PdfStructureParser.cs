@@ -319,38 +319,15 @@ internal static class PdfStructureParser
             return -1;
         }
 
-        // Extract first /Kids entry
+        // Extract the /Kids child references
         int kidsPos = pagesText.IndexOf(PdfKeys.Kids, StringComparison.Ordinal);
         if (kidsPos < 0)
         {
             return -1;
         }
 
-        int bracketStart = pagesText.IndexOf('[', kidsPos);
-        if (bracketStart < 0)
-        {
-            return -1;
-        }
-
-        // Parse first object reference in /Kids array
-        int cursor = bracketStart + 1;
-        while (cursor < pagesText.Length && !char.IsDigit(pagesText[cursor]))
-        {
-            cursor++;
-        }
-
-        int numStart = cursor;
-        while (cursor < pagesText.Length && char.IsDigit(pagesText[cursor]))
-        {
-            cursor++;
-        }
-
-        if (numStart < cursor && int.TryParse(pagesText.AsSpan(numStart, cursor - numStart), out int firstPageObj))
-        {
-            return firstPageObj;
-        }
-
-        return -1;
+        List<int> childObjNums = ParseKidsArrayReferences(pagesText, kidsPos);
+        return childObjNums.Count > 0 ? childObjNums[0] : -1;
     }
 
     /// <summary>
@@ -388,55 +365,166 @@ internal static class PdfStructureParser
             return -1;
         }
 
+        // Extract the /Kids child references
         int kidsPos = pagesText.IndexOf(PdfKeys.Kids, StringComparison.Ordinal);
         if (kidsPos < 0)
         {
             return -1;
         }
 
-        int bracketStart = pagesText.IndexOf('[', kidsPos);
-        if (bracketStart < 0)
+        List<int> childObjNums = ParseKidsArrayReferences(pagesText, kidsPos);
+        if (pageNumber > childObjNums.Count)
         {
             return -1;
         }
 
-        int count = 0;
-        int cursor = bracketStart + 1;
-        while (cursor < pagesText.Length && count < pageNumber)
-        {
-            while (cursor < pagesText.Length && !char.IsDigit(pagesText[cursor]))
-            {
-                cursor++;
-            }
+        return childObjNums[pageNumber - 1];
+    }
 
-            if (cursor >= pagesText.Length)
+    /// <summary>
+    /// Parses the <c>/Kids</c> array that follows the given <c>/Kids</c> key position in a
+    /// <c>/Pages</c> dictionary text, using PDF token rules rather than line-oriented matching.
+    /// Each child entry is an indirect reference (<c>objNum genNum R</c>). Entries may be
+    /// separated by any PDF whitespace character (NUL, TAB, LF, FF, CR, SP — ISO 32000-1 §7.2.2),
+    /// and comments (<c>%</c> to end of line) are skipped where PDF syntax permits them.
+    /// Line endings are not required between entries.
+    /// </summary>
+    /// <param name="pagesText">The text of the <c>/Pages</c> object (dictionary or extracted ObjStm content).</param>
+    /// <param name="kidsKeyPos">The position of the <c>/Kids</c> key within <paramref name="pagesText"/>.</param>
+    /// <returns>The object numbers of the /Kids children, in array order.</returns>
+    private static List<int> ParseKidsArrayReferences(string pagesText, int kidsKeyPos)
+    {
+        List<int> childObjNums = [];
+
+        int openBracket = pagesText.IndexOf('[', kidsKeyPos);
+        if (openBracket < 0)
+        {
+            return childObjNums;
+        }
+
+        int cursor = openBracket + 1;
+        while (cursor < pagesText.Length)
+        {
+            cursor = SkipPdfSeparators(pagesText, cursor);
+            if (cursor >= pagesText.Length || pagesText[cursor] == ']')
             {
                 break;
             }
 
-            int numStart = cursor;
-            while (cursor < pagesText.Length && char.IsDigit(pagesText[cursor]))
+            if (TryParseIndirectReference(pagesText, ref cursor, out int objNum))
+            {
+                childObjNums.Add(objNum);
+                continue;
+            }
+
+            // Malformed entry: skip this token and resynchronise at the next separator.
+            while (cursor < pagesText.Length && pagesText[cursor] != ']' && !IsPdfWhitespaceChar(pagesText[cursor]) && pagesText[cursor] != '%')
             {
                 cursor++;
             }
+        }
 
-            if (numStart < cursor && int.TryParse(pagesText.AsSpan(numStart, cursor - numStart), out int objNum))
+        return childObjNums;
+    }
+
+    /// <summary>
+    /// Parses one indirect reference (<c>objNum genNum R</c>) at the current cursor position.
+    /// On success, advances the cursor past the reference and returns the object number.
+    /// On failure, the cursor is left at the first unparsable position.
+    /// </summary>
+    private static bool TryParseIndirectReference(string text, ref int cursor, out int objNum)
+    {
+        objNum = 0;
+        int numStart = cursor;
+
+        while (cursor < text.Length && IsAsciiDigit(text[cursor]))
+        {
+            if (objNum > int.MaxValue / 10)
             {
-                while (cursor < pagesText.Length && pagesText[cursor] != '\n' && pagesText[cursor] != '\r' && pagesText[cursor] != ']')
+                // Overflow: consume the remaining digits and fail.
+                while (cursor < text.Length && IsAsciiDigit(text[cursor]))
                 {
                     cursor++;
                 }
 
-                count++;
-                if (count == pageNumber)
+                return false;
+            }
+
+            objNum = (objNum * 10) + (text[cursor] - '0');
+            cursor++;
+        }
+
+        // Object numbers are positive; "0" alone is not a valid reference.
+        if (numStart == cursor || objNum <= 0)
+        {
+            return false;
+        }
+
+        cursor = SkipPdfSeparators(text, cursor);
+
+        // Generation number.
+        int genStart = cursor;
+        while (cursor < text.Length && IsAsciiDigit(text[cursor]))
+        {
+            cursor++;
+        }
+
+        if (genStart == cursor)
+        {
+            return false;
+        }
+
+        cursor = SkipPdfSeparators(text, cursor);
+
+        if (cursor >= text.Length || text[cursor] != 'R')
+        {
+            return false;
+        }
+
+        cursor++;
+        return true;
+    }
+
+    /// <summary>
+    /// Advances the cursor past PDF whitespace (NUL, TAB, LF, FF, CR, SP — ISO 32000-1 §7.2.2)
+    /// and comments (<c>%</c> to end of line).
+    /// </summary>
+    private static int SkipPdfSeparators(string text, int cursor)
+    {
+        while (cursor < text.Length)
+        {
+            char c = text[cursor];
+            if (IsPdfWhitespaceChar(c))
+            {
+                cursor++;
+            }
+            else if (c == '%')
+            {
+                // Comment runs to end of line (or end of the object text).
+                while (cursor < text.Length && text[cursor] != '\n' && text[cursor] != '\r')
                 {
-                    return objNum;
+                    cursor++;
                 }
+            }
+            else
+            {
+                break;
             }
         }
 
-        return -1;
+        return cursor;
     }
+
+    /// <summary>
+    /// Determines whether a character is a PDF whitespace character
+    /// (NUL, TAB, LF, FF, CR, SP — ISO 32000-1 §7.2.2).
+    /// </summary>
+    private static bool IsPdfWhitespaceChar(char c) => c is '\0' or '\t' or '\n' or '\f' or '\r' or ' ';
+
+    /// <summary>
+    /// Determines whether a character is an ASCII decimal digit. PDF numbers are ASCII-only.
+    /// </summary>
+    private static bool IsAsciiDigit(char c) => c is >= '0' and <= '9';
 
     /// <summary>
     /// Gets the text content of a PDF object, trying regular object bytes first,

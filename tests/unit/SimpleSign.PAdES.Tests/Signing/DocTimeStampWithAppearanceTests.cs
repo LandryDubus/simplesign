@@ -80,6 +80,30 @@ public sealed class DocTimeStampWithAppearanceTests
         thirdSignature.HasSignatureTimestamp.ShouldBeTrue();
     }
 
+    [Fact(DisplayName = "DocTimeStamp preserves an inline AcroForm dictionary")]
+    public async Task AppendDocTimeStamp_InlineAcroForm_Preserved()
+    {
+        using var cert = TestCertificateFactory.CreateSelfSignedCert("CN=Inline AcroForm Signer");
+        byte[] source = InlineAcroFormPreservationTests.BuildPdfWithInlineAcroForm();
+        byte[] signed = await PadesSigner.Document(source)
+            .WithCertificate(cert)
+            .WithFieldOptions(new SignatureFieldOptions { FieldName = "SigA", SignerName = "First" })
+            .SignAsync();
+
+        byte[] result = await DocTimeStampWriter.AppendDocTimeStampAsync(
+            signed, "http://tsa.example.com", BuildMockTsaClient());
+
+        string text = Encoding.Latin1.GetString(result);
+        int lastAcro = text.LastIndexOf("/AcroForm", StringComparison.Ordinal);
+        lastAcro.ShouldBeGreaterThanOrEqualTo(0);
+
+        // The latest revision must keep the inline representation with all original entries.
+        text[lastAcro..].ShouldStartWith("/AcroForm <<");
+        text[lastAcro..].ShouldContain("/DA (/Helv 0 Tf 0 g)");
+        text[lastAcro..].ShouldContain("/DR <<");
+        text[lastAcro..].ShouldContain("/SigFlags 3");
+    }
+
     [Fact(DisplayName = "DocTimeStamp after visible appearance produces valid PDF structure")]
     public async Task AppendDocTimeStamp_AfterVisibleAppearance_ProducesValidStructure()
     {

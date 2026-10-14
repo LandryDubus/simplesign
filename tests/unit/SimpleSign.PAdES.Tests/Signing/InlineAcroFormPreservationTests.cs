@@ -22,7 +22,7 @@ public sealed class InlineAcroFormPreservationTests
     /// Builds a PDF whose Catalog has an inline /AcroForm dictionary with /Fields,
     /// /DA and /DR entries, plus an existing (empty) signature field on page 1.
     /// </summary>
-    private static byte[] BuildPdfWithInlineAcroForm()
+    internal static byte[] BuildPdfWithInlineAcroForm()
     {
         var sb = new StringBuilder();
         sb.Append("%PDF-1.7\n");

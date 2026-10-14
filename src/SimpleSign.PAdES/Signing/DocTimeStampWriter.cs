@@ -58,6 +58,10 @@ public static class DocTimeStampWriter
         int catalogObjNum = PdfStructureParser.FindRootObjectNumber(signedPdf);
         int existingAcroFormObjNum = PdfStructureParser.FindAcroFormObjNum(signedPdf, catalogObjNum);
         bool reuseAcroForm = existingAcroFormObjNum > 0;
+        // An inline /AcroForm dictionary must stay inline (same as PdfSignatureWriter):
+        // converting it drops /DA, /DR, … and invalidates earlier signatures in Acrobat.
+        bool preserveInlineAcroForm = !reuseAcroForm
+            && PdfStructureParser.HasUpdatableInlineAcroForm(signedPdf, catalogObjNum);
         int acroFormObjNum = reuseAcroForm ? existingAcroFormObjNum : (nextObjNum + 2);
 
         // Build the timestamp signature dictionary (/SubFilter /ETSI.RFC3161)
@@ -94,8 +98,11 @@ public static class DocTimeStampWriter
         fieldDict.Append("   /Rect [0 0 0 0]\n");
         fieldDict.Append(">>\nendobj\n");
 
-        // Build AcroForm — delegate to shared builder to preserve all existing keys
-        byte[] acroFormBytes = PdfSignatureWriter.BuildAcroFormDictionary(acroFormObjNum, signedPdf, existingAcroFormObjNum, fieldObjNum, catalogObjNum);
+        // Build AcroForm — delegate to shared builder to preserve all existing keys.
+        // When the Catalog holds an inline AcroForm, keep it inline and update only /Fields.
+        byte[]? acroFormBytes = preserveInlineAcroForm
+            ? null
+            : PdfSignatureWriter.BuildAcroFormDictionary(acroFormObjNum, signedPdf, existingAcroFormObjNum, fieldObjNum, catalogObjNum);
 
         // Only rewrite the Catalog when the AcroForm reference changes.
         // Rewriting the Catalog unnecessarily causes Adobe diff analysis
@@ -104,30 +111,38 @@ public static class DocTimeStampWriter
         byte[]? catalogBytes = null;
         if (needCatalogUpdate)
         {
-            var (catStart, catEnd) = PdfStructureParser.FindObjectBytes(signedPdf, catalogObjNum);
-            string catalogText;
-            if (catStart >= 0)
+            if (preserveInlineAcroForm)
             {
-                string origCatalog = Encoding.Latin1.GetString(signedPdf.AsSpan().Slice(catStart, catEnd - catStart));
-                string updCatalog = PdfStructureParser.RemoveKeyFromDict(origCatalog, "/AcroForm");
-                catalogText = PdfStructureParser.InsertIntoDict(updCatalog, $"   /AcroForm {acroFormObjNum} 0 R\n");
+                catalogBytes = PdfSignatureWriter.BuildCatalogWithUpdatedInlineAcroForm(catalogObjNum, signedPdf, fieldObjNum);
             }
             else
             {
-                // Catalog may be in a compressed Object Stream
-                string? compressedCatalog = PdfStructureParser.ExtractObjectFromObjStm(signedPdf, catalogObjNum);
-                if (compressedCatalog != null)
+                var (catStart, catEnd) = PdfStructureParser.FindObjectBytes(signedPdf, catalogObjNum);
+                string catalogText;
+                if (catStart >= 0)
                 {
-                    string fullObj = $"{catalogObjNum} 0 obj\n{compressedCatalog.Trim()}\nendobj\n";
-                    string updCatalog = PdfStructureParser.RemoveKeyFromDict(fullObj, "/AcroForm");
+                    string origCatalog = Encoding.Latin1.GetString(signedPdf.AsSpan().Slice(catStart, catEnd - catStart));
+                    string updCatalog = PdfStructureParser.RemoveKeyFromDict(origCatalog, "/AcroForm");
                     catalogText = PdfStructureParser.InsertIntoDict(updCatalog, $"   /AcroForm {acroFormObjNum} 0 R\n");
                 }
                 else
                 {
-                    catalogText = $"{catalogObjNum} 0 obj\n<< /Type /Catalog /AcroForm {acroFormObjNum} 0 R >>\nendobj\n";
+                    // Catalog may be in a compressed Object Stream
+                    string? compressedCatalog = PdfStructureParser.ExtractObjectFromObjStm(signedPdf, catalogObjNum);
+                    if (compressedCatalog != null)
+                    {
+                        string fullObj = $"{catalogObjNum} 0 obj\n{compressedCatalog.Trim()}\nendobj\n";
+                        string updCatalog = PdfStructureParser.RemoveKeyFromDict(fullObj, "/AcroForm");
+                        catalogText = PdfStructureParser.InsertIntoDict(updCatalog, $"   /AcroForm {acroFormObjNum} 0 R\n");
+                    }
+                    else
+                    {
+                        catalogText = $"{catalogObjNum} 0 obj\n<< /Type /Catalog /AcroForm {acroFormObjNum} 0 R >>\nendobj\n";
+                    }
                 }
+
+                catalogBytes = Encoding.Latin1.GetBytes(catalogText);
             }
-            catalogBytes = Encoding.Latin1.GetBytes(catalogText);
         }
 
         // Write all objects to output
@@ -142,8 +157,12 @@ public static class DocTimeStampWriter
         output.Write(sigDictBytes);
         long fieldObjOffset = output.Position;
         output.Write(fieldDictBytes);
-        long acroFormObjOffset = output.Position;
-        output.Write(acroFormBytes);
+        long acroFormObjOffset = 0L;
+        if (acroFormBytes != null)
+        {
+            acroFormObjOffset = output.Position;
+            output.Write(acroFormBytes);
+        }
 
         long catalogObjOffset = 0L;
         if (catalogBytes != null)
@@ -181,9 +200,12 @@ public static class DocTimeStampWriter
         var objectOffsets = new SortedDictionary<int, long>
         {
             [sigObjNum] = sigObjOffset,
-            [fieldObjNum] = fieldObjOffset,
-            [acroFormObjNum] = acroFormObjOffset
+            [fieldObjNum] = fieldObjOffset
         };
+        if (acroFormBytes != null)
+        {
+            objectOffsets[acroFormObjNum] = acroFormObjOffset;
+        }
         if (needCatalogUpdate)
         {
             objectOffsets[catalogObjNum] = catalogObjOffset;

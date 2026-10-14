@@ -706,7 +706,7 @@ public sealed class PdfSignatureWriter
     /// representation avoids the structural change that makes Acrobat's modification analysis
     /// invalidate earlier signatures.
     /// </summary>
-    private static byte[] BuildCatalogWithUpdatedInlineAcroForm(int catalogObjNum, ReadOnlySpan<byte> data, int fieldObjNum, CertificationLevel? certLevel = null)
+    internal static byte[] BuildCatalogWithUpdatedInlineAcroForm(int catalogObjNum, ReadOnlySpan<byte> data, int fieldObjNum, CertificationLevel? certLevel = null)
     {
         // The caller pre-checked the Catalog via HasUpdatableInlineAcroForm, which found the
         // object, so this lookup succeeds for the same input bytes.

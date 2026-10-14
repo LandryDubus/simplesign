@@ -109,6 +109,23 @@ public sealed class PdfTextStringDecodingTests
         return (Encoding.Latin1.GetBytes(sb.ToString()), sigObjNums);
     }
 
+    [Fact]
+    public async Task ReadSignatureFields_DictDelimitersInsideLiteralStrings_DoNotBreakParsing()
+    {
+        var (pdf, _) = BuildPdfWithSignatures(
+            SigPrefix +
+            "/Reason (merged >> streams << here)\n" +
+            "% a comment with << fake dict open\n" +
+            "/Contents <00>\n" +
+            "/ByteRange [0 100 200 300]");
+
+        using var stream = new MemoryStream(pdf);
+        var fields = await PdfStructureReader.ReadSignatureFieldsAsync(stream);
+
+        fields.Count.ShouldBe(1);
+        fields[0].Reason.ShouldBe("merged >> streams << here");
+    }
+
     private const string SigPrefix = "/Type /Sig /Filter /Adobe.PPKLite /SubFilter /adbe.pkcs7.detached\n";
 
     [Fact]

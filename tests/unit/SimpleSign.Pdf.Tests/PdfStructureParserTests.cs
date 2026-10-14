@@ -573,6 +573,50 @@ public sealed class PdfStructureParserTests
         PdfStructureParser.HasUpdatableInlineAcroForm(pdf, 1).ShouldBeFalse();
     }
 
+    // ── String/Comment-Aware Dictionary Scanning Tests ───────────────────────
+
+    [Fact]
+    public void FindOutermostDictClose_LiteralStringWithDoubleAngle_ReturnsTopLevelClose()
+    {
+        string source = "<< /DA (a >> b) /DR << /Font << /F 0 R >> >> >>";
+
+        int result = PdfStructureParser.FindOutermostDictClose(source);
+
+        result.ShouldBe(source.Length - 2);
+    }
+
+    [Fact]
+    public void FindOutermostDictClose_CommentWithAngleBrackets_ReturnsTopLevelClose()
+    {
+        string source = "<< /Foo 1\n% fake << >>\n/Bar 2 >>";
+
+        int result = PdfStructureParser.FindOutermostDictClose(source);
+
+        result.ShouldBe(source.LastIndexOf(">>", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void FindNextTopLevelKey_LiteralStringWithAngleBrackets_FindsNextKey()
+    {
+        string text = "/DA (a >> b) /DR << /Font << /F 0 R >> >>";
+
+        int pos = PdfStructureParser.FindNextTopLevelKey(text, "/DA ".Length);
+
+        text[pos..].ShouldStartWith("/DR");
+    }
+
+    [Fact]
+    public void AppendFieldToInlineAcroForm_CommentedCloseBracket_AppendsAfterRealBracket()
+    {
+        // The '%' comments out the first ']'; the real array close is the second one.
+        const string catalog = "1 0 obj\n<< /Type /Catalog /AcroForm << /SigFlags 3 /Fields [51 0 R % ]\n52 0 R] /DA (/Helv 0 Tf 0 g) >> >>\nendobj\n";
+
+        string updated = PdfStructureParser.AppendFieldToInlineAcroForm(catalog, "62 0 R");
+
+        updated.ShouldContain("52 0 R 62 0 R]");
+        updated.ShouldContain("/DA (/Helv 0 Tf 0 g)");
+    }
+
     // ── UsesXRefStreams Tests ───────────────────────────────────────────────
 
     [Fact]

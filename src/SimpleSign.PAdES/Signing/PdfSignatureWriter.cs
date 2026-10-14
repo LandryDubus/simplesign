@@ -812,7 +812,7 @@ public sealed class PdfSignatureWriter
 
             // Extract the value — find where the next top-level key starts
             int valueStart = nameEnd;
-            int valueEnd = FindNextTopLevelKey(acroFormText, valueStart);
+            int valueEnd = PdfStructureParser.FindNextTopLevelKey(acroFormText, valueStart);
             string value = acroFormText[valueStart..valueEnd].TrimEnd();
 
             sb.Append($"   {keyName}{value}\n");
@@ -820,53 +820,6 @@ public sealed class PdfSignatureWriter
         }
 
         return sb.ToString();
-    }
-
-    /// <summary>
-    /// Finds the position of the next top-level PDF dictionary key (starting with '/')
-    /// or the end-of-dictionary marker ('>>'), skipping nested structures.
-    /// </summary>
-    private static int FindNextTopLevelKey(string text, int start)
-    {
-        int depth = 0;
-        for (int i = start; i < text.Length; i++)
-        {
-            char c = text[i];
-            if (c == '<' && i + 1 < text.Length && text[i + 1] == '<')
-            {
-                depth++;
-                i++;
-            }
-            else if (c == '[')
-            {
-                depth++;
-            }
-            else if (c == '>' && i + 1 < text.Length && text[i + 1] == '>')
-            {
-                if (depth > 0)
-                {
-                    depth--;
-                    i++;
-                }
-                else
-                {
-                    return i;
-                }
-            }
-            else if (c == ']')
-            {
-                if (depth > 0)
-                {
-                    depth--;
-                }
-            }
-            else if (c == '/' && depth == 0 && i > start)
-            {
-                return i;
-            }
-        }
-
-        return text.Length;
     }
 
     // ── Private: Xref & ByteRange ────────────────────────────────────────────

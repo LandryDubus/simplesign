@@ -374,6 +374,38 @@ public sealed class PdfSignatureWriterTests
         return result;
     }
 
+    [Fact(DisplayName = "PrepareAsync preserves AcroForm keys whose values contain >>")]
+    public async Task PrepareAsync_AcroFormDaWithAngleBrackets_PreservesExtraKeys()
+    {
+        byte[] pdfBytes = BuildPdfWithAcroFormDaWithAngles();
+        using var input = new MemoryStream(pdfBytes);
+        using var output = new MemoryStream();
+
+        await PdfSignatureWriter.PrepareAsync(input, output, DefaultOptions());
+
+        string outputText = Encoding.Latin1.GetString(output.ToArray());
+        outputText.ShouldContain("/DA (x >> y)");
+        outputText.ShouldContain("6 0 R");
+    }
+
+    /// <summary>
+    /// Builds a PDF whose AcroForm (object 5) has a /DA literal string containing
+    /// dictionary-like delimiters (>>) that must not break key extraction.
+    /// </summary>
+    private static byte[] BuildPdfWithAcroFormDaWithAngles()
+    {
+        var sb = new StringBuilder();
+        sb.Append("%PDF-1.7\n");
+        sb.Append("1 0 obj\n<< /Type /Catalog /Pages 2 0 R /AcroForm 5 0 R >>\nendobj\n");
+        sb.Append("2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n");
+        sb.Append("3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>\nendobj\n");
+        sb.Append("4 0 obj\n<< /Type /Font >>\nendobj\n");
+        sb.Append("5 0 obj\n<< /Fields [6 0 R] /SigFlags 3 /DA (x >> y) >>\nendobj\n");
+        sb.Append("6 0 obj\n<< /Type /Annot /Subtype /Widget /FT /Sig /T (Existing) /Rect [0 0 0 0] >>\nendobj\n");
+        sb.Append("xref\n0 7\n0000000000 65535 f \n0000000009 00000 n \n0000000058 00000 n \n0000000115 00000 n \n0000000173 00000 n \n0000000205 00000 n \n0000000270 00000 n \ntrailer\n<< /Size 7 /Root 1 0 R >>\nstartxref\n350\n%%EOF\n");
+        return Encoding.Latin1.GetBytes(sb.ToString());
+    }
+
     // ── Helper: non-seekable stream ────────────────────────────────────────────
 
     private sealed class NonSeekableStream : MemoryStream

@@ -231,7 +231,8 @@ internal static class PdfStructureParser
     /// <summary>
     /// Locates the inline <c>/AcroForm &lt;&lt;…&gt;&gt;</c> dictionary in a Catalog object
     /// text and returns its bounds (the dictionary delimiters inclusive), or (-1, -1) when
-    /// the Catalog has no inline AcroForm. Nested dictionaries (e.g. /DR) are depth-tracked.
+    /// the Catalog has no inline AcroForm. Nested dictionaries (e.g. /DR), literal strings,
+    /// hexadecimal strings, and comments are handled by the shared depth-aware scanner.
     /// </summary>
     private static (int Start, int End) FindInlineAcroFormBounds(string catalogText)
     {
@@ -252,27 +253,14 @@ internal static class PdfStructureParser
             return (-1, -1);
         }
 
-        int depth = 0;
         int dictStart = cursor;
-        for (int i = dictStart; i < catalogText.Length - 1; i++)
+        int dictClose = FindDictEnd(catalogText, dictStart);
+        if (dictClose < 0)
         {
-            if (catalogText[i] == '<' && catalogText[i + 1] == '<')
-            {
-                depth++;
-                i++;
-            }
-            else if (catalogText[i] == '>' && catalogText[i + 1] == '>')
-            {
-                depth--;
-                i++;
-                if (depth == 0)
-                {
-                    return (dictStart, i + 1);
-                }
-            }
+            return (-1, -1);
         }
 
-        return (-1, -1);
+        return (dictStart, dictClose + 2);
     }
 
     /// <summary>
@@ -326,18 +314,177 @@ internal static class PdfStructureParser
 
     /// <summary>
     /// Finds the bracket that closes the array opened at the given position, tracking
-    /// nested arrays. Returns -1 when no closing bracket is found.
+    /// nested arrays, dictionaries, literal and hexadecimal strings, and comments.
+    /// Returns -1 when no closing bracket is found.
     /// </summary>
-    private static int FindClosingBracket(string text, int openBracketPos)
+    private static int FindClosingBracket(string text, int openBracketPos) => FindArrayEnd(text, openBracketPos);
+
+    /// <summary>
+    /// Finds the index of the first '&gt;' of the <c>&gt;&gt;</c> that closes the dictionary
+    /// opened at <paramref name="dictStart"/>, tracking nested dictionaries and arrays while
+    /// skipping literal strings (with escape sequences and nesting), hexadecimal strings, and
+    /// comments. Returns -1 when no closing delimiter is found.
+    /// </summary>
+    internal static int FindDictEnd(string text, int dictStart)
     {
         int depth = 0;
-        for (int i = openBracketPos; i < text.Length; i++)
+        int i = dictStart;
+        while (i < text.Length)
         {
-            if (text[i] == '[')
+            char c = text[i];
+            if (c == '%')
+            {
+                i = SkipComment(text, i);
+                continue;
+            }
+
+            if (c == '(')
+            {
+                i = SkipLiteralString(text, i) + 1;
+                continue;
+            }
+
+            if (c == '<')
+            {
+                if (i + 1 < text.Length && text[i + 1] == '<')
+                {
+                    depth++;
+                    i += 2;
+                    continue;
+                }
+
+                i = SkipHexString(text, i) + 1;
+                continue;
+            }
+
+            if (c == '>' && i + 1 < text.Length && text[i + 1] == '>')
+            {
+                depth--;
+                i += 2;
+                if (depth == 0)
+                {
+                    return i - 2; // index of the first '>'
+                }
+                continue;
+            }
+
+            i++;
+        }
+
+        return -1;
+    }
+
+    /// <summary>
+    /// Finds the index of the ']' that closes the array opened at <paramref name="openBracketPos"/>,
+    /// tracking nested arrays and dictionaries while skipping literal strings, hexadecimal
+    /// strings, and comments. Returns -1 when no closing bracket is found.
+    /// </summary>
+    internal static int FindArrayEnd(string text, int openBracketPos)
+    {
+        int depth = 0;
+        int i = openBracketPos;
+        while (i < text.Length)
+        {
+            char c = text[i];
+            if (c == '%')
+            {
+                i = SkipComment(text, i);
+                continue;
+            }
+
+            if (c == '(')
+            {
+                i = SkipLiteralString(text, i) + 1;
+                continue;
+            }
+
+            if (c == '<')
+            {
+                if (i + 1 < text.Length && text[i + 1] == '<')
+                {
+                    int dictEnd = FindDictEnd(text, i);
+                    if (dictEnd < 0)
+                    {
+                        return -1;
+                    }
+
+                    i = dictEnd + 2;
+                    continue;
+                }
+
+                i = SkipHexString(text, i) + 1;
+                continue;
+            }
+
+            if (c == '[')
+            {
+                depth++;
+                i++;
+                continue;
+            }
+
+            if (c == ']')
+            {
+                depth--;
+                i++;
+                if (depth == 0)
+                {
+                    return i - 1;
+                }
+                continue;
+            }
+
+            i++;
+        }
+
+        return -1;
+    }
+
+    /// <summary>
+    /// Skips a comment (% to end of line) starting at <paramref name="pos"/>
+    /// and returns the index of the line terminator (or the end of the text).
+    /// </summary>
+    private static int SkipComment(string text, int pos)
+    {
+        int i = pos;
+        while (i < text.Length && text[i] != '\n' && text[i] != '\r')
+        {
+            i++;
+        }
+
+        return i;
+    }
+
+    /// <summary>
+    /// Skips a literal string starting at the '(' at <paramref name="openParenPos"/>,
+    /// honouring escape sequences and nested parentheses, and returns the index of the
+    /// closing ')'. Returns the last character index when the string is unterminated.
+    /// </summary>
+    private static int SkipLiteralString(string text, int openParenPos)
+    {
+        int depth = 1;
+        int i = openParenPos + 1;
+        while (i < text.Length && depth > 0)
+        {
+            char c = text[i];
+            if (c == '\\')
+            {
+                if (i + 2 < text.Length && text[i + 1] == '\r' && text[i + 2] == '\n')
+                {
+                    i += 3; // line continuation \r\n
+                }
+                else
+                {
+                    i += 2; // escaped character
+                }
+                continue;
+            }
+
+            if (c == '(')
             {
                 depth++;
             }
-            else if (text[i] == ']')
+            else if (c == ')')
             {
                 depth--;
                 if (depth == 0)
@@ -345,9 +492,27 @@ internal static class PdfStructureParser
                     return i;
                 }
             }
+
+            i++;
         }
 
-        return -1;
+        return text.Length - 1;
+    }
+
+    /// <summary>
+    /// Skips a hexadecimal string starting at the '&lt;' at <paramref name="openAnglePos"/>
+    /// and returns the index of the closing '&gt;'. Returns the last character index when
+    /// the string is unterminated.
+    /// </summary>
+    private static int SkipHexString(string text, int openAnglePos)
+    {
+        int i = openAnglePos + 1;
+        while (i < text.Length && text[i] != '>')
+        {
+            i++;
+        }
+
+        return i < text.Length ? i : text.Length - 1;
     }
 
     /// <summary>
@@ -1141,34 +1306,139 @@ internal static class PdfStructureParser
     }
 
     /// <summary>
+    /// Finds the position of the next top-level PDF dictionary key (starting with '/')
+    /// or the end-of-dictionary marker ('&gt;&gt;'), skipping nested structures, literal
+    /// strings, hexadecimal strings, and comments.
+    /// </summary>
+    internal static int FindNextTopLevelKey(string text, int start)
+    {
+        int depth = 0;
+        int i = start;
+        while (i < text.Length)
+        {
+            char c = text[i];
+            if (c == '%')
+            {
+                i = SkipComment(text, i);
+                continue;
+            }
+
+            if (c == '(')
+            {
+                i = SkipLiteralString(text, i) + 1;
+                continue;
+            }
+
+            if (c == '<')
+            {
+                if (i + 1 < text.Length && text[i + 1] == '<')
+                {
+                    depth++;
+                    i += 2;
+                    continue;
+                }
+
+                i = SkipHexString(text, i) + 1;
+                continue;
+            }
+
+            if (c == '[')
+            {
+                depth++;
+                i++;
+                continue;
+            }
+
+            if (c == '>')
+            {
+                if (i + 1 < text.Length && text[i + 1] == '>')
+                {
+                    if (depth > 0)
+                    {
+                        depth--;
+                        i += 2;
+                        continue;
+                    }
+
+                    return i;
+                }
+
+                i++;
+                continue;
+            }
+
+            if (c == ']')
+            {
+                if (depth > 0)
+                {
+                    depth--;
+                }
+
+                i++;
+                continue;
+            }
+
+            if (c == '/' && depth == 0 && i > start)
+            {
+                return i;
+            }
+
+            i++;
+        }
+
+        return text.Length;
+    }
+
+    /// <summary>
     /// Finds the offset of the closing <c>&gt;&gt;</c> of the top-level dictionary by
     /// tracking dictionary nesting depth. Returns the last <c>&gt;&gt;</c> that brings
     /// the depth from 1 back to 0, or -1 if no top-level dictionary is found.
     /// Avoids matching a <c>&gt;&gt;</c> inside a nested dictionary value such as
-    /// <c>/DR &lt;&lt; /Font &lt;&lt; … &gt;&gt; &gt;&gt;</c>.
+    /// <c>/DR &lt;&lt; /Font &lt;&lt; … &gt;&gt; &gt;&gt;</c>, and ignores <c>&lt;&lt;</c>/<c>&gt;&gt;</c>
+    /// sequences inside literal strings, hexadecimal strings, and comments.
     /// </summary>
     public static int FindOutermostDictClose(string text)
     {
-        int depth = 0;
-        int lastTopLevelClose = -1;
-        for (int i = 0; i < text.Length - 1; i++)
+        // Locate the first top-level '<<', then let the depth-aware scanner find its
+        // matching close (nested dictionaries are skipped internally).
+        int firstOpen = -1;
+        int i = 0;
+        while (i < text.Length)
         {
-            if (text[i] == '<' && text[i + 1] == '<')
+            char c = text[i];
+            if (c == '%')
             {
-                depth++;
-                i++;
+                i = SkipComment(text, i);
+                continue;
             }
-            else if (text[i] == '>' && text[i + 1] == '>')
+
+            if (c == '(')
             {
-                depth--;
-                if (depth == 0)
+                i = SkipLiteralString(text, i) + 1;
+                continue;
+            }
+
+            if (c == '<')
+            {
+                if (i + 1 < text.Length && text[i + 1] == '<')
                 {
-                    lastTopLevelClose = i;
+                    firstOpen = i;
+                    break;
                 }
-                i++;
+
+                i = SkipHexString(text, i) + 1;
+                continue;
             }
+
+            i++;
         }
-        return lastTopLevelClose;
+
+        if (firstOpen < 0)
+        {
+            return -1;
+        }
+
+        return FindDictEnd(text, firstOpen);
     }
 
     /// <summary>

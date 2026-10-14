@@ -2348,15 +2348,30 @@ public sealed class PdfStructureReader
 
     /// <summary>
     /// Finds the start of the enclosing dictionary (&lt;&lt;) by scanning backwards from nearPos.
-    /// Verifies the found dictionary actually encloses nearPos (handles nested dicts).
+    /// Verifies the found dictionary actually encloses nearPos (handles nested dicts), and
+    /// skips literal strings, hexadecimal strings, and comments while scanning backwards.
     /// </summary>
     private static int FindDictStart(ReadOnlySpan<byte> data, int nearPos)
     {
         for (int pos = nearPos; pos >= 1; pos--)
         {
-            if (data[pos] == '<' && data[pos - 1] == '<')
+            byte b = data[pos];
+            if (b == (byte)')')
+            {
+                // Backtrack over the literal string that ends here so that '<'/'>'/'%'
+                // characters inside it cannot be mistaken for structure.
+                pos = BacktrackLiteralString(data, pos);
+                continue;
+            }
+
+            if (b == (byte)'<' && data[pos - 1] == (byte)'<')
             {
                 int candidate = pos - 1;
+                if (IsInsideComment(data, candidate))
+                {
+                    continue;
+                }
+
                 // Verify this dict encloses nearPos
                 int end = FindMatchingDictEnd(data, candidate);
                 if (end >= nearPos)
@@ -2370,29 +2385,176 @@ public sealed class PdfStructureReader
     }
 
     /// <summary>
-    /// Finds the matching dictionary end (&gt;&gt;) for a given &lt;&lt;, handling nested dictionaries.
+    /// Backtracks from a closing ')' over the literal string it terminates, honouring
+    /// escape sequences and nested parentheses. Returns the index before the matching '(',
+    /// or -1 when no opening parenthesis is found.
     /// </summary>
-    private static int FindMatchingDictEnd(ReadOnlySpan<byte> data, int dictStart)
+    private static int BacktrackLiteralString(ReadOnlySpan<byte> data, int closePos)
     {
-        int nestingDepth = 0;
-        for (int i = dictStart; i < data.Length - 1; i++)
+        int depth = 1;
+        int i = closePos - 1;
+        while (i >= 0 && depth > 0)
         {
-            if (data[i] == '<' && data[i + 1] == '<')
+            byte b = data[i];
+            if (b == (byte)')')
             {
-                nestingDepth++;
-                i++; // skip second '<'
+                depth++;
             }
-            else if (data[i] == '>' && data[i + 1] == '>')
+            else if (b == (byte)'(')
             {
-                nestingDepth--;
-                i++; // skip second '>'
-                if (nestingDepth == 0)
+                depth--;
+                if (depth == 0)
                 {
                     return i - 1;
                 }
             }
+            else if (b == (byte)'\\')
+            {
+                // Skip the escaped character immediately before the backslash.
+                i--;
+            }
+
+            i--;
         }
+
         return -1;
+    }
+
+    /// <summary>
+    /// Determines whether the given position is inside a comment (% to end of line),
+    /// by scanning backwards to the start of the line.
+    /// </summary>
+    private static bool IsInsideComment(ReadOnlySpan<byte> data, int pos)
+    {
+        int i = pos - 1;
+        while (i >= 0 && data[i] != (byte)'\n' && data[i] != (byte)'\r')
+        {
+            if (data[i] == (byte)'%')
+            {
+                return true;
+            }
+
+            i--;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Finds the matching dictionary end (&gt;&gt;) for a given &lt;&lt;, handling nested dictionaries,
+    /// literal strings (with escape sequences and nesting), hexadecimal strings, and comments.
+    /// Returns the index of the first '&gt;' of the closing pair, or -1.
+    /// </summary>
+    private static int FindMatchingDictEnd(ReadOnlySpan<byte> data, int dictStart)
+    {
+        int nestingDepth = 0;
+        int i = dictStart;
+        while (i < data.Length)
+        {
+            byte b = data[i];
+            if (b == (byte)'%')
+            {
+                while (i < data.Length && data[i] != (byte)'\n' && data[i] != (byte)'\r')
+                {
+                    i++;
+                }
+                continue;
+            }
+
+            if (b == (byte)'(')
+            {
+                i = SkipLiteralString(data, i) + 1;
+                continue;
+            }
+
+            if (b == (byte)'<')
+            {
+                if (i + 1 < data.Length && data[i + 1] == (byte)'<')
+                {
+                    nestingDepth++;
+                    i += 2;
+                    continue;
+                }
+
+                i = SkipHexString(data, i) + 1;
+                continue;
+            }
+
+            if (b == (byte)'>' && i + 1 < data.Length && data[i + 1] == (byte)'>')
+            {
+                nestingDepth--;
+                i += 2;
+                if (nestingDepth == 0)
+                {
+                    return i - 2; // index of the first '>'
+                }
+                continue;
+            }
+
+            i++;
+        }
+
+        return -1;
+    }
+
+    /// <summary>
+    /// Skips a literal string starting at the '(' at <paramref name="openParenPos"/>,
+    /// honouring escape sequences and nested parentheses, and returns the index of the
+    /// closing ')'. Returns the last index when the string is unterminated.
+    /// </summary>
+    private static int SkipLiteralString(ReadOnlySpan<byte> data, int openParenPos)
+    {
+        int depth = 1;
+        int i = openParenPos + 1;
+        while (i < data.Length && depth > 0)
+        {
+            byte b = data[i];
+            if (b == (byte)'\\')
+            {
+                if (i + 2 < data.Length && data[i + 1] == (byte)'\r' && data[i + 2] == (byte)'\n')
+                {
+                    i += 3; // line continuation \r\n
+                }
+                else
+                {
+                    i += 2; // escaped character
+                }
+                continue;
+            }
+
+            if (b == (byte)'(')
+            {
+                depth++;
+            }
+            else if (b == (byte)')')
+            {
+                depth--;
+                if (depth == 0)
+                {
+                    return i;
+                }
+            }
+
+            i++;
+        }
+
+        return data.Length - 1;
+    }
+
+    /// <summary>
+    /// Skips a hexadecimal string starting at the '&lt;' at <paramref name="openAnglePos"/>
+    /// and returns the index of the closing '&gt;'. Returns the last index when the string
+    /// is unterminated.
+    /// </summary>
+    private static int SkipHexString(ReadOnlySpan<byte> data, int openAnglePos)
+    {
+        int i = openAnglePos + 1;
+        while (i < data.Length && data[i] != (byte)'>')
+        {
+            i++;
+        }
+
+        return i < data.Length ? i : data.Length - 1;
     }
 
     /// <summary>

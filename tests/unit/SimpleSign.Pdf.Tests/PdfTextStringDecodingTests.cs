@@ -126,6 +126,43 @@ public sealed class PdfTextStringDecodingTests
         fields[0].Reason.ShouldBe("merged >> streams << here");
     }
 
+    [Fact]
+    public async Task ReadSignatureFields_HexMDate_DecodesSigningTime()
+    {
+        const string dateStr = "D:20261013120000+00'00'";
+        string hex = Convert.ToHexString(Encoding.ASCII.GetBytes(dateStr));
+        var (pdf, _) = BuildPdfWithSignatures(
+            SigPrefix +
+            $"/M <{hex}>\n" +
+            "/Contents <00>\n" +
+            "/ByteRange [0 100 200 300]");
+
+        using var stream = new MemoryStream(pdf);
+        var fields = await PdfStructureReader.ReadSignatureFieldsAsync(stream);
+
+        fields.Count.ShouldBe(1);
+        fields[0].PdfSigningTime.ShouldBe(new DateTimeOffset(2026, 10, 13, 12, 0, 0, TimeSpan.Zero));
+    }
+
+    [Fact]
+    public async Task ReadSignatureFields_Utf16HexMDate_DecodesSigningTime()
+    {
+        const string dateStr = "D:20261013120000+00'00'";
+        byte[] utf16 = [0xFE, 0xFF, .. Encoding.BigEndianUnicode.GetBytes(dateStr)];
+        string hex = Convert.ToHexString(utf16);
+        var (pdf, _) = BuildPdfWithSignatures(
+            SigPrefix +
+            $"/M <{hex}>\n" +
+            "/Contents <00>\n" +
+            "/ByteRange [0 100 200 300]");
+
+        using var stream = new MemoryStream(pdf);
+        var fields = await PdfStructureReader.ReadSignatureFieldsAsync(stream);
+
+        fields.Count.ShouldBe(1);
+        fields[0].PdfSigningTime.ShouldBe(new DateTimeOffset(2026, 10, 13, 12, 0, 0, TimeSpan.Zero));
+    }
+
     private const string SigPrefix = "/Type /Sig /Filter /Adobe.PPKLite /SubFilter /adbe.pkcs7.detached\n";
 
     [Fact]

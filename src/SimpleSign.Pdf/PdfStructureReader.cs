@@ -2121,41 +2121,17 @@ public sealed class PdfStructureReader
 
     /// <summary>
     /// Extracts the /M (modification date) from a signature dictionary.
-    /// Format: /M (D:YYYYMMDDHHmmss+HH'mm')
+    /// Format: /M (D:YYYYMMDDHHmmss+HH'mm'). Literal, hexadecimal, and UTF-16
+    /// text strings are decoded with the shared PDF text-string decoder.
     /// </summary>
     private static DateTimeOffset? ExtractPdfDate(ReadOnlySpan<byte> dictSpan)
     {
-        // Try "/M(" first (no space), then "/M ("
-        int keyPos = IndexOf(dictSpan, "/M("u8, 0);
-        int openParenPos;
-        if (keyPos >= 0)
-        {
-            openParenPos = keyPos + "/M("u8.Length - 1;
-        }
-        else
-        {
-            keyPos = IndexOf(dictSpan, "/M ("u8, 0);
-            if (keyPos < 0)
-            {
-                return null;
-            }
-            openParenPos = keyPos + "/M ("u8.Length - 1;
-        }
-
-        // Read value between parentheses
-        int valueStart = openParenPos + 1;
-        int valueEnd = valueStart;
-        while (valueEnd < dictSpan.Length && dictSpan[valueEnd] != ')')
-        {
-            valueEnd++;
-        }
-
-        if (valueEnd >= dictSpan.Length)
+        string? dateString = ExtractPdfString(dictSpan, "/M"u8);
+        if (string.IsNullOrEmpty(dateString))
         {
             return null;
         }
 
-        string dateString = Encoding.ASCII.GetString(dictSpan[valueStart..valueEnd]);
         return ParsePdfDate(dateString);
     }
 

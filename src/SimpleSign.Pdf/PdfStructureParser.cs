@@ -444,7 +444,7 @@ internal static class PdfStructureParser
     /// Skips a comment (% to end of line) starting at <paramref name="pos"/>
     /// and returns the index of the line terminator (or the end of the text).
     /// </summary>
-    private static int SkipComment(string text, int pos)
+    internal static int SkipComment(string text, int pos)
     {
         int i = pos;
         while (i < text.Length && text[i] != '\n' && text[i] != '\r')
@@ -460,7 +460,7 @@ internal static class PdfStructureParser
     /// honouring escape sequences and nested parentheses, and returns the index of the
     /// closing ')'. Returns the last character index when the string is unterminated.
     /// </summary>
-    private static int SkipLiteralString(string text, int openParenPos)
+    internal static int SkipLiteralString(string text, int openParenPos)
     {
         int depth = 1;
         int i = openParenPos + 1;
@@ -504,7 +504,7 @@ internal static class PdfStructureParser
     /// and returns the index of the closing '&gt;'. Returns the last character index when
     /// the string is unterminated.
     /// </summary>
-    private static int SkipHexString(string text, int openAnglePos)
+    internal static int SkipHexString(string text, int openAnglePos)
     {
         int i = openAnglePos + 1;
         while (i < text.Length && text[i] != '>')
@@ -1384,7 +1384,7 @@ internal static class PdfStructureParser
     /// dictionary) by token-aware scanning that skips literal strings, hexadecimal
     /// strings, comments, and nested dictionaries/arrays. Returns -1 when not found.
     /// </summary>
-    private static int FindTopLevelKey(string text, string key)
+    internal static int FindTopLevelKey(string text, string key)
     {
         int depth = 0;
         int i = 0;

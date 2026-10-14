@@ -452,17 +452,12 @@ public sealed class PdfSignatureWriter
         var (fObjStart, fObjEnd) = PdfStructureParser.FindObjectBytes(inputMem.Span, fieldObjNum);
         string fieldText = Encoding.Latin1.GetString(inputMem.Span.Slice(fObjStart, fObjEnd - fObjStart));
         string updatedField;
-        if (fieldText.Contains("/V ", StringComparison.Ordinal))
+        int vKeyPos = PdfStructureParser.FindTopLevelKey(fieldText, "/V");
+        if (vKeyPos >= 0)
         {
-            // Replace existing /V value
-            int vIdx = fieldText.IndexOf("/V ", StringComparison.Ordinal);
-            int vEnd = fieldText.IndexOfAny(['\n', '\r', '/'], vIdx + 3);
-            if (vEnd < 0)
-            {
-                vEnd = fieldText.IndexOf(">>", vIdx + 3, StringComparison.Ordinal);
-            }
-
-            updatedField = string.Concat(fieldText.AsSpan(0, vIdx), $"/V {sigObjNum} 0 R", fieldText.AsSpan(vEnd));
+            // Replace the existing /V value (reference, name, null, or empty string).
+            int vEnd = FindValueEnd(fieldText, vKeyPos);
+            updatedField = string.Concat(fieldText.AsSpan(0, vKeyPos), $"/V {sigObjNum} 0 R", fieldText.AsSpan(vEnd));
         }
         else
         {
@@ -1219,6 +1214,114 @@ public sealed class PdfSignatureWriter
 
         return arrayObjectText.Substring(bracketOpen + 1, bracketClose - bracketOpen - 1).Trim();
     }
+
+    /// <summary>
+    /// Finds the end of the PDF value that follows a dictionary key at
+    /// <paramref name="keyPos"/> (dictionaries, arrays, literal/hex strings, names,
+    /// numbers, and indirect references), so the value can be replaced without
+    /// leaving orphaned tokens behind.
+    /// </summary>
+    private static int FindValueEnd(string text, int keyPos)
+    {
+        int cursor = keyPos;
+        while (cursor < text.Length && !IsValueDelimiter(text[cursor]))
+        {
+            cursor++;
+        }
+
+        while (cursor < text.Length && (text[cursor] == ' ' || text[cursor] == '\t' || text[cursor] == '\n' || text[cursor] == '\r'))
+        {
+            cursor++;
+        }
+
+        if (cursor >= text.Length)
+        {
+            return cursor;
+        }
+
+        char c = text[cursor];
+        if (c == '<' && cursor + 1 < text.Length && text[cursor + 1] == '<')
+        {
+            int dictEnd = PdfStructureParser.FindDictEnd(text, cursor);
+            return dictEnd >= 0 ? dictEnd + 2 : text.Length;
+        }
+
+        if (c == '<')
+        {
+            int hexEnd = PdfStructureParser.SkipHexString(text, cursor);
+            return Math.Min(hexEnd + 1, text.Length);
+        }
+
+        if (c == '(')
+        {
+            int litEnd = PdfStructureParser.SkipLiteralString(text, cursor);
+            return Math.Min(litEnd + 1, text.Length);
+        }
+
+        if (c == '[')
+        {
+            int arrayEnd = PdfStructureParser.FindArrayEnd(text, cursor);
+            return arrayEnd >= 0 ? arrayEnd + 1 : text.Length;
+        }
+
+        if (c is >= '0' and <= '9')
+        {
+            // Indirect reference: objNum genNum R.
+            int end = cursor;
+            while (end < text.Length && text[end] is >= '0' and <= '9')
+            {
+                end++;
+            }
+            while (end < text.Length && (text[end] == ' ' || text[end] == '\t'))
+            {
+                end++;
+            }
+            if (end < text.Length && text[end] is >= '0' and <= '9')
+            {
+                while (end < text.Length && text[end] is >= '0' and <= '9')
+                {
+                    end++;
+                }
+                while (end < text.Length && (text[end] == ' ' || text[end] == '\t'))
+                {
+                    end++;
+                }
+                if (end < text.Length && text[end] == 'R')
+                {
+                    end++;
+                }
+            }
+
+            return end;
+        }
+
+        // Name (/Name), null, or any other single token.
+        int tokenEnd = cursor;
+        if (tokenEnd < text.Length && text[tokenEnd] == '/')
+        {
+            // Name value: consume the whole name.
+            tokenEnd++;
+            while (tokenEnd < text.Length && !IsValueDelimiter(text[tokenEnd]))
+            {
+                tokenEnd++;
+            }
+
+            return tokenEnd;
+        }
+
+        while (tokenEnd < text.Length && !IsValueDelimiter(text[tokenEnd]) && text[tokenEnd] != '/')
+        {
+            tokenEnd++;
+        }
+
+        return tokenEnd;
+    }
+
+    /// <summary>
+    /// Determines whether a character delimits a value token (whitespace or
+    /// end-of-dictionary marker).
+    /// </summary>
+    private static bool IsValueDelimiter(char c) => c is ' ' or '\t' or '\n' or '\r' or '>';
 
     private static string AppendAnnots(string pageObj, string fieldRef)
     {
